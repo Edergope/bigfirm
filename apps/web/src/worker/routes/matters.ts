@@ -178,6 +178,17 @@ mattersRoutes.post("/:matterId/documents", async (c) => {
     detail: { source: "DRIVE" },
   });
 
+  // Encola la ingestión. El consumidor la procesará cuando Drive esté conectado;
+  // mientras tanto deja el documento PENDIENTE, sin inventar contenido.
+  await c.env.DOCUMENT_INGESTION.send({
+    organization_id: organizationId,
+    matter_id: matterId,
+    document_id: documentId,
+    drive_file_id: parsed.data.drive_file_id,
+    reason: "LINKED",
+    enqueued_at: new Date().toISOString(),
+  });
+
   return c.json({ document_id: documentId }, 201);
 });
 

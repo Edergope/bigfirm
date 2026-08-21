@@ -6,4 +6,5 @@ export * from "./work-package.js";
 export * from "./execution.js";
 export * from "./events.js";
 export * from "./credits.js";
+export * from "./document-storage.js";
 export * from "./errors.js";

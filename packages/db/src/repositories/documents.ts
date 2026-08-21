@@ -68,4 +68,18 @@ export class DocumentRepository {
       .set({ status, updatedAt: new Date().toISOString() })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
+
+  /** Marca un documento como indexado tras escribir su espejo normalizado en R2. */
+  async markIndexed(
+    organizationId: string,
+    documentId: string,
+    r2MirrorKey: string,
+    contentHash: string,
+  ) {
+    const now = new Date().toISOString();
+    await this.db
+      .update(documents)
+      .set({ r2MirrorKey, contentHash, indexedAt: now, status: "EN_REVISION", updatedAt: now })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
 }

@@ -62,6 +62,18 @@
     }
   ],
 
+  "queues": {
+    "producers": [{ "binding": "DOCUMENT_INGESTION", "queue": "iusia-document-ingestion" }],
+    "consumers": [
+      {
+        "queue": "iusia-document-ingestion",
+        "max_batch_size": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "iusia-document-ingestion-dlq"
+      }
+    ]
+  },
+
   "analytics_engine_datasets": [{ "binding": "USAGE_ANALYTICS", "dataset": "iusia_usage" }],
 
   "vars": {

@@ -5,7 +5,10 @@ import { createAuth } from "./auth/config.js";
 import { requireSession, withContext, type AppBindings } from "./context.js";
 import { mattersRoutes } from "./routes/matters.js";
 import { orchestrationRoutes } from "./routes/orchestration.js";
+import { documentsRoutes } from "./routes/documents.js";
 import { devRoutes } from "./routes/dev.js";
+import { IngestionService } from "./services/ingestion.js";
+import { DocumentIngestionMessage } from "@iusia/domain";
 
 const app = new Hono<AppBindings>();
 
@@ -57,11 +60,44 @@ protectedApi.get("/me", async (c) => {
 
 protectedApi.route("/matters", mattersRoutes);
 protectedApi.route("/", orchestrationRoutes);
+protectedApi.route("/", documentsRoutes);
 
 app.route("/api", protectedApi);
 app.route("/api/dev", devRoutes);
 
-export default app;
+/**
+ * Consumidor de la cola de ingestión documental.
+ *
+ * Idempotente: reprocesar un mensaje reescribe el mismo espejo R2. Los mensajes
+ * que fallan por causa transitoria se reintentan (retry); los que fallan por
+ * configuración externa (Drive sin OAuth) se ACK-ean para no llenar la DLQ con un
+ * fallo que ningún reintento resolverá — el documento queda PENDIENTE de indexar.
+ */
+async function handleIngestionQueue(
+  batch: MessageBatch<unknown>,
+  env: Env,
+): Promise<void> {
+  const service = IngestionService.forEnv(env);
+  for (const message of batch.messages) {
+    const parsed = DocumentIngestionMessage.safeParse(message.body);
+    if (!parsed.success) {
+      message.ack(); // mensaje malformado: no se reintenta
+      continue;
+    }
+    const outcome = await service.ingest(parsed.data);
+    if (outcome.status === "ERROR") {
+      message.retry(); // fallo transitorio: reintentar (o a la DLQ tras max_retries)
+    } else {
+      message.ack();
+    }
+  }
+}
+
+// El módulo del Worker expone `fetch` (Hono) y `queue` (ingestión).
+export default {
+  fetch: app.fetch,
+  queue: handleIngestionQueue,
+};
 
 // Runtime multiagente y motor durable. Los nombres de clase deben coincidir con
 // wrangler.jsonc y sobrevivir al bundling (ver vite.config.ts, keepNames).
