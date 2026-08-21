@@ -1,0 +1,26 @@
+{
+  "name": "iusia",
+  "private": true,
+  "version": "0.1.0",
+  "description": "IUSIA — Legal Operating System (Go Legaltech). MVP monorepo.",
+  "packageManager": "pnpm@9.15.0",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "dev": "pnpm --filter @iusia/web dev",
+    "build": "pnpm --filter @iusia/web build",
+    "typecheck": "tsc -b --pretty && tsc -p apps/web/tsconfig.client.json --pretty",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "db:generate": "pnpm --filter @iusia/db generate",
+    "db:migrate:local": "pnpm --filter @iusia/web migrate:local",
+    "prompts:sync": "node scripts/sync-prompts.mjs --local",
+    "prompts:sync:remote": "node scripts/sync-prompts.mjs --remote"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.9.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
+  }
+}

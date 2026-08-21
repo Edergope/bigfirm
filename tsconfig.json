@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/domain" },
+    { "path": "./packages/db" },
+    { "path": "./packages/agents" },
+    { "path": "./packages/orchestration" },
+    { "path": "./packages/ui" },
+    { "path": "./apps/web/tsconfig.worker.json" }
+  ]
+}

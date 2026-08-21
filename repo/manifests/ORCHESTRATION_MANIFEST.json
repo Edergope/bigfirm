@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-08-21T12:07:03.100861",
+  "category": "ORCHESTRATION",
+  "count": 5,
+  "entries": [
+    {
+      "id": "WORKFLOW_ORCHESTRATION",
+      "type": "dag-spec",
+      "name": "WORKFLOW_ORCHESTRATION.md",
+      "source_path": "/Users/edergope/Documents/Pisoso Legal/WORKFLOW_ORCHESTRATION.md",
+      "repo_path": "/Users/edergope/Documents/Pisoso Legal/repo/orchestration/dag/WORKFLOW_ORCHESTRATION.md",
+      "sha256": "420b9c7caa023a9c7b4ea38bc7e7457967588d575a7ceffb2f7676106620894c",
+      "sha256_match": true,
+      "line_count": 63,
+      "status": "CURRENT",
+      "version": "UNKNOWN",
+      "notes": "Spec de orquestación en olas (prosa)."
+    },
+    {
+      "id": "agent_router",
+      "type": "routing-spec",
+      "name": "agent_router.py",
+      "source_path": "/Users/edergope/Documents/Pisoso Legal/scripts/agent_router.py",
+      "repo_path": "/Users/edergope/Documents/Pisoso Legal/repo/orchestration/routing/agent_router.py",
+      "sha256": "03266a4921e0121a44d9c16c09f57e1aab6c9b26b70ffb453595de053eb03e18",
+      "sha256_match": true,
+      "line_count": 304,
+      "status": "REFERENCE",
+      "version": "UNKNOWN",
+      "notes": "WAVE_TEMPLATES + selección de especialistas (implementación de referencia)."
+    },
+    {
+      "id": "auto_entrypoint",
+      "type": "routing+gates+dag-spec",
+      "name": "auto_entrypoint.py",
+      "source_path": "/Users/edergope/Documents/Pisoso Legal/scripts/governance/auto_entrypoint.py",
+      "repo_path": "/Users/edergope/Documents/Pisoso Legal/repo/orchestration/routing/auto_entrypoint.py",
+      "sha256": "67ca9aff115c9ae1de61c74862adcf3d299ef1a4e4f25968bfd1ae5b37bd5110",
+      "sha256_match": true,
+      "line_count": 1297,
+      "status": "REFERENCE",
+      "version": "UNKNOWN",
+      "notes": "classify_risk_level, extract_issue_map, DAG waves, Foundation/Specialist/Strategy/Audit gates, authorize_dispatch, anti-redispatch, invocation cap, provenance, active-case."
+    },
+    {
+      "id": "agent_output_contract.schema",
+      "type": "execution-contract",
+      "name": "agent_output_contract.schema.json",
+      "source_path": "/Users/edergope/Documents/Pisoso Legal/schemas/agent_output_contract.schema.json",
+      "repo_path": "/Users/edergope/Documents/Pisoso Legal/repo/orchestration/execution-contracts/agent_output_contract.schema.json",
+      "sha256": "60c3967a92adb31094720f39dac8de2a6c573195a6dc79a18e365c13851e6f59",
+      "sha256_match": true,
+      "line_count": 162,
+      "status": "CURRENT",
+      "version": "UNKNOWN",
+      "notes": ""
+    },
+    {
+      "id": "agent_deliverable.schema",
+      "type": "execution-contract",
+      "name": "agent_deliverable.schema.json",
+      "source_path": "/Users/edergope/Documents/Pisoso Legal/schemas/agent_deliverable.schema.json",
+      "repo_path": "/Users/edergope/Documents/Pisoso Legal/repo/orchestration/execution-contracts/agent_deliverable.schema.json",
+      "sha256": "96bd5d117e726f953230e6868a35eaeee41bededde9246792bc172d8ba8eb24a",
+      "sha256_match": true,
+      "line_count": 22,
+      "status": "CURRENT",
+      "version": "UNKNOWN",
+      "notes": ""
+    }
+  ]
+}

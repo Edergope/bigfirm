@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "@iusia/ui/tokens.css";
+
+/* Las clases utilitarias de los paquetes del workspace deben ser escaneadas. */
+@source "../../../../packages/ui/src";

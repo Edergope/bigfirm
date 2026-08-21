@@ -1,0 +1,73 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "iusia",
+  "main": "./src/worker/index.ts",
+  "compatibility_date": "2026-08-21",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true,
+    // Traces técnicos, no auditoría jurídica. El audit ledger vive en D1.
+    "logs": { "enabled": true, "invocation_logs": true }
+  },
+
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    // El Worker atiende primero API y auth; el resto lo sirve el SPA.
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "iusia-db",
+      // PENDIENTE: reemplazar por el id real tras `wrangler d1 create iusia-db`.
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      // Artefactos versionados de prompts. NUNCA documentos de cliente.
+      "binding": "PROMPTS",
+      "bucket_name": "iusia-prompts"
+    },
+    {
+      // Salidas de agentes y espejos normalizados para indexación.
+      "binding": "ARTIFACTS",
+      "bucket_name": "iusia-artifacts"
+    }
+  ],
+
+  "durable_objects": {
+    // Un solo runtime genérico para los 30 agentes. Cada ejecución se direcciona
+    // por execution_id, de modo que cada sub-agente tiene identidad y estado propios.
+    "bindings": [{ "name": "LegalWorker", "class_name": "LegalWorker" }]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LegalWorker"]
+    }
+  ],
+
+  "workflows": [
+    {
+      "name": "iusia-matter-orchestration",
+      "binding": "MATTER_ORCHESTRATION",
+      "class_name": "MatterOrchestrationWorkflow"
+    }
+  ],
+
+  "analytics_engine_datasets": [{ "binding": "USAGE_ANALYTICS", "dataset": "iusia_usage" }],
+
+  "vars": {
+    "IUSIA_ENV": "development",
+    // Ruta lógica del AI Gateway. Los secretos van por `wrangler secret`, nunca aquí.
+    "AI_GATEWAY_NAME": "iusia",
+    "APP_URL": "http://localhost:5173"
+  }
+}

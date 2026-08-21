@@ -1,0 +1,27 @@
+# Matriz de diferenciación de agentes
+
+| Agente A | Agente B | Diferencia | Zona de solapamiento | Regla de liderazgo | Escalamiento |
+| -------- | -------- | ---------- | -------------------- | ------------------ | ------------ |
+| comercial | contractual | Comercial gobierna actividad mercantil y empresarios; contractual diseña instrumentos y obligaciones. | Contratos comerciales. | Contractual lidera arquitectura documental; comercial lidera negocio mercantil. | Socio director si la forma contractual cambia naturaleza mercantil. |
+| comercial | societario | Comercial mira operación mercantil; societario órganos, socios y gobierno. | Operaciones entre socios o empresas. | Societario lidera estructura societaria. | Escalar si afecta administradores o accionistas. |
+| societario | fusiones-adquisiciones | Societario es régimen de sociedades; M&A lidera transacción de control/inversión. | Reorganizaciones y compraventa de participaciones. | M&A lidera transacción; societario valida autorizaciones. | Auditor M&A. |
+| financiero | bancario | Financiero cubre productos/mercados; bancario entidades y operaciones bancarias. | Crédito, garantías y supervisión. | Bancario lidera relación entidad-cliente. | Financiero si hay producto complejo. |
+| mercado-capitales | sector-mercado-capitales | Área jurídica analiza régimen; sector explica funcionamiento operativo. | Emisiones e intermediarios. | Área jurídica lidera conclusión. | Sectorial no concluye jurídicamente. |
+| tributario | tributario-internacional | Tributario nacional/territorial; internacional cruza residencia, fuente y tratados. | Operaciones transfronterizas. | Internacional lidera cruce de jurisdicciones. | Tributario nacional valida efecto local. |
+| tributario | penal-tributario | Tributario define obligación/sanción; penal tributario evalúa relevancia penal. | Fraude u ocultamiento. | Tributario primero; penal solo con evidencia. | No criminalizar controversias. |
+| penal-economico | penal-empresarial | Económico mira delitos de mercado/patrimonio; empresarial estructura de decisión corporativa. | Delitos dentro de empresa. | Penal empresarial lidera riesgos corporativos. | Penal económico si afecta mercado. |
+| penal-empresarial | compliance-penal-corporativo | Penal evalúa exposición; compliance diseña prevención. | Controles y remediación. | Penal lidera contingencia; compliance programa. | Auditor penal empresarial. |
+| competencia | competencia-economica | Competencia desleal vs libre competencia/mercados. | Conductas comerciales restrictivas. | Competencia económica lidera mercado relevante. | Escalar a comercial/consumidor. |
+| propiedad-intelectual | propiedad-industrial | PI coordina todo intangible; industrial marcas/patentes/diseños/secretos. | Activos registrables/no registrables. | Subespecialista lidera activo. | PI coordina portafolio. |
+| derechos-autor | software-propiedad-intelectual | Autor cubre obras; software cubre código, dependencias y tecnología. | Software como obra. | Software lidera componente técnico. | Autor valida titularidad moral/patrimonial. |
+| marcas-signos-distintivos | especialista-nombres-comerciales | Marcas registrables/cobertura; nombres comerciales uso e identificación empresarial. | Signos distintivos. | Marca lidera registro; nombres lidera uso comercial. | Auditor marcas. |
+| secretos-empresariales | franquicias | Secretos protege información reservada; franquicia integra know-how al sistema de expansión. | Know-how. | Franquicia lidera sistema; secretos controla reserva. | Escalar a PI. |
+| aeronautico | aviacion-civil | Área jurídica aeronáutica vs sector operativo aviación civil. | Operadores/licencias. | Jurídico lidera conclusión. | Sectorial apoya contexto. |
+| aeronautico | drones-sistemas-no-tripulados | Aeronáutico jurídico general; drones sector técnico-operativo. | UAS/RPAS. | Aeronáutico lidera norma. | Sector drones no concluye jurídico. |
+| tic | regulacion-digital | TIC telecom/servicios tecnológicos; regulación digital IA/plataformas/datos. | Plataformas. | Regulación digital lidera IA/algoritmos. | TIC lidera telecom. |
+| constitucional | constitucional-economico | Constitucional general derechos/control; económico libertad económica/intervención. | Regulación económica constitucional. | Constitucional económico lidera intervención económica. | Constitucional general coordina principios. |
+| administrativo | administrativo-regulatorio | Administrativo general actos/procedimiento; regulatorio agencias/supervisión sectorial. | Actos regulatorios. | Regulatorio lidera sector. | Administrativo valida procedimiento. |
+| insolvencia-empresarial | estructurar-reorganizacion-contractual | Insolvencia define régimen concursal; reorganización contractual diseña instrumentos. | Salvamento. | Insolvencia lidera prelación/autorización. | Contractual si paquete documental. |
+| franquicias | marcas-signos-distintivos | Franquicia sistema de negocio; marca signo/licencia. | Licencia de marca. | Franquicia lidera expansión. | Marca valida signo. |
+| franquicias | comercial | Franquicia formato integrado; distribución compraventa/canal. | Red comercial. | Franquicia lidera si hay know-how y control. | Comercial si solo canal. |
+| franquicias | comercial | Franquicia no es agencia; agencia implica promoción/explotación por cuenta ajena según análisis. | Captación/clientela/control. | Franquicia lidera sistema; comercial evalúa agencia. | Bloquear si recalificación. |

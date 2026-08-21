@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentOutputContract",
+  "description": "Contrato estructurado agnóstico y determinístico para outputs de subagentes en Pisoso Legal AI v5.3.0 basado en 5 invariantes",
+  "type": "object",
+  "required": [
+    "case_id",
+    "agent",
+    "execution_uuid",
+    "output_type",
+    "status",
+    "provenance"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^CASE-[0-9]{4}-[A-Z0-9]+$"
+    },
+    "agent": {
+      "type": "string"
+    },
+    "execution_uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "output_type": {
+      "type": "string",
+      "enum": ["INTAKE", "EVIDENTIARY", "RESEARCH", "PROCEDURAL", "SPECIALIST_DICTAMEN", "STRATEGY", "RED_TEAM", "CITATION_AUDIT", "FINAL_DELIVERABLE"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["COMPLETED", "READY_WITH_RESERVATIONS", "BLOCKED", "REMEDIATED"]
+    },
+    "fact_assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["assertion_id", "statement", "classification"],
+        "properties": {
+          "assertion_id": { "type": "string" },
+          "statement": { "type": "string" },
+          "fact_refs": { "type": "array", "items": { "type": "string" } },
+          "source_refs": { "type": "array", "items": { "type": "string" } },
+          "classification": {
+            "type": "string",
+            "enum": ["CANONICAL_FACT", "PRIMARY_DOCUMENT", "OFFICIAL_RECORD", "ANALYSIS_INFERENCE", "EXPLICIT_HYPOTHESIS", "UNKNOWN"]
+          }
+        }
+      }
+    },
+    "numerical_assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["assertion_id", "raw", "classification"],
+        "properties": {
+          "assertion_id": { "type": "string" },
+          "raw": { "type": "string" },
+          "normalized_value": { "type": "number" },
+          "unit": { "type": "string" },
+          "classification": {
+            "type": "string",
+            "enum": ["CANONICAL_FACT", "DERIVED_CALCULATION", "LEGAL_AUTHORITY", "CLIENT_DEFINED", "EXPLICIT_HYPOTHESIS"]
+          },
+          "fact_refs": { "type": "array", "items": { "type": "string" } },
+          "authority_refs": { "type": "array", "items": { "type": "string" } },
+          "formula": { "type": "string" },
+          "hypothetical": { "type": "boolean" }
+        }
+      }
+    },
+    "legal_propositions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["proposition_id", "statement", "authority_refs", "status"],
+        "properties": {
+          "proposition_id": { "type": "string" },
+          "statement": { "type": "string" },
+          "authority_refs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["VERIFIED_CURRENT", "SUPERSEDED", "REQUIRES_CALIBRATION", "HYPOTHETICAL"]
+          }
+        }
+      }
+    },
+    "entities_used": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["entity_id", "canonical_name"],
+        "properties": {
+          "entity_id": { "type": "string" },
+          "canonical_name": { "type": "string" }
+        }
+      }
+    },
+    "recommended_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action_id", "action", "reversible", "client_approval_required"],
+        "properties": {
+          "action_id": { "type": "string" },
+          "action": { "type": "string" },
+          "reversible": { "type": "boolean" },
+          "client_approval_required": { "type": "boolean" },
+          "client_approval_status": {
+            "type": "string",
+            "enum": ["PENDING", "APPROVED", "REJECTED"]
+          }
+        }
+      }
+    },
+    "nba": {
+      "type": "object",
+      "required": ["action_id", "verb", "object", "owner", "reversible"],
+      "properties": {
+        "action_id": { "type": "string" },
+        "verb": { "type": "string" },
+        "object": { "type": "string" },
+        "owner": { "type": "string" },
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "reversible": { "type": "boolean" }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["unknown_id", "description"],
+        "properties": {
+          "unknown_id": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "produced_by",
+        "execution_uuid",
+        "native_output_path",
+        "persisted_output_path",
+        "sha256_native",
+        "sha256_persisted"
+      ],
+      "properties": {
+        "produced_by": { "type": "string" },
+        "execution_uuid": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "native_output_path": { "type": "string" },
+        "persisted_output_path": { "type": "string" },
+        "sha256_native": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "sha256_persisted": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

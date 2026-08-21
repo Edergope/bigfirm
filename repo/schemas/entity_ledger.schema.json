@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EntityLedger",
+  "description": "Schema determinístico para el Ledger Canónico de Entidades en Pisoso Legal AI v5.3",
+  "type": "object",
+  "required": ["matter_id", "entities"],
+  "properties": {
+    "matter_id": { "type": "string" },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["entity_id", "canonical_name", "type"],
+        "properties": {
+          "entity_id": { "type": "string", "pattern": "^ENT-[0-9]{2,}$" },
+          "canonical_name": { "type": "string" },
+          "type": { "type": "string", "enum": ["PERSON", "COMPANY", "GOVERNMENT_ENTITY", "COURT", "OTHER"] },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "role_in_case": { "type": "string" }
+        }
+      }
+    }
+  }
+}

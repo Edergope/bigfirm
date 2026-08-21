@@ -1,0 +1,291 @@
+# Sprint 06 Next Search Report
+
+## Resumen
+
+- PDF encontrados/revisados: 86.
+- Documentos canónicos/variantes únicas: 79.
+- Duplicados exactos: 7.
+- Versiones/compilaciones diferentes: 22.
+- Lotes con cobertura: 10/10.
+- Faltantes críticos principales: Código Civil oficial primario y Decreto 1068 de 2015.
+
+## Por lote
+
+### Lote 1 — Fuentes troncales
+- Ya disponibles:
+  - Código Civil — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Constitución Política de Colombia — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Firma electrónica — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Acción de tutela — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-01-troncales; no volver a buscar.
+  - CPACA — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Derecho de petición — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Estatuto de Conciliación — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - CPACA — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+- Pendientes:
+  - Código Civil — validar autoridad/vigencia.
+  - Constitución Política de Colombia — validar autoridad/vigencia.
+  - Firma electrónica — validar autoridad/vigencia.
+  - Acción de tutela — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - CPACA — validar autoridad/vigencia.
+  - CPACA — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+- Faltantes:
+  - Código Civil oficial primario si se decide reemplazar compilación secundaria
+
+### Lote 2 — Empresarial y societario
+- Ya disponibles:
+  - Circular Externa 100-000020 de 2026 Supersociedades — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Circular Externa 100-300000 de 2024 Supersociedades — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Circular Básica Jurídica Supersociedades — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Decreto Único Sector Comercio, Industria y Turismo — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Decreto Antitrámites — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Decreto Antitrámites — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - NIIF y aseguramiento — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Normas de contabilidad e información financiera — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código Sustantivo del Trabajo — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Decreto 46 de 2024 — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Estatuto Tributario — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Decreto 805 de 2013 — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Fomento a cultura del emprendimiento — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Insolvencia empresarial — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Sociedad por acciones simplificada — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Protección de la competencia — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Formalización y generación de empleo — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Registro mercantil y cámaras de comercio — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Ley de emprendimiento — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Ley 222 de 1995 — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Reforma laboral — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Propiedad horizontal — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Mercado de valores — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+- Pendientes:
+  - Circular Externa 100-000020 de 2026 Supersociedades — validar autoridad/vigencia.
+  - Circular Externa 100-300000 de 2024 Supersociedades — validar autoridad/vigencia.
+  - Circular Básica Jurídica Supersociedades — validar autoridad/vigencia.
+  - Decreto Único Sector Comercio, Industria y Turismo — validar autoridad/vigencia.
+  - Decreto Antitrámites — validar autoridad/vigencia.
+  - Decreto Antitrámites — validar autoridad/vigencia.
+  - NIIF y aseguramiento — validar autoridad/vigencia.
+  - Normas de contabilidad e información financiera — validar autoridad/vigencia.
+  - Código Sustantivo del Trabajo — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+- Faltantes:
+  - Decreto 1068 de 2015 si se vincula a inversión/cambiario empresarial
+
+### Lote 3 — Insolvencia
+- Ya disponibles:
+  - Insolvencia persona natural — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Decreto 0042 de 2026 — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Captación masiva no autorizada — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Insolvencia emergencia — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Insolvencia emergencia Decreto 772 — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Decreto 842 de 2020 — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Decreto 991 de 2018 — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Garantías mobiliarias — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Ley 2437 de 2024 — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Insolvencia persona natural no comerciante — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Reestructuración empresarial — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Decreto Único Sector Comercio, Industria y Turismo — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Insolvencia empresarial — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Formalización y generación de empleo — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Estatuto de Conciliación — ya disponible desde lote-01-troncales; no volver a buscar.
+- Pendientes:
+  - Decreto Único Sector Comercio, Industria y Turismo — validar autoridad/vigencia.
+  - Insolvencia persona natural — validar autoridad/vigencia.
+  - Decreto 0042 de 2026 — validar autoridad/vigencia.
+  - Captación masiva no autorizada — validar autoridad/vigencia.
+  - Insolvencia emergencia — validar autoridad/vigencia.
+  - Insolvencia emergencia Decreto 772 — validar autoridad/vigencia.
+  - Decreto 842 de 2020 — validar autoridad/vigencia.
+  - Decreto 991 de 2018 — validar autoridad/vigencia.
+  - Insolvencia empresarial — validar autoridad/vigencia.
+  - Formalización y generación de empleo — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+- Faltantes:
+  - Reglamentación vigente de insolvencia persona natural si se requiere complemento
+
+### Lote 4 — Contratos, comercio y garantías
+- Ya disponibles:
+  - Código Civil — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Firma electrónica — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Insolvencia empresarial — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Garantías mobiliarias — ya disponible desde lote-03-insolvencia; no volver a buscar.
+  - Estatuto de Conciliación — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+- Pendientes:
+  - Código Civil — validar autoridad/vigencia.
+  - Firma electrónica — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Código de Comercio — validar autoridad/vigencia.
+  - Insolvencia empresarial — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+  - Garantías mobiliarias — validar autoridad/vigencia.
+  - Estatuto de Conciliación — validar autoridad/vigencia.
+  - Mensajes de datos — validar autoridad/vigencia.
+- Faltantes:
+  - Código Civil oficial primario
+  - Régimen reglamentario completo de garantías mobiliarias si falta decreto compilado
+
+### Lote 5 — Migratorio, inversión extranjera y cambiario
+- Ya disponibles:
+  - Fusiones y adquisiciones PwC — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Fusiones y adquisiciones crecimiento empresarial — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Cartilla negocios fiduciarios — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Anexo DCIN-83 BanRep — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Circular Reglamentaria Externa DCIN-83 BanRep — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Instructivos DCIN-83 BanRep — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - ABC negocios fiduciarios — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Decisión 486 de 2000 — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Decreto Único Sector Relaciones Exteriores — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Decreto Único Sector Trabajo — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Decreto Único Sector Vivienda — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Régimen sancionatorio cambiario — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Código Sustantivo del Trabajo — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Código de Comercio — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Estatuto Tributario — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Entidades sin ánimo de lucro — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Guía legal para hacer negocios en Colombia — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - CPACA — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Estatuto del consumidor — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Registro de instrumentos públicos — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Protección de datos personales — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Ley marco de aduanas — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Ley de emprendimiento — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Resolución Externa 1 de 2018 Régimen Cambiario — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Registro Único de Beneficiarios Finales — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Facturación electrónica DIAN — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Resolución 2061 de 2020 Migración Colombia — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Resolución 2357 de 2020 Migración Colombia — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Certificado de movimientos migratorios — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Visas Colombia — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Código Civil — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Estatuto Tributario — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Sociedad por acciones simplificada — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - CPACA — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Ley 222 de 1995 — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+- Pendientes:
+  - Fusiones y adquisiciones PwC — validar autoridad/vigencia.
+  - Fusiones y adquisiciones crecimiento empresarial — validar autoridad/vigencia.
+  - Cartilla negocios fiduciarios — validar autoridad/vigencia.
+  - Anexo DCIN-83 BanRep — validar autoridad/vigencia.
+  - Circular Reglamentaria Externa DCIN-83 BanRep — validar autoridad/vigencia.
+  - Instructivos DCIN-83 BanRep — validar autoridad/vigencia.
+  - Código Civil — validar autoridad/vigencia.
+  - ABC negocios fiduciarios — validar autoridad/vigencia.
+  - Decisión 486 de 2000 — validar autoridad/vigencia.
+  - Decreto Único Sector Relaciones Exteriores — validar autoridad/vigencia.
+  - Decreto Único Sector Trabajo — validar autoridad/vigencia.
+  - Decreto Único Sector Vivienda — validar autoridad/vigencia.
+- Faltantes:
+  - Decreto 1068 de 2015 — régimen Hacienda/crédito público/cambiario
+
+### Lote 6 — Tributario
+- Ya disponibles:
+  - Estatuto Tributario — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Estatuto Tributario — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+- Pendientes:
+  - Estatuto Tributario — validar autoridad/vigencia.
+  - Estatuto Tributario — validar autoridad/vigencia.
+- Faltantes:
+  - Decreto 1068 de 2015
+  - Estatuto Tributario oficial primario si se desea reemplazar EGlobal
+
+### Lote 7 — Propiedad intelectual y tecnología
+- Ya disponibles:
+  - Decisión 486 de 2000 — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Decreto Único Sector Comercio, Industria y Turismo — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Firma electrónica — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+- Pendientes:
+  - Decisión 486 de 2000 — validar autoridad/vigencia.
+  - Decreto Único Sector Comercio, Industria y Turismo — validar autoridad/vigencia.
+  - Firma electrónica — validar autoridad/vigencia.
+  - Mensajes de datos — validar autoridad/vigencia.
+  - Mensajes de datos — validar autoridad/vigencia.
+  - Mensajes de datos — validar autoridad/vigencia.
+- Faltantes:
+  - Ley 23 de 1982 derechos de autor
+  - Decisión 351 de 1993 derecho de autor
+
+### Lote 8 — Compliance, LA/FT y penal empresarial
+- Ya disponibles:
+  - Circular Externa 100-000020 de 2026 Supersociedades — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Circular Externa 100-300000 de 2024 Supersociedades — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Protección de datos personales — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+- Pendientes:
+  - Circular Externa 100-000020 de 2026 Supersociedades — validar autoridad/vigencia.
+  - Circular Externa 100-300000 de 2024 Supersociedades — validar autoridad/vigencia.
+  - Protección de datos personales — validar autoridad/vigencia.
+- Faltantes:
+  - Ley 2195 de 2022 transparencia/anticorrupción
+  - Código Penal económico fuente oficial
+  - Circular SAGRILAFT/PTEE vigente si no está cubierta por Circular Básica Jurídica revisada
+
+### Lote 9 — Competencia, consumidor y datos
+- Ya disponibles:
+  - Decreto Único Sector Comercio, Industria y Turismo — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Estatuto del consumidor — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Protección de datos personales — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-02-empresarial-societario; no volver a buscar.
+  - Mensajes de datos — ya disponible desde lote-05-migratorio-inversion-cambiario; no volver a buscar.
+- Pendientes:
+  - Decreto Único Sector Comercio, Industria y Turismo — validar autoridad/vigencia.
+  - Estatuto del consumidor — validar autoridad/vigencia.
+  - Protección de datos personales — validar autoridad/vigencia.
+  - Mensajes de datos — validar autoridad/vigencia.
+  - Mensajes de datos — validar autoridad/vigencia.
+  - Mensajes de datos — validar autoridad/vigencia.
+- Faltantes:
+  - Decreto 1377 de 2013 datos personales
+  - Guías SIC oficiales de datos/consumidor/competencia
+
+### Lote 10 — Inmobiliario y urbanístico
+- Ya disponibles:
+  - Código Civil — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-01-troncales; no volver a buscar.
+  - Código General del Proceso — ya disponible desde lote-03-insolvencia; no volver a buscar.
+- Pendientes:
+  - Código Civil — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+  - Código General del Proceso — validar autoridad/vigencia.
+- Faltantes:
+  - Ley 388 de 1997 ordenamiento territorial
+  - Normativa notarial/registro complementaria

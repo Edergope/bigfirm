@@ -1,0 +1,60 @@
+/**
+ * Design tokens de IUSIA.
+ * Fuente normativa: documentacion/IUSIA_UI_UX_Design_System_MVP_v1.pdf §01 y §02.
+ * No introducir paletas ni tipografías nuevas sin decisión explícita.
+ */
+
+@theme {
+  /* Paleta operativa */
+  --color-iusia-navy: #0b1d3a; /* Marca, navegación, autoridad */
+  --color-iusia-carbon: #1f2937; /* Texto principal */
+  --color-iusia-action: #2563eb; /* CTA, foco, selección */
+  --color-iusia-intel: #22c7e8; /* IA, nodos, flujos */
+  --color-iusia-gold: #c9a24b; /* Acento premium mínimo */
+  --color-iusia-mist: #a7adb5; /* Bordes, metadata */
+  --color-iusia-surface: #f7f8fa; /* Superficies generales */
+  --color-iusia-paper: #ffffff; /* Lectura y tarjetas */
+
+  /* Estados semánticos. Nunca depender sólo del color: siempre texto o icono. */
+  --color-iusia-success: #16a34a;
+  --color-iusia-warning: #d97706;
+  --color-iusia-critical: #dc2626;
+  --color-iusia-info: #2563eb;
+
+  /* Tipografía de UI */
+  --font-sans: Inter, "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Grid base 8 px */
+  --spacing-1: 8px;
+  --spacing-2: 12px;
+  --spacing-3: 16px;
+  --spacing-4: 24px;
+  --spacing-5: 32px;
+
+  /* Radios de tarjeta: 12–16 px */
+  --radius-card: 14px;
+
+  /* Estructura del shell */
+  --iusia-sidebar-width: 232px;
+  --iusia-topbar-height: 64px;
+}
+
+:root {
+  color-scheme: light; /* Sin dark mode global en MVP (Design System §07). */
+}
+
+body {
+  background: var(--color-iusia-surface);
+  color: var(--color-iusia-carbon);
+  font-family: var(--font-sans);
+  /* Mínimos: 15–16 px texto operativo, 14 px metadata. */
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Foco de teclado siempre visible (WCAG AA). */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-iusia-action);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

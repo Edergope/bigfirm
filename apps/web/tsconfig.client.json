@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    // El cliente lo empaqueta Vite: aquí sólo se verifica. Sin emisión de .d.ts
+    // se evita el problema de portabilidad de tipos inferidos de better-auth.
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"],
+  "references": [
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/ui" }
+  ]
+}

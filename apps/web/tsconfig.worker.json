@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist/worker",
+    "lib": ["ES2022"],
+    "types": ["./worker-configuration.d.ts"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationDir": "dist/worker",
+    // El Agents SDK usa decoradores (@callable); su tsconfig fija el target correcto.
+    "experimentalDecorators": true
+  },
+  "include": ["src/worker/**/*.ts", "worker-configuration.d.ts"],
+  "references": [
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/agents" },
+    { "path": "../../packages/orchestration" }
+  ]
+}

@@ -1,0 +1,90 @@
+# Sprint 06 Human Review Queue
+
+## Prioridad 1
+
+- Validar autoridad y vigencia de documentos canónicos manuales.
+- Sustituir o confirmar compilaciones secundarias: Código Civil, Código de Comercio EGlobal, Estatuto Tributario EGlobal.
+- Buscar Decreto 1068 de 2015 para Lotes 5 y 6.
+- Revisar documentos secundarios/doctrinales antes de cualquier uso jurídico.
+
+## Pendientes
+
+- Fusiones y adquisiciones PwC — secondary_reliable / review_required
+- Fusiones y adquisiciones crecimiento empresarial — secondary_reliable / review_required
+- Cartilla negocios fiduciarios — secondary_reliable / review_required
+- Circular Externa 100-000020 de 2026 Supersociedades — official_probable / review_required
+- Circular Externa 100-300000 de 2024 Supersociedades — official_probable / review_required
+- Circular Básica Jurídica Supersociedades — official_probable / review_required
+- Anexo DCIN-83 BanRep — official_source_unknown / review_required
+- Circular Reglamentaria Externa DCIN-83 BanRep — official_probable / review_required
+- Instructivos DCIN-83 BanRep — official_source_unknown / review_required
+- Código Civil — secondary_reliable / review_required
+- ABC negocios fiduciarios — official_source_unknown / review_required
+- Constitución Política de Colombia — official_probable / review_required
+- Decisión 486 de 2000 — official_probable / review_required
+- Decreto Único Sector Relaciones Exteriores — official_probable / review_required
+- Decreto Único Sector Trabajo — official_probable / review_required
+- Decreto Único Sector Comercio, Industria y Turismo — official_source_unknown / review_required
+- Decreto Único Sector Vivienda — official_source_unknown / review_required
+- Decreto Antitrámites — official_probable / review_required
+- Decreto Antitrámites — official_probable / review_required
+- Régimen sancionatorio cambiario — official_probable / review_required
+- NIIF y aseguramiento — official_source_unknown / review_required
+- Firma electrónica — official_probable / review_required
+- Normas de contabilidad e información financiera — official_probable / review_required
+- Acción de tutela — official_probable / review_required
+- Código Sustantivo del Trabajo — official_probable / review_required
+- Código Sustantivo del Trabajo — official_probable / review_required
+- Insolvencia persona natural — official_probable / review_required
+- Código de Comercio — official_probable / review_required
+- Código de Comercio — official_probable / review_required
+- Código de Comercio — official_probable / review_required
+- Código de Comercio — secondary_reliable / review_required
+- Decreto 0042 de 2026 — official_probable / review_required
+- Captación masiva no autorizada — official_probable / review_required
+- Decreto 46 de 2024 — official_probable / review_required
+- Insolvencia emergencia — official_probable / review_required
+- Estatuto Tributario — secondary_reliable / review_required
+- Estatuto Tributario — secondary_reliable / review_required
+- Insolvencia emergencia Decreto 772 — official_probable / review_required
+- Decreto 805 de 2013 — official_probable / review_required
+- Decreto 842 de 2020 — official_probable / review_required
+- Entidades sin ánimo de lucro — official_probable / review_required
+- Decreto 991 de 2018 — official_probable / review_required
+- Guía legal para hacer negocios en Colombia — official_source_unknown / review_required
+- Fomento a cultura del emprendimiento — official_source_unknown / review_required
+- Insolvencia empresarial — official_probable / review_required
+- Sociedad por acciones simplificada — official_probable / review_required
+- Protección de la competencia — official_probable / review_required
+- Formalización y generación de empleo — official_probable / review_required
+- CPACA — official_probable / review_required
+- CPACA — official_probable / review_required
+- Estatuto del consumidor — official_probable / review_required
+- Código General del Proceso — official_probable / review_required
+- Código General del Proceso — official_probable / review_required
+- Registro de instrumentos públicos — official_probable / review_required
+- Protección de datos personales — official_probable / review_required
+- Ley marco de aduanas — official_probable / review_required
+- Garantías mobiliarias — official_probable / review_required
+- Registro mercantil y cámaras de comercio — official_probable / review_required
+- Derecho de petición — official_probable / review_required
+- Ley de emprendimiento — official_source_unknown / review_required
+- Ley de emprendimiento — official_source_unknown / review_required
+- Ley 222 de 1995 — official_probable / review_required
+- Estatuto de Conciliación — official_probable / review_required
+- Ley 2437 de 2024 — official_probable / review_required
+- Insolvencia persona natural no comerciante — official_source_unknown / review_required
+- Reforma laboral — official_source_unknown / review_required
+- Mensajes de datos — official_probable / review_required
+- Mensajes de datos — official_probable / review_required
+- Mensajes de datos — official_probable / review_required
+- Reestructuración empresarial — official_probable / review_required
+- Propiedad horizontal — official_probable / review_required
+- Mercado de valores — official_probable / review_required
+- Resolución Externa 1 de 2018 Régimen Cambiario — official_probable / review_required
+- Registro Único de Beneficiarios Finales — official_probable / review_required
+- Facturación electrónica DIAN — official_probable / review_required
+- Resolución 2061 de 2020 Migración Colombia — official_probable / review_required
+- Resolución 2357 de 2020 Migración Colombia — official_probable / review_required
+- Certificado de movimientos migratorios — official_probable / review_required
+- Visas Colombia — official_probable / review_required

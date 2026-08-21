@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentDeliverableHeader",
+  "description": "Schema determinístico de metadatos de entregable de subagente para Pisoso Legal AI v5.3",
+  "type": "object",
+  "required": ["PRODUCED_BY", "DATE", "STATUS", "VERSION", "CASE_ID"],
+  "properties": {
+    "PRODUCED_BY": { "type": "string" },
+    "EXECUTION_UUID": { 
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "DATE": { "type": "string" },
+    "STATUS": { "type": "string" },
+    "VERSION": { "type": "string", "pattern": "^v[0-9]+.*$" },
+    "CASE_ID": { "type": "string", "pattern": "^CASE-[0-9]{4}-[A-Z0-9]+$" },
+    "STRATEGY_READINESS": {
+      "type": "string",
+      "enum": ["STRATEGY READY", "STRATEGY READY WITH RESERVATIONS", "NOT READY - BLOCKED"]
+    }
+  }
+}
