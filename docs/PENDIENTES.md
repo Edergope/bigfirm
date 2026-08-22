@@ -93,7 +93,20 @@ La cuenta de Cloudflare **sí** está autenticada en wrangler
 `wrangler deploy` resuelve la cuenta automáticamente. Falta crear los recursos
 (D1/R2/Queues) y pegar el `database_id` real en `wrangler.jsonc`.
 
-## 8. Desfase de versión en Better Auth CLI
+## 8. Toolchain de diseño (figma-cli / skills externas)
+
+**No instalado en esta sesión, por decisión de seguridad y alcance.** Conectar a
+Figma requiere tu autenticación de Figma (servicio externo), e instalar figma-cli
+(`silships/figma-cli`), los skills de Emil Kowalski, Impeccable y Taste implica clonar
+y ejecutar repos de terceros. En una sesión automatizada eso queda `BLOCKED_EXTERNAL`.
+
+En su lugar se entregó el **Design System as Code** (`packages/ui/src/tokens`,
+`docs/design/DESIGN.md`, `docs/design/iusia.tokens.json`) y el **rediseño React** aplicando
+directamente los principios anti-slop del PDF normativo. Para el round-trip con Figma:
+instala figma-cli **fuera** del repo IUSIA (no debe ser dependencia del runtime), en
+**Browser Mode** (verifica el commit que lo soporte), y los skills como project-local.
+
+## 9. Desfase de versión en Better Auth CLI
 
 `@better-auth/cli` publicado (1.4.x) va por detrás de `better-auth` 1.7.1 y no emite
 el campo `issuer` de la tabla `account`. Está añadido a mano en
