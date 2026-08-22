@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { IusiaError, projectStrategyGraph } from "@iusia/domain";
+import type { Materiality } from "@iusia/domain";
 import { listAgentDefinitions } from "@iusia/agents";
-import { WAVE_GATE, type Wave } from "@iusia/orchestration";
+import { WAVE_GATE, buildRoutingPlan, type Wave } from "@iusia/orchestration";
 import type { AppBindings } from "../context.js";
 
 export const orchestrationRoutes = new Hono<AppBindings>();
@@ -156,6 +157,29 @@ orchestrationRoutes.post("/executions/:rootExecutionId/gates", async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+/**
+ * Preview del plan de routing para un Matter, sin ejecutar. Muestra qué agentes
+ * intervendrían según materialidad y áreas de práctica (decisión determinista).
+ */
+orchestrationRoutes.get("/matters/:matterId/routing", async (c) => {
+  const { authz, matters } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+
+  await authz.authorizeMatter(organizationId, userId, matterId, "matter:read");
+  const matter = await matters.findById(organizationId, matterId);
+  if (!matter) throw new IusiaError("NOT_FOUND", "Expediente no encontrado");
+
+  const plan = buildRoutingPlan(
+    {
+      materiality: matter.materiality as Materiality,
+      practice_areas: matter.practiceAreas,
+    },
+    listAgentDefinitions(),
+  );
+  return c.json({ plan });
 });
 
 /** Agentes registrados. La UI nunca inventa nodos que no existan aquí. */

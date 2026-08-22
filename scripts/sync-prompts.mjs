@@ -2,7 +2,7 @@
 /**
  * Sincroniza los prompts canónicos hacia R2.
  *
- * Lee `packages/agents/src/pilot-agents.json` —la misma fuente que usa el Agent
+ * Lee `packages/agents/src/full-agents.json` —la misma fuente que usa el Agent
  * Registry— y sube cada `agent.md` VERBATIM al bucket de prompts.
  *
  * Reglas que este script hace cumplir:
@@ -32,11 +32,11 @@ if (remote === local) {
 }
 
 const definitions = JSON.parse(
-  readFileSync(join(repoRoot, "packages/agents/src/pilot-agents.json"), "utf8"),
+  readFileSync(join(repoRoot, "packages/agents/src/full-agents.json"), "utf8"),
 );
 
 let uploaded = 0;
-for (const def of definitions) {
+for (const def of definitions.filter((d) => d.enabled)) {
   const sourcePath = join(repoRoot, def.prompt_source_path);
   const bytes = readFileSync(sourcePath);
   const actual = createHash("sha256").update(bytes).digest("hex");

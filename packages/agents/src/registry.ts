@@ -1,28 +1,35 @@
 import { IusiaError } from "@iusia/domain";
 import { AgentDefinition } from "./definition.js";
-import pilotAgents from "./pilot-agents.json" with { type: "json" };
+import fullAgents from "./full-agents.json" with { type: "json" };
 
 /**
- * Agent Registry — piloto técnico: 00 Managing Partner, 01 Intake, 03 Investigación.
+ * Agent Registry — los 30 agentes canónicos registrados por metadata.
  *
- * Las definiciones viven en `pilot-agents.json` para que el runtime y el script de
+ * Las definiciones viven en `full-agents.json` para que el runtime y el script de
  * sincronización de prompts lean exactamente la misma fuente, sin duplicarla.
+ * Habilitar un agente es sólo cambiar su `enabled` a true (más sincronizar su
+ * prompt a R2): no requiere tocar el runtime ni el prompt jurídico.
  *
- * Los `prompt_sha256` provienen de `repo/manifests/AGENTS_MANIFEST.json` y fueron
- * verificados contra los archivos canónicos. Si un agent.md cambia, el hash deja de
- * coincidir y el Prompt Loader falla de forma explícita: esa es la protección de
- * integridad de la propiedad intelectual, no un obstáculo.
+ * Los `prompt_sha256` provienen de `repo/manifests/AGENTS_MANIFEST.json` y se
+ * verifican contra los archivos canónicos en carga. Si un agent.md cambia, el hash
+ * deja de coincidir y el Prompt Loader falla de forma explícita: esa es la
+ * protección de integridad de la propiedad intelectual.
  *
- * Los 27 agentes restantes NO se registran todavía (Blueprint §10: primero el
- * vertical slice end-to-end). Habilitarlos es añadir entradas a ese JSON.
+ * Piloto técnico ACTIVO (Blueprint §10): 00 → 01 → 03 (enabled). Los otros 27
+ * quedan registrados pero deshabilitados hasta su activación por vertical.
  */
-const DEFINITIONS: AgentDefinition[] = pilotAgents.map((raw) => AgentDefinition.parse(raw));
+const DEFINITIONS: AgentDefinition[] = fullAgents.map((raw) => AgentDefinition.parse(raw));
 
 const BY_ID = new Map(DEFINITIONS.map((d) => [d.agent_id, d]));
 const BY_NODE = new Map(DEFINITIONS.map((d) => [d.node_code, d]));
 
 export function listAgentDefinitions(): readonly AgentDefinition[] {
   return DEFINITIONS;
+}
+
+/** Sólo los agentes habilitados para ejecución real. */
+export function listEnabledAgentDefinitions(): readonly AgentDefinition[] {
+  return DEFINITIONS.filter((d) => d.enabled);
 }
 
 export function getAgentDefinition(agentId: string): AgentDefinition {

@@ -1,0 +1,1210 @@
+[
+  {
+    "agent_id": "pisoso-orquestador-juridico",
+    "node_code": "00",
+    "name": "Managing Partner / Orquestador Jurídico",
+    "role": "Managing Partner / Orquestador Jurídico",
+    "domain": "ORCHESTRATION",
+    "prompt_source_path": "repo/agents/pisoso-orquestador-juridico/agent.md",
+    "prompt_ref": "prompts/pisoso-orquestador-juridico/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "a66999bba59f74b01acecfc3e034f7039e32df9f816881f70c12482e3ca355e1",
+    "enabled": true,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "STRATEGY",
+    "output_schema_id": "iusia.orchestration.v1",
+    "dependencies": [],
+    "parallelizable": false,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "01-intake-y-clasificador",
+    "node_code": "01",
+    "name": "Intake, Factual Intelligence y Case Mapping",
+    "role": "Intake, Factual Intelligence y Case Mapping",
+    "domain": "INTAKE",
+    "prompt_source_path": "repo/agents/01-intake-y-clasificador/agent.md",
+    "prompt_ref": "prompts/01-intake-y-clasificador/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "aa181f9570e4cdc504a8171dde74671ba75b4ce9385212505efe262cda22f3cb",
+    "enabled": true,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "INTAKE",
+    "output_schema_id": "iusia.intake.v1",
+    "dependencies": [
+      "pisoso-orquestador-juridico"
+    ],
+    "parallelizable": false,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": true,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "03-investigador-normativo-jurisprudencial",
+    "node_code": "03",
+    "name": "Investigación Normativa y Jurisprudencial",
+    "role": "Investigación Normativa y Jurisprudencial",
+    "domain": "RESEARCH",
+    "prompt_source_path": "repo/agents/03-investigador-normativo-jurisprudencial/agent.md",
+    "prompt_ref": "prompts/03-investigador-normativo-jurisprudencial/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "2f4eb5384c23f9d7acce82232ed77bdee88339321fc54f0221ee4041a0bd79ac",
+    "enabled": true,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "RESEARCH",
+    "output_schema_id": "iusia.research.v1",
+    "dependencies": [
+      "01-intake-y-clasificador"
+    ],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": true
+    }
+  },
+  {
+    "agent_id": "04-analista-probatorio-y-pericial",
+    "node_code": "04",
+    "name": "Análisis Probatorio y Pericial",
+    "role": "Análisis Probatorio y Pericial",
+    "domain": "EVIDENCE",
+    "prompt_source_path": "repo/agents/04-analista-probatorio-y-pericial/agent.md",
+    "prompt_ref": "prompts/04-analista-probatorio-y-pericial/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "77bfd8038bb0880ae07884b1e748b6f2908d63236a96316c9c65b6cd5dac21b4",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "EVIDENTIARY",
+    "output_schema_id": "iusia.evidence.v1",
+    "dependencies": [
+      "01-intake-y-clasificador"
+    ],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": true,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "05-analista-procesal-y-procedibilidad",
+    "node_code": "05",
+    "name": "Análisis Procesal y Procedibilidad",
+    "role": "Análisis Procesal y Procedibilidad",
+    "domain": "PROCEDURAL",
+    "prompt_source_path": "repo/agents/05-analista-procesal-y-procedibilidad/agent.md",
+    "prompt_ref": "prompts/05-analista-procesal-y-procedibilidad/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "6f821bcbc03b8a821d7f4a0ddf7862fb0c49a17d8b0398f97fdc7af7614e8e38",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "PROCEDURAL",
+    "output_schema_id": "iusia.procedural.v1",
+    "dependencies": [
+      "01-intake-y-clasificador"
+    ],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "06-estratega-juridico-convencional",
+    "node_code": "06",
+    "name": "Estrategia Jurídica Convencional",
+    "role": "Estrategia Jurídica Convencional",
+    "domain": "STRATEGY",
+    "prompt_source_path": "repo/agents/06-estratega-juridico-convencional/agent.md",
+    "prompt_ref": "prompts/06-estratega-juridico-convencional/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "4074ac5a91d404a347da68828dac340c9a62c4485bbd743779028d4fe2a85532",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "STRATEGY",
+    "output_schema_id": "iusia.strategy.v1",
+    "dependencies": [],
+    "parallelizable": false,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "08-redactor-senior-juridico",
+    "node_code": "08",
+    "name": "Redacción Senior Jurídica",
+    "role": "Redacción Senior Jurídica",
+    "domain": "DRAFTING",
+    "prompt_source_path": "repo/agents/08-redactor-senior-juridico/agent.md",
+    "prompt_ref": "prompts/08-redactor-senior-juridico/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "964233092e741375efb1ac051502b4298fd311698d57ecbcf66d79748a66f877",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "FINAL_DELIVERABLE",
+    "output_schema_id": "iusia.drafting.v1",
+    "dependencies": [],
+    "parallelizable": false,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": true,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "02-compilador-y-entrega-final",
+    "node_code": "02",
+    "name": "Compilación y Entrega Final",
+    "role": "Compilación y Entrega Final",
+    "domain": "DELIVERY",
+    "prompt_source_path": "repo/agents/02-compilador-y-entrega-final/agent.md",
+    "prompt_ref": "prompts/02-compilador-y-entrega-final/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "fce476f16c1f5911dd72ab1f8b8c4812e0641d22db999378773bca04037eab38",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "FINAL_DELIVERABLE",
+    "output_schema_id": "iusia.delivery.v1",
+    "dependencies": [],
+    "parallelizable": false,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": true,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "10-auditor-juridico-y-red-team",
+    "node_code": "10",
+    "name": "Auditoría Jurídica y Red Team",
+    "role": "Auditoría Jurídica y Red Team",
+    "domain": "AUDIT",
+    "prompt_source_path": "repo/agents/10-auditor-juridico-y-red-team/agent.md",
+    "prompt_ref": "prompts/10-auditor-juridico-y-red-team/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "d4b67f4e21e1175613b011613f8bad52674cb1eca09b21cafe0487944df65f84",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "RED_TEAM",
+    "output_schema_id": "iusia.audit.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "11-auditor-de-citas-y-vigencia",
+    "node_code": "11",
+    "name": "Auditoría de Citas y Vigencia",
+    "role": "Auditoría de Citas y Vigencia",
+    "domain": "AUDIT",
+    "prompt_source_path": "repo/agents/11-auditor-de-citas-y-vigencia/agent.md",
+    "prompt_ref": "prompts/11-auditor-de-citas-y-vigencia/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "6af9d3a010a6de69da66269993c3e5bf91e9a4b0114e16ab5a14d5d9183ee5e7",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "CITATION_AUDIT",
+    "output_schema_id": "iusia.audit.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": true
+    }
+  },
+  {
+    "agent_id": "14-magistrado-procesal-y-nulidades",
+    "node_code": "14",
+    "name": "Magistrado Procesal y Nulidades (Shadow Bench)",
+    "role": "Magistrado Procesal y Nulidades (Shadow Bench)",
+    "domain": "LITIGATION",
+    "prompt_source_path": "repo/agents/14-magistrado-procesal-y-nulidades/agent.md",
+    "prompt_ref": "prompts/14-magistrado-procesal-y-nulidades/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "060d6b6806dc36e423c283c541bfb665bf85a2b4e7c553d5a9a702a09246df01",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "PROCEDURAL",
+    "output_schema_id": "iusia.litigation.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "15-estratega-disruptivo-y-negociador",
+    "node_code": "15",
+    "name": "Estrategia Disruptiva y Negociación",
+    "role": "Estrategia Disruptiva y Negociación",
+    "domain": "LITIGATION",
+    "prompt_source_path": "repo/agents/15-estratega-disruptivo-y-negociador/agent.md",
+    "prompt_ref": "prompts/15-estratega-disruptivo-y-negociador/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "790ea421a7eb27d98d63ce3a9e5466aaf2b93e27dbbe19e6638f4e2980ff517e",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "STRATEGY",
+    "output_schema_id": "iusia.litigation.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "analista-debida-diligencia-y-listas",
+    "node_code": "DDL",
+    "name": "Debida Diligencia y Listas Restrictivas",
+    "role": "Debida Diligencia y Listas Restrictivas",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/analista-debida-diligencia-y-listas/agent.md",
+    "prompt_ref": "prompts/analista-debida-diligencia-y-listas/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "912d4653efef0c5c31ea33228ceca3637894c63e15ba1877c42b62f855dcbe90",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "arquitecto-metodologico-y-calidad",
+    "node_code": "QA",
+    "name": "Arquitecto Metodológico y Calidad",
+    "role": "Arquitecto Metodológico y Calidad",
+    "domain": "QUALITY",
+    "prompt_source_path": "repo/agents/arquitecto-metodologico-y-calidad/agent.md",
+    "prompt_ref": "prompts/arquitecto-metodologico-y-calidad/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "5def3e1a86f0e262fcbc163218819deeef6082f10ccd17cdd89eba421c25efce",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-general",
+      "preferred": {
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "fallback": [
+        {
+          "provider": "google",
+          "model": "gemini-2.5-pro"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.quality.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-administrativo-y-regulatorio",
+    "node_code": "ADM",
+    "name": "Especialista Administrativo y Regulatorio",
+    "role": "Especialista Administrativo y Regulatorio",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-administrativo-y-regulatorio/agent.md",
+    "prompt_ref": "prompts/especialista-administrativo-y-regulatorio/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "041288da6d712634ee26bf7c7ecd86881a2dae0af98368d5aeec060301b3e5fa",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-civil-bienes-e-inmobiliario",
+    "node_code": "CIV",
+    "name": "Especialista Civil, Bienes e Inmobiliario",
+    "role": "Especialista Civil, Bienes e Inmobiliario",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-civil-bienes-e-inmobiliario/agent.md",
+    "prompt_ref": "prompts/especialista-civil-bienes-e-inmobiliario/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "2a6f8cd6dbb13c8634931bda9c7734490bfd193d9e5c8ead11fc9aceb39e493e",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-constitucional-y-derechos-fundamentales",
+    "node_code": "CONS",
+    "name": "Especialista Constitucional y Derechos Fundamentales",
+    "role": "Especialista Constitucional y Derechos Fundamentales",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-constitucional-y-derechos-fundamentales/agent.md",
+    "prompt_ref": "prompts/especialista-constitucional-y-derechos-fundamentales/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "1c4ae3e965fd66ac74c84232d978606bec56c8938755c8913d835ccb53d5970c",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-contractual-y-negocios",
+    "node_code": "CTR",
+    "name": "Especialista Contractual y Negocios",
+    "role": "Especialista Contractual y Negocios",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-contractual-y-negocios/agent.md",
+    "prompt_ref": "prompts/especialista-contractual-y-negocios/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "587b98cac1accfb159f5619cdeb49c472613d56a3e727e4f3c119fa3196fcd90",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-familia-y-planeacion-patrimonial",
+    "node_code": "FAM",
+    "name": "Especialista Familia y Planeación Patrimonial",
+    "role": "Especialista Familia y Planeación Patrimonial",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-familia-y-planeacion-patrimonial/agent.md",
+    "prompt_ref": "prompts/especialista-familia-y-planeacion-patrimonial/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "23c0260ef815d0c67930e99a28611c6795c76f233e4c43ae3b874a8b8519f49b",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-financiero-y-mercado-capitales",
+    "node_code": "FIN",
+    "name": "Especialista Financiero y Mercado de Capitales",
+    "role": "Especialista Financiero y Mercado de Capitales",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-financiero-y-mercado-capitales/agent.md",
+    "prompt_ref": "prompts/especialista-financiero-y-mercado-capitales/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "0a2f11f2313e9a56b70209ddde8d575ef908faf46a314beea213ef97903f82f8",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-insolvencia-y-reestructuracion",
+    "node_code": "INS",
+    "name": "Especialista Insolvencia y Reestructuración",
+    "role": "Especialista Insolvencia y Reestructuración",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-insolvencia-y-reestructuracion/agent.md",
+    "prompt_ref": "prompts/especialista-insolvencia-y-reestructuracion/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "899bbf919d988775a7b6f69f91c1e05ef9c1d2e8e669436923271322362b8112",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-laboral-y-seguridad-social",
+    "node_code": "LAB",
+    "name": "Especialista Laboral y Seguridad Social",
+    "role": "Especialista Laboral y Seguridad Social",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-laboral-y-seguridad-social/agent.md",
+    "prompt_ref": "prompts/especialista-laboral-y-seguridad-social/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "3a5bed81a4ac574434b5afde952df419132a904706c524968dcc625e129010b3",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-migratorio-y-movilidad",
+    "node_code": "MIG",
+    "name": "Especialista Migratorio y Movilidad",
+    "role": "Especialista Migratorio y Movilidad",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-migratorio-y-movilidad/agent.md",
+    "prompt_ref": "prompts/especialista-migratorio-y-movilidad/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "a2bed63595523cdb95b104e55f9c9b08130912b4ce9a79ebfe7e16af7e48bd49",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-penal-corporativo-y-delitos-economicos",
+    "node_code": "PEC",
+    "name": "Especialista Penal Corporativo y Delitos Económicos",
+    "role": "Especialista Penal Corporativo y Delitos Económicos",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-penal-corporativo-y-delitos-economicos/agent.md",
+    "prompt_ref": "prompts/especialista-penal-corporativo-y-delitos-economicos/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "2c21d2ac76e63dee5f5061498ac28f819b0742783e7cd1395adfbe8a1f0cfbdb",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-penal-general-y-litigio",
+    "node_code": "PEN",
+    "name": "Especialista Penal General y Litigio",
+    "role": "Especialista Penal General y Litigio",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-penal-general-y-litigio/agent.md",
+    "prompt_ref": "prompts/especialista-penal-general-y-litigio/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "99da4483726663ba56640241631455f4ac4bb445700e48690a12719c7ce0d91d",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-propiedad-intelectual-y-datos",
+    "node_code": "PI",
+    "name": "Especialista Propiedad Intelectual y Datos",
+    "role": "Especialista Propiedad Intelectual y Datos",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-propiedad-intelectual-y-datos/agent.md",
+    "prompt_ref": "prompts/especialista-propiedad-intelectual-y-datos/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "b22e9073ad99eab2a789dc0432af9f16ba6e8bb368c58787ba8e754c265f01f5",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-sectorial-e-innovacion",
+    "node_code": "SEC",
+    "name": "Especialista Sectorial e Innovación",
+    "role": "Especialista Sectorial e Innovación",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-sectorial-e-innovacion/agent.md",
+    "prompt_ref": "prompts/especialista-sectorial-e-innovacion/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "e10cccb58753c2223eeccc348a62367d3490cf0d2c1d8b72b4ca4f1b90459842",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-societario-y-mna",
+    "node_code": "SOC",
+    "name": "Especialista Societario y M&A",
+    "role": "Especialista Societario y M&A",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-societario-y-mna/agent.md",
+    "prompt_ref": "prompts/especialista-societario-y-mna/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "d6972dace6873369f6c58a7cdc9e4d066b0ef2381f50ea4a00415a520808b74c",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "especialista-tributario-y-aduanero",
+    "node_code": "TRI",
+    "name": "Especialista Tributario y Aduanero",
+    "role": "Especialista Tributario y Aduanero",
+    "domain": "SPECIALIST",
+    "prompt_source_path": "repo/agents/especialista-tributario-y-aduanero/agent.md",
+    "prompt_ref": "prompts/especialista-tributario-y-aduanero/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "9e1c0accd180e7633a9ca06ef05e39661d2071fda07eed6cc8d0b5372550f13d",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.specialist.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  },
+  {
+    "agent_id": "oficial-compliance-sagrilaft-ptee",
+    "node_code": "CMP",
+    "name": "Oficial de Compliance SAGRILAFT/PTEE",
+    "role": "Oficial de Compliance SAGRILAFT/PTEE",
+    "domain": "COMPLIANCE",
+    "prompt_source_path": "repo/agents/oficial-compliance-sagrilaft-ptee/agent.md",
+    "prompt_ref": "prompts/oficial-compliance-sagrilaft-ptee/v1/agent.md",
+    "prompt_version": "v1",
+    "prompt_sha256": "b75be2a4068ed1d332100be16906f04c8090f6a830e12e021eba54538408eefd",
+    "enabled": false,
+    "model_policy": {
+      "route": "iusia-research",
+      "preferred": {
+        "provider": "google",
+        "model": "gemini-2.5-pro"
+      },
+      "fallback": [
+        {
+          "provider": "openai",
+          "model": "gpt-5"
+        }
+      ],
+      "temperature": 0.15,
+      "max_output_tokens": 16000
+    },
+    "tools_policy": [
+      "matter.read_documents"
+    ],
+    "output_type": "SPECIALIST_DICTAMEN",
+    "output_schema_id": "iusia.compliance.v1",
+    "dependencies": [],
+    "parallelizable": true,
+    "timeout_ms": 300000,
+    "governance": {
+      "requires_human_gate": false,
+      "may_write_facts": false,
+      "may_write_authorities": false
+    }
+  }
+]

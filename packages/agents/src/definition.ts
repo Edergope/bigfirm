@@ -41,6 +41,17 @@ export const AgentDefinition = z.object({
   output_type: OutputType,
   output_schema_id: z.string().min(1),
 
+  /** Ola del DAG canónico a la que pertenece (WAVE_1..WAVE_5). */
+  wave: z
+    .enum([
+      "WAVE_1_INTAKE_AND_RESEARCH",
+      "WAVE_2_SUBSTANTIVE_SPECIALISTS",
+      "WAVE_3_STRATEGY_AND_LITIGATION",
+      "WAVE_4_AUDITING_AND_INTEGRITY",
+      "WAVE_5_SYNTHESIS_AND_DELIVERY",
+    ])
+    .optional(),
+
   /** Agentes que deben haber terminado antes de despachar éste. */
   dependencies: z.array(z.string()).default([]),
   parallelizable: z.boolean().default(true),

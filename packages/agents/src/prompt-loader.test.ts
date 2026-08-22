@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryPromptSource, PromptLoader, sha256Hex } from "./prompt-loader.js";
-import { getAgentDefinition, listAgentDefinitions } from "./registry.js";
+import {
+  getAgentDefinition,
+  listAgentDefinitions,
+  listEnabledAgentDefinitions,
+} from "./registry.js";
 import type { AgentDefinition } from "./definition.js";
 
 describe("integridad del Prompt Loader", () => {
@@ -31,8 +35,16 @@ describe("integridad del Prompt Loader", () => {
 });
 
 describe("Agent Registry", () => {
-  it("registra exactamente los tres agentes del piloto", () => {
-    expect(listAgentDefinitions().map((d) => d.node_code).sort()).toEqual(["00", "01", "03"]);
+  it("registra los 30 agentes canónicos por metadata", () => {
+    expect(listAgentDefinitions()).toHaveLength(30);
+  });
+
+  it("habilita exactamente el piloto 00/01/03 para ejecución real", () => {
+    expect(listEnabledAgentDefinitions().map((d) => d.node_code).sort()).toEqual([
+      "00",
+      "01",
+      "03",
+    ]);
   });
 
   it("rechaza agentes no registrados en vez de improvisar", () => {
