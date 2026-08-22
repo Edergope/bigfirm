@@ -83,29 +83,46 @@ export function MatterWorkspace() {
         </div>
       ) : null}
 
-      <nav className="flex gap-0.5 border-b border-iusia-mist/30">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={
-              tab === t.id
-                ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[14px] font-medium text-iusia-navy"
-                : "px-3.5 py-2.5 text-[14px] text-iusia-mist transition-colors hover:text-iusia-carbon"
-            }
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <div role="tablist" aria-label="Secciones del expediente" className="flex gap-0.5 border-b border-iusia-mist/30">
+        {TABS.map((t) => {
+          const selected = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`tab-${t.id}`}
+              aria-selected={selected}
+              aria-controls={`panel-${t.id}`}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => setTab(t.id)}
+              onKeyDown={(e) => {
+                if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+                e.preventDefault();
+                const i = TABS.findIndex((x) => x.id === tab);
+                const next = e.key === "ArrowRight" ? (i + 1) % TABS.length : (i - 1 + TABS.length) % TABS.length;
+                setTab(TABS[next]!.id);
+              }}
+              className={
+                selected
+                  ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[14px] font-medium text-iusia-navy"
+                  : "px-3.5 py-2.5 text-[14px] text-iusia-mist transition-colors hover:text-iusia-carbon"
+              }
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-      {tab === "resumen" ? <Resumen matterId={matterId} data={data} /> : null}
-      {tab === "documentos" ? <Documentos data={data} /> : null}
-      {tab === "hechos" ? <Hechos data={data} /> : null}
-      {tab === "tareas" ? <Tareas matterId={matterId} /> : null}
-      {tab === "estrategia" ? <Estrategia matterId={matterId} data={data} /> : null}
-      {tab === "actividad" ? <Actividad data={data} /> : null}
+      <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`}>
+        {tab === "resumen" ? <Resumen matterId={matterId} data={data} /> : null}
+        {tab === "documentos" ? <Documentos data={data} /> : null}
+        {tab === "hechos" ? <Hechos data={data} /> : null}
+        {tab === "tareas" ? <Tareas matterId={matterId} /> : null}
+        {tab === "estrategia" ? <Estrategia matterId={matterId} data={data} /> : null}
+        {tab === "actividad" ? <Actividad data={data} /> : null}
+      </div>
     </div>
   );
 }

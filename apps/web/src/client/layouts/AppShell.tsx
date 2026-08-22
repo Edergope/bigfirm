@@ -89,10 +89,21 @@ export function AppShell() {
 
       <div className="flex min-h-screen flex-col pl-[236px]">
         <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-iusia-mist/30 bg-iusia-paper/85 px-8 backdrop-blur">
-          <div className="flex h-9 max-w-md flex-1 items-center gap-2 rounded-[10px] border border-iusia-mist/40 bg-iusia-surface px-3 text-iusia-mist">
+          {/* Búsqueda global prevista por el Design System pero aún no implementada:
+              se muestra como control honesto y deshabilitado, no como affordance falso. */}
+          <button
+            type="button"
+            disabled
+            aria-label="Búsqueda global (próximamente)"
+            title="Búsqueda global — próximamente"
+            className="flex h-9 max-w-md flex-1 cursor-not-allowed items-center gap-2 rounded-[10px] border border-iusia-mist/40 bg-iusia-surface px-3 text-left text-iusia-mist"
+          >
             <Search size={16} aria-hidden />
             <span className="text-[14px]">Buscar expedientes, documentos…</span>
-          </div>
+            <span className="ml-auto rounded-full bg-iusia-mist/15 px-2 py-0.5 text-[11px] font-medium">
+              Pronto
+            </span>
+          </button>
           <div className="ml-auto flex items-center gap-4">
             {me.data ? <CreditBadge balance={me.data.credits} /> : null}
           </div>

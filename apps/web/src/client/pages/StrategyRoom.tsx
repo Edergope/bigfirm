@@ -79,15 +79,20 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
       };
     });
 
+    // El estado vivo del nodo destino decide si su arista se anima: un pulso sólo
+    // representa trabajo en curso, nunca decoración tras completar (criterio Emil).
+    const statusByAgent = new Map(graph.nodes.map((n) => [n.agent_id, n.status]));
     const edgeMap = new Map<string, Edge>();
     for (const e of graph.edges) {
       const key = `${e.from_agent_id}->${e.to_agent_id}`;
+      const targetStatus = statusByAgent.get(e.to_agent_id);
+      const live = targetStatus === "RUNNING" || targetStatus === "WAITING";
       edgeMap.set(key, {
         id: key,
         source: e.from_agent_id,
         target: e.to_agent_id,
         label: e.event_type,
-        animated: e.event_type === "work_package.sent",
+        animated: live && e.event_type === "work_package.sent",
         style: { stroke: "#22C7E8", strokeWidth: 1.5 },
         labelStyle: { fontSize: 10.5, fill: "#0c7d95" },
         labelBgStyle: { fill: "#EAF9FC" },
