@@ -11,6 +11,9 @@ export default tseslint.config(
       "apps/web/migrations/**",
       // Repositorio canónico de agentes: no es código de la plataforma.
       "repo/**",
+      // Toolchain de diseño instalado localmente (terceros): no es código de IUSIA.
+      ".agents/**",
+      ".claude/**",
     ],
   },
   js.configs.recommended,

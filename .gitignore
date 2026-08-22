@@ -17,3 +17,12 @@ coverage/
 # Artefactos de trabajo local
 *.log
 .turbo/
+
+# Toolchain de diseño instalado localmente (no es runtime de IUSIA):
+# skills de Emil/Taste, Impeccable y su config/hooks. Se instala con
+# `npx skills add ...` / `npx impeccable install`; ver docs/design/UI_QA_PLAN.md.
+.agents/
+.codex/
+skills-lock.json
+.claude/skills/
+.claude/settings.local.json
