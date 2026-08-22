@@ -8,25 +8,59 @@ import {
 /**
  * GoogleDriveAdapter — adapter del port DocumentStorageProvider.
  *
- * Estado actual: ADAPTER listo, OAuth de Google NO aprovisionado. Sin un access
- * token válido, `status()` es NOT_CONFIGURED y las operaciones lanzan
+ * Estado actual: ADAPTER listo, OAuth de Google NO aprovisionado (ACTION_REQUIRED_OAUTH).
+ * Sin un access token válido, `status()` es NOT_CONFIGURED y las operaciones lanzan
  * StorageNotConfiguredError. No se inventan archivos ni metadata.
  *
  * El dominio jamás ve tipos del SDK de Google: este adapter traduce a
- * `StoredFileMetadata`. Google Drive sigue siendo el repositorio primario; IUSIA
- * sólo guarda referencias y metadata.
+ * `StoredFileMetadata` y normaliza los errores de la API (auth/not_found/rate/5xx).
  */
 export interface GoogleDriveCredentials {
   /** Access token OAuth del usuario/servicio con scope drive.readonly. */
   accessToken: string;
 }
 
+export type DriveFailureKind =
+  | "auth"
+  | "not_found"
+  | "rate_limited"
+  | "http_4xx"
+  | "http_5xx"
+  | "network";
+
+export class DriveApiError extends Error {
+  constructor(
+    readonly kind: DriveFailureKind,
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "DriveApiError";
+  }
+  static fromStatus(op: string, status: number): DriveApiError {
+    const kind: DriveFailureKind =
+      status === 401 || status === 403
+        ? "auth"
+        : status === 404
+          ? "not_found"
+          : status === 429
+            ? "rate_limited"
+            : status >= 500
+              ? "http_5xx"
+              : "http_4xx";
+    return new DriveApiError(kind, `Drive ${op} HTTP ${status}`, status);
+  }
+}
+
 export class GoogleDriveAdapter implements DocumentStorageProvider {
   readonly id = "google-drive";
-  private readonly credentials: GoogleDriveCredentials | null;
+  private readonly fetchImpl: typeof fetch;
 
-  constructor(credentials: GoogleDriveCredentials | null) {
-    this.credentials = credentials;
+  constructor(
+    private readonly credentials: GoogleDriveCredentials | null,
+    fetchImpl?: typeof fetch,
+  ) {
+    this.fetchImpl = fetchImpl ?? fetch;
   }
 
   status(): IntegrationState {
@@ -37,8 +71,7 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
     const token = this.requireToken();
     const url = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}`);
     url.searchParams.set("fields", "id,name,mimeType,size,modifiedTime,webViewLink");
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new Error(`Drive getMetadata HTTP ${res.status}`);
+    const res = await this.call(url, token, "getMetadata");
     const f = (await res.json()) as {
       id: string;
       name: string;
@@ -61,9 +94,22 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
     const token = this.requireToken();
     // alt=media descarga el binario; para Google Docs nativos se usaría export.
     const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new Error(`Drive download HTTP ${res.status}`);
+    const res = await this.call(url, token, "download");
     return res.arrayBuffer();
+  }
+
+  private async call(url: URL | string, token: string, op: string): Promise<Response> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
+    } catch (error) {
+      throw new DriveApiError(
+        "network",
+        `Drive ${op}: ${error instanceof Error ? error.message : "error de red"}`,
+      );
+    }
+    if (!res.ok) throw DriveApiError.fromStatus(op, res.status);
+    return res;
   }
 
   private requireToken(): string {
