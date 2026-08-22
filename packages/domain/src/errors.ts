@@ -10,6 +10,9 @@ export type IusiaErrorCode =
   | "PROMPT_INTEGRITY_FAILED"
   | "AGENT_NOT_REGISTERED"
   | "PROVIDER_ERROR"
+  /** Falta un secreto/config externa para operar (p. ej. AI Gateway sin credenciales). */
+  | "PROVIDER_NOT_CONFIGURED"
+  | "PROVIDER_TIMEOUT"
   | "GATE_BLOCKED"
   | "INTERNAL";
 
@@ -23,6 +26,9 @@ const STATUS: Record<IusiaErrorCode, number> = {
   PROMPT_INTEGRITY_FAILED: 500,
   AGENT_NOT_REGISTERED: 500,
   PROVIDER_ERROR: 502,
+  // 503: la operación es válida pero el servicio externo no está aprovisionado.
+  PROVIDER_NOT_CONFIGURED: 503,
+  PROVIDER_TIMEOUT: 504,
   GATE_BLOCKED: 409,
   INTERNAL: 500,
 };
