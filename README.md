@@ -60,8 +60,18 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm build
 
 ## Estado del piloto
 
-El DAG activo es el piloto técnico: **00 Managing Partner → 01 Intake → 03 Investigación**.
-Los otros 27 agentes existen como conocimiento canónico en `repo/agents/` pero no
-están registrados. Habilitarlos es añadir entradas en
-`packages/agents/src/pilot-agents.json` y nodos en `packages/orchestration/src/dag.ts`:
-no requiere tocar el runtime ni los prompts.
+El DAG **ejecutable** es el piloto técnico: **00 Managing Partner → 01 Intake → 03
+Investigación**. Los 30 agentes canónicos están **registrados por metadata** en
+`packages/agents/src/full-agents.json`; los 27 restantes quedan `enabled: false`.
+Habilitar uno es cambiar su flag y sincronizar su prompt a R2: no requiere tocar el
+runtime ni los prompts. El motor de routing ya planifica el DAG completo por
+materialidad y área de práctica, marcando qué agentes son ejecutables hoy.
+
+## Estado de módulos y pendientes
+
+- [docs/MODULE_STATUS.md](docs/MODULE_STATUS.md) — tabla de estado de cada módulo.
+- [docs/PENDIENTES.md](docs/PENDIENTES.md) — dependencias externas sin aprovisionar.
+
+Verificación actual: `typecheck`, `lint`, `build` y **79 tests** en verde, incluida la
+certificación de aislamiento multi-tenant, ACL por Matter, inyección desde documentos,
+aislamiento de recuperación e idempotencia de créditos — todo con SQLite real.

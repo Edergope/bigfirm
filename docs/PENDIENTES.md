@@ -75,12 +75,23 @@ filtrado por matter y recall antes de usarlo como búsqueda jurídica real.
 Diferido por decisión del Blueprint §03. El Credit Ledger de IUSIA ya existe y es
 autoridad contable; Stripe sólo aportará el cobro de dinero.
 
-## 7. CI/CD
+## 7. Git remoto y CI/CD
 
-No configurado. El Blueprint §02 fija `GitHub main -> Cloudflare CI/CD`, pero este
-directorio **no es un repositorio git** todavía. Antes de conectar Workers Builds:
-`git init`, verificar que `.gitignore` cubre `.dev.vars` y `.wrangler/`, y crear el
-repo `github.com/Edergope/bigfirm`.
+El repositorio git **ya está inicializado** localmente (`main`, con baseline
+`foundation-v0.1` y trabajo posterior) y `origin` apunta a
+`https://github.com/Edergope/bigfirm.git`. **El push está BLOQUEADO**: no hay
+credenciales de escritura (no hay `gh` instalado ni token de git). Para publicar:
+
+```bash
+# Autenticarse (una vez) y luego:
+git push -u origin main
+git push origin --tags
+```
+
+La cuenta de Cloudflare **sí** está autenticada en wrangler
+(`edergonzalezpe@gmail.com`, account `a5c1f73aafac11795dbf5192c7a87817`), por lo que
+`wrangler deploy` resuelve la cuenta automáticamente. Falta crear los recursos
+(D1/R2/Queues) y pegar el `database_id` real en `wrangler.jsonc`.
 
 ## 8. Desfase de versión en Better Auth CLI
 
