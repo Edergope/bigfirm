@@ -1,114 +1,139 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, CardHeader, EmptyState, MatterStatusChip, StatusChip } from "@iusia/ui";
+import {
+  Button,
+  Card,
+  Drawer,
+  Field,
+  Input,
+  MatterStatusChip,
+  PageHeader,
+  Select,
+  Skeleton,
+  StateBlock,
+  StatusChip,
+  Textarea,
+} from "@iusia/ui";
 import { api, ApiError } from "../api.js";
 
 const PRACTICE_AREAS = [
-  "CIVIL",
-  "COMERCIAL_CONTRACTUAL",
-  "SOCIETARIO_MA",
-  "LABORAL",
-  "TRIBUTARIO",
-  "PENAL_ECONOMICO",
-  "ADMINISTRATIVO",
-  "CONSTITUCIONAL",
-  "FAMILIA",
-  "INMOBILIARIO",
-  "PROPIEDAD_INTELECTUAL",
-  "INSOLVENCIA",
-  "MIGRATORIO",
-  "FINANCIERO",
-  "COMPLIANCE",
-  "OTRO",
+  "CIVIL", "COMERCIAL_CONTRACTUAL", "SOCIETARIO_MA", "LABORAL", "TRIBUTARIO",
+  "PENAL_ECONOMICO", "ADMINISTRATIVO", "CONSTITUCIONAL", "FAMILIA", "INMOBILIARIO",
+  "PROPIEDAD_INTELECTUAL", "INSOLVENCIA", "MIGRATORIO", "FINANCIERO", "COMPLIANCE", "OTRO",
 ];
 
 const MATERIALITY_HELP: Record<string, string> = {
-  SIMPLE: "Ruta corta: menos nodos del DAG, sin gates de aprobación humana.",
-  MATERIAL: "Ruta estándar con especialistas y auditoría de citas.",
-  HIGH_STAKES: "Exige aprobación humana en los gates de estrategia e integridad.",
+  SIMPLE: "Ruta corta: sólo la fundación, sin gates de aprobación humana.",
+  MATERIAL: "Ruta estándar: especialistas, estrategia y auditoría de citas.",
+  HIGH_STAKES: "Aprobación humana en gates de estrategia e integridad.",
 };
 
 export function Matters() {
   const queryClient = useQueryClient();
   const matters = useQuery({ queryKey: ["matters"], queryFn: api.listMatters });
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  const rows = useMemo(() => {
+    const all = matters.data?.matters ?? [];
+    const q = filter.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(
+      (m) =>
+        m.title.toLowerCase().includes(q) ||
+        m.clientName.toLowerCase().includes(q) ||
+        m.reference.toLowerCase().includes(q),
+    );
+  }, [matters.data, filter]);
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-iusia-navy">Casos</h1>
-          <p className="mt-1 text-[14px] text-iusia-mist">
-            {matters.data?.scope === "FIRM"
-              ? "Cartera completa de la firma (acceso de dirección, auditado)."
-              : "Expedientes asignados a ti."}
-          </p>
-        </div>
-        <Button onClick={() => setOpen((v) => !v)}>
-          {open ? "Cancelar" : "Nuevo expediente"}
-        </Button>
-      </div>
+      <PageHeader
+        title="Casos"
+        description={
+          matters.data?.scope === "FIRM"
+            ? "Cartera completa de la firma (acceso de dirección, auditado)."
+            : "Expedientes asignados a ti."
+        }
+        actions={<Button onClick={() => setOpen(true)}>Nuevo expediente</Button>}
+      />
 
-      {open ? (
+      <Card>
+        <div className="flex items-center gap-3 border-b border-iusia-mist/25 px-5 py-3">
+          <Input
+            placeholder="Filtrar por asunto, cliente o referencia…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="h-9 max-w-sm"
+          />
+          <span className="ml-auto text-[13px] text-iusia-mist tnum">
+            {rows.length} expediente{rows.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        {matters.isLoading ? (
+          <div className="space-y-2 p-5">
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+          </div>
+        ) : rows.length === 0 ? (
+          <StateBlock
+            kind="empty"
+            title={filter ? "Sin coincidencias" : "No hay expedientes en tu alcance"}
+            hint={filter ? "Ajusta el filtro." : "Crea uno o pide que te asignen a un caso."}
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left">
+              <thead>
+                <tr className="border-b border-iusia-mist/25 text-[12.5px] font-medium text-iusia-mist">
+                  <th className="px-5 py-2.5">Referencia</th>
+                  <th className="px-5 py-2.5">Asunto</th>
+                  <th className="px-5 py-2.5">Cliente</th>
+                  <th className="px-5 py-2.5">Materialidad</th>
+                  <th className="px-5 py-2.5">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-iusia-mist/15">
+                {rows.map((m) => (
+                  <tr key={m.id} className="group transition-colors hover:bg-iusia-surface">
+                    <td className="px-5 py-3 text-[13px] tabular-nums text-iusia-mist">{m.reference}</td>
+                    <td className="px-5 py-3">
+                      <Link
+                        to={`/casos/${m.id}`}
+                        className="text-[14.5px] font-medium text-iusia-carbon group-hover:text-iusia-action"
+                      >
+                        {m.title}
+                      </Link>
+                    </td>
+                    <td className="px-5 py-3 text-[14px] text-iusia-carbon/85">{m.clientName}</td>
+                    <td className="px-5 py-3">
+                      <StatusChip
+                        label={m.materiality}
+                        tone={m.materiality === "HIGH_STAKES" ? "warning" : "neutral"}
+                      />
+                    </td>
+                    <td className="px-5 py-3">
+                      <MatterStatusChip status={m.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Drawer open={open} onClose={() => setOpen(false)} title="Nuevo expediente" width={520}>
         <NewMatterForm
           onCreated={() => {
             setOpen(false);
             void queryClient.invalidateQueries({ queryKey: ["matters"] });
           }}
         />
-      ) : null}
-
-      <Card>
-        <CardHeader title={`${matters.data?.matters.length ?? 0} expedientes`} />
-        {matters.isLoading ? (
-          <EmptyState title="Cargando expedientes…" />
-        ) : (matters.data?.matters.length ?? 0) === 0 ? (
-          <EmptyState
-            title="No hay expedientes en tu alcance"
-            hint="Crea uno nuevo o pide a un socio que te asigne a un caso existente."
-          />
-        ) : (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-iusia-mist/30 text-[13px] text-iusia-mist">
-                <th className="px-6 py-3 font-medium">Referencia</th>
-                <th className="px-6 py-3 font-medium">Asunto</th>
-                <th className="px-6 py-3 font-medium">Cliente</th>
-                <th className="px-6 py-3 font-medium">Materialidad</th>
-                <th className="px-6 py-3 font-medium">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-iusia-mist/20">
-              {matters.data?.matters.map((m) => (
-                <tr key={m.id} className="h-[48px] hover:bg-iusia-surface">
-                  <td className="px-6 text-[14px] tabular-nums text-iusia-mist">
-                    {m.reference}
-                  </td>
-                  <td className="px-6">
-                    <Link
-                      to={`/casos/${m.id}`}
-                      className="text-[15px] font-medium text-iusia-action hover:underline"
-                    >
-                      {m.title}
-                    </Link>
-                  </td>
-                  <td className="px-6 text-[14px]">{m.clientName}</td>
-                  <td className="px-6">
-                    <StatusChip
-                      label={m.materiality}
-                      tone={m.materiality === "HIGH_STAKES" ? "warning" : "neutral"}
-                    />
-                  </td>
-                  <td className="px-6">
-                    <MatterStatusChip status={m.status} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Card>
+      </Drawer>
     </div>
   );
 }
@@ -140,90 +165,51 @@ function NewMatterForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <Card>
-      <CardHeader title="Nuevo expediente" />
-      <form onSubmit={submit} className="grid grid-cols-2 gap-4 px-6 py-5">
-        <Field label="Asunto" value={title} onChange={setTitle} required />
-        <Field label="Cliente" value={clientName} onChange={setClientName} required />
-        <Field label="Jurisdicción" value={jurisdiction} onChange={setJurisdiction} required />
-
-        <label className="flex flex-col gap-1">
-          <span className="text-[14px]">Área de práctica</span>
-          <select
-            value={area}
-            onChange={(e) => setArea(e.target.value)}
-            className="h-10 rounded-lg border border-iusia-mist/60 px-3 text-[15px]"
-          >
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <Field label="Asunto">
+        <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
+      </Field>
+      <Field label="Cliente">
+        <Input value={clientName} onChange={(e) => setClientName(e.target.value)} required />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Jurisdicción">
+          <Input value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} required />
+        </Field>
+        <Field label="Área de práctica">
+          <Select value={area} onChange={(e) => setArea(e.target.value)}>
             {PRACTICE_AREAS.map((a) => (
               <option key={a} value={a}>
                 {a.replaceAll("_", " ")}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
+      </div>
+      <Field label="Materialidad" hint={MATERIALITY_HELP[materiality]}>
+        <Select value={materiality} onChange={(e) => setMateriality(e.target.value)}>
+          {Object.keys(MATERIALITY_HELP).map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Objetivo del cliente (opcional)">
+        <Textarea rows={3} value={objective} onChange={(e) => setObjective(e.target.value)} />
+      </Field>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-[14px]">Materialidad</span>
-          <select
-            value={materiality}
-            onChange={(e) => setMateriality(e.target.value)}
-            className="h-10 rounded-lg border border-iusia-mist/60 px-3 text-[15px]"
-          >
-            {Object.keys(MATERIALITY_HELP).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <span className="text-[13px] text-iusia-mist">{MATERIALITY_HELP[materiality]}</span>
-        </label>
+      {create.error ? (
+        <p role="alert" className="text-[13.5px] text-iusia-critical">
+          {create.error instanceof ApiError ? create.error.message : "Error al crear"}
+        </p>
+      ) : null}
 
-        <label className="col-span-2 flex flex-col gap-1">
-          <span className="text-[14px]">Objetivo del cliente (opcional)</span>
-          <textarea
-            value={objective}
-            onChange={(e) => setObjective(e.target.value)}
-            rows={3}
-            className="rounded-lg border border-iusia-mist/60 px-3 py-2 text-[15px]"
-          />
-        </label>
-
-        {create.error ? (
-          <p role="alert" className="col-span-2 text-[14px] text-iusia-critical">
-            {create.error instanceof ApiError ? create.error.message : "Error al crear"}
-          </p>
-        ) : null}
-
-        <div className="col-span-2">
-          <Button type="submit" disabled={create.isPending}>
-            {create.isPending ? "Creando…" : "Crear expediente"}
-          </Button>
-        </div>
-      </form>
-    </Card>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  required,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  required?: boolean;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[14px]">{label}</span>
-      <input
-        value={value}
-        required={required}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-10 rounded-lg border border-iusia-mist/60 px-3 text-[15px] outline-none focus:border-iusia-action"
-      />
-    </label>
+      <div className="mt-1 flex justify-end">
+        <Button type="submit" disabled={create.isPending || !title || !clientName}>
+          {create.isPending ? "Creando…" : "Crear expediente"}
+        </Button>
+      </div>
+    </form>
   );
 }

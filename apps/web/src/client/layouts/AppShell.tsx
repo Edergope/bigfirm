@@ -7,8 +7,7 @@ import {
   Files,
   LayoutTemplate,
   BrainCircuit,
-  Users,
-  Settings,
+  Search,
   LogOut,
 } from "lucide-react";
 import { CreditBadge } from "@iusia/ui";
@@ -17,75 +16,70 @@ import { api } from "../api.js";
 import { signOut } from "../auth-client.js";
 
 /**
- * Shell de IUSIA. Sobrio y estable: la expresividad se reserva para la
- * orquestación (Design System §01, "regla de oro visual").
+ * Shell de IUSIA. Institucional y estable: la expresividad se reserva para la
+ * orquestación (Design System §01). Navegación MVP de seis vistas.
  */
-
 const NAV = [
-  { to: "/", label: "Inicio", icon: Home, ready: true },
-  { to: "/casos", label: "Casos", icon: Briefcase, ready: true },
-  { to: "/tareas", label: "Tareas y términos", icon: CalendarClock, ready: false },
-  { to: "/documentos", label: "Documentos", icon: Files, ready: false },
-  { to: "/plantillas", label: "Plantillas", icon: LayoutTemplate, ready: false },
-  { to: "/inteligencia", label: "Inteligencia", icon: BrainCircuit, ready: false },
-  { to: "/equipo", label: "Equipo", icon: Users, ready: false },
-  { to: "/administracion", label: "Administración", icon: Settings, ready: false },
+  { to: "/", label: "Inicio", icon: Home },
+  { to: "/casos", label: "Casos", icon: Briefcase },
+  { to: "/tareas", label: "Tareas y términos", icon: CalendarClock },
+  { to: "/documentos", label: "Documentos", icon: Files },
+  { to: "/plantillas", label: "Plantillas", icon: LayoutTemplate },
+  { to: "/inteligencia", label: "Inteligencia", icon: BrainCircuit },
 ];
 
 export function AppShell() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="fixed inset-y-0 left-0 flex w-[232px] flex-col bg-iusia-navy text-white/90">
-        <div className="px-6 py-5">
-          <p className="text-lg font-bold tracking-[0.14em] text-white">IUSIA</p>
-          <p className="mt-0.5 text-[12px] tracking-wide text-white/50">
-            INTELLIGENCE. LAW. ADVANTAGE.
+    <div className="min-h-screen">
+      <aside className="fixed inset-y-0 left-0 flex w-[236px] flex-col border-r border-black/10 bg-iusia-navy text-white/85">
+        <div className="px-6 pb-5 pt-6">
+          <p className="text-[19px] font-bold tracking-[0.18em] text-white">IUSIA</p>
+          <p className="mt-1 text-[10.5px] font-medium tracking-[0.14em] text-white/45">
+            INTELLIGENCE · LAW · ADVANTAGE
           </p>
         </div>
 
         <nav className="flex-1 px-3 py-2">
-          {NAV.map(({ to, label, icon: Icon, ready }) =>
-            ready ? (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === "/"}
-                className={({ isActive }) =>
-                  clsx(
-                    "mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] transition",
-                    isActive
-                      ? "bg-white/12 font-medium text-white"
-                      : "text-white/70 hover:bg-white/6 hover:text-white",
-                  )
-                }
-              >
-                <Icon size={17} aria-hidden />
-                {label}
-              </NavLink>
-            ) : (
-              // Ruta prevista pero no construida. No se finge una vista con datos falsos.
-              <span
-                key={to}
-                title="Módulo previsto para una vertical posterior"
-                className="mb-0.5 flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-[14px] text-white/35"
-              >
-                <Icon size={17} aria-hidden />
-                {label}
-                <span className="ml-auto text-[11px] uppercase tracking-wide">pend.</span>
-              </span>
-            ),
-          )}
+          {NAV.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === "/"}
+              className={({ isActive }) =>
+                clsx(
+                  "mb-0.5 flex items-center gap-3 rounded-[10px] px-3 py-2 text-[14px] transition-colors",
+                  isActive
+                    ? "bg-white/[0.10] font-medium text-white"
+                    : "text-white/65 hover:bg-white/[0.05] hover:text-white",
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon
+                    size={17}
+                    strokeWidth={isActive ? 2.2 : 1.8}
+                    className={isActive ? "text-iusia-intel" : ""}
+                    aria-hidden
+                  />
+                  {label}
+                </>
+              )}
+            </NavLink>
+          ))}
         </nav>
 
         <div className="border-t border-white/10 px-4 py-4">
-          <p className="text-[14px] font-medium text-white">{me.data?.user.name ?? "…"}</p>
-          <p className="text-[12px] text-white/50">{me.data?.firm_role ?? ""}</p>
+          <p className="truncate text-[14px] font-medium text-white">
+            {me.data?.user.name ?? "…"}
+          </p>
+          <p className="mt-0.5 text-[12px] text-white/45">{firmRoleLabel(me.data?.firm_role)}</p>
           <button
             type="button"
             onClick={() => void signOut().then(() => window.location.assign("/entrar"))}
-            className="mt-3 flex items-center gap-2 text-[13px] text-white/60 hover:text-white"
+            className="mt-3 flex items-center gap-2 text-[13px] text-white/55 transition-colors hover:text-white"
           >
             <LogOut size={14} aria-hidden />
             Cerrar sesión
@@ -93,14 +87,33 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="ml-[232px] flex min-h-screen flex-1 flex-col">
-        <header className="flex h-16 items-center justify-end gap-4 border-b border-iusia-mist/30 bg-iusia-paper px-8">
-          {me.data ? <CreditBadge balance={me.data.credits} /> : null}
+      <div className="flex min-h-screen flex-col pl-[236px]">
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-iusia-mist/30 bg-iusia-paper/85 px-8 backdrop-blur">
+          <div className="flex h-9 max-w-md flex-1 items-center gap-2 rounded-[10px] border border-iusia-mist/40 bg-iusia-surface px-3 text-iusia-mist">
+            <Search size={16} aria-hidden />
+            <span className="text-[14px]">Buscar expedientes, documentos…</span>
+          </div>
+          <div className="ml-auto flex items-center gap-4">
+            {me.data ? <CreditBadge balance={me.data.credits} /> : null}
+          </div>
         </header>
-        <main className="flex-1 px-8 py-6">
+        <main className="mx-auto w-full max-w-[1360px] flex-1 px-8 py-7">
           <Outlet />
         </main>
       </div>
     </div>
   );
+}
+
+function firmRoleLabel(role: string | undefined): string {
+  const map: Record<string, string> = {
+    FIRM_DIRECTOR: "Dirección",
+    PARTNER: "Socio",
+    LAWYER: "Abogado",
+    EXTERNAL_LAWYER: "Abogado externo",
+    ASSISTANT: "Asistente",
+    PARALEGAL: "Paralegal",
+    READ_ONLY: "Solo lectura",
+  };
+  return role ? (map[role] ?? role) : "";
 }

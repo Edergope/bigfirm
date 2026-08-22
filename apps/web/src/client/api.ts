@@ -193,4 +193,127 @@ export const api = {
       "/api/dev/bootstrap",
       { method: "POST" },
     ),
+
+  caseBrief: (matterId: string) =>
+    request<{ brief: CaseBriefData }>(`/api/matters/${matterId}/brief`),
+
+  routingPreview: (matterId: string) =>
+    request<{ plan: RoutingPlanData }>(`/api/matters/${matterId}/routing`),
+
+  listTasks: (matterId: string) =>
+    request<{ tasks: TaskRow[] }>(`/api/matters/${matterId}/tasks`),
+
+  createTask: (matterId: string, input: CreateTaskBody) =>
+    request<{ task_id: string }>(`/api/matters/${matterId}/tasks`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  integrationsStatus: () =>
+    request<{
+      storage: { id: string; status: string };
+      retrieval: { id: string; status: string };
+      notes: Record<string, string>;
+    }>("/api/integrations/status"),
+
+  intelligence: {
+    caseHealth: (firm: boolean) =>
+      request<{ total: number; by_status: Record<string, number>; at_risk: number }>(
+        `/api/intelligence/case-health${firm ? "?scope=firm" : ""}`,
+      ),
+    overdue: (firm: boolean) =>
+      request<{ tasks: IntelTask[] }>(
+        `/api/intelligence/overdue-tasks${firm ? "?scope=firm" : ""}`,
+      ),
+    upcoming: (firm: boolean, days = 15) =>
+      request<{ deadlines: IntelDeadline[] }>(
+        `/api/intelligence/upcoming-deadlines?days=${days}${firm ? "&scope=firm" : ""}`,
+      ),
+    risks: (firm: boolean) =>
+      request<{ risks: IntelRisk[] }>(
+        `/api/intelligence/case-risks${firm ? "?scope=firm" : ""}`,
+      ),
+    inactive: (firm: boolean) =>
+      request<{ matters: IntelInactive[] }>(
+        `/api/intelligence/inactive-matters${firm ? "?scope=firm" : ""}`,
+      ),
+  },
 };
+
+export interface CaseBriefData {
+  matter_id: string;
+  objective: string | null;
+  matter_type: string[];
+  status: string;
+  materiality: string;
+  parties: Array<{ kind: string; name: string }>;
+  risk: { level: string; rationale: string | null };
+  facts: Array<{ fact_id: string; statement: string; certainty: string; primary_source: string }>;
+  authorities: Array<{ authority_id: string; citation: string; type: string; status: string }>;
+  document_count: number;
+  deadlines: Array<{ task_id: string; title: string; due_at: string | null; rule: string | null; source: string | null }>;
+  open_task_count: number;
+  ai_executions: { total: number; completed: number; failed: number };
+  open_questions: string[];
+  sources: string[];
+}
+
+export interface RoutingPlanData {
+  materiality: string;
+  agents: Array<{ agent_id: string; wave: string; reason: string; executable_now: boolean }>;
+  planned_disabled: string[];
+  signature: string;
+}
+
+export interface TaskRow {
+  id: string;
+  title: string;
+  description: string | null;
+  kind: string;
+  status: string;
+  dueAt: string | null;
+  deadlineRule: string | null;
+  deadlineSource: string | null;
+}
+
+export interface CreateTaskBody {
+  title: string;
+  description?: string;
+  kind?: "TASK" | "PROCEDURAL_DEADLINE" | "HEARING";
+  due_at?: string;
+  deadline?: {
+    rule: string;
+    source: string;
+    start_date: string;
+    term_length: number;
+    day_kind: "CALENDAR" | "BUSINESS";
+    holidays?: string[];
+  };
+}
+
+export interface IntelTask {
+  task_id: string;
+  matter_id: string;
+  title: string;
+  due_at: string | null;
+  kind: string;
+}
+export interface IntelDeadline {
+  task_id: string;
+  matter_id: string;
+  title: string;
+  due_at: string | null;
+  rule: string | null;
+  source: string | null;
+}
+export interface IntelRisk {
+  matter_id: string;
+  title: string;
+  risk_level: string;
+  rationale: string | null;
+}
+export interface IntelInactive {
+  matter_id: string;
+  title: string;
+  updated_at: string;
+}

@@ -5,6 +5,10 @@ import { SignIn } from "./pages/SignIn.js";
 import { Home } from "./pages/Home.js";
 import { Matters } from "./pages/Matters.js";
 import { MatterWorkspace } from "./pages/MatterWorkspace.js";
+import { Deadlines } from "./pages/Deadlines.js";
+import { Documents } from "./pages/Documents.js";
+import { Intelligence } from "./pages/Intelligence.js";
+import { Templates } from "./pages/Templates.js";
 
 export function App() {
   const { data: session, isPending } = useSession();
@@ -33,6 +37,10 @@ export function App() {
         <Route index element={<Home />} />
         <Route path="casos" element={<Matters />} />
         <Route path="casos/:matterId" element={<MatterWorkspace />} />
+        <Route path="tareas" element={<Deadlines />} />
+        <Route path="documentos" element={<Documents />} />
+        <Route path="plantillas" element={<Templates />} />
+        <Route path="inteligencia" element={<Intelligence />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

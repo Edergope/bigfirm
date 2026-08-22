@@ -1,32 +1,32 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useParams, Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Card,
   CardHeader,
-  EmptyState,
-  ExecutionStatusChip,
+  Field,
+  Input,
   MatterStatusChip,
+  PageHeader,
   RiskIndicator,
+  Skeleton,
+  StateBlock,
   StatusChip,
+  Textarea,
 } from "@iusia/ui";
-import type { ExecutionStatus, RiskLevel } from "@iusia/domain";
-import { api, ApiError } from "../api.js";
+import type { RiskLevel } from "@iusia/domain";
+import { api, ApiError, type CaseBriefData, type MatterDetail } from "../api.js";
 import { StrategyRoom } from "./StrategyRoom.js";
 
-/**
- * Workspace del caso. Jerarquía fijada por el Design System §06:
- * 1) qué pasa, 2) qué debo hacer, 3) qué sabemos, 4) qué recomienda IUSIA, 5) qué ocurrió.
- */
 const TABS = [
   { id: "resumen", label: "Resumen" },
   { id: "documentos", label: "Documentos" },
   { id: "hechos", label: "Hechos y fuentes" },
+  { id: "tareas", label: "Tareas y términos" },
   { id: "estrategia", label: "Estrategia" },
   { id: "actividad", label: "Actividad" },
 ] as const;
-
 type TabId = (typeof TABS)[number]["id"];
 
 export function MatterWorkspace() {
@@ -38,52 +38,52 @@ export function MatterWorkspace() {
     enabled: matterId.length > 0,
   });
 
-  if (detail.isLoading) return <EmptyState title="Cargando expediente…" />;
-  if (detail.error) {
+  if (detail.isLoading) {
     return (
-      <EmptyState
-        title="Expediente no disponible"
-        hint={
-          detail.error instanceof ApiError
-            ? detail.error.message
-            : "No fue posible cargar el expediente."
-        }
-      />
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-80" />
+        <Skeleton className="h-64" />
+      </div>
+    );
+  }
+  if (detail.error || !detail.data) {
+    return (
+      <Card>
+        <StateBlock
+          kind="error"
+          title="Expediente no disponible"
+          hint={detail.error instanceof ApiError ? detail.error.message : "No fue posible cargar."}
+        />
+      </Card>
     );
   }
   const data = detail.data;
-  if (!data) return null;
   const m = data.matter;
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <Link to="/casos" className="text-[13px] text-iusia-action hover:underline">
-            ← Casos
-          </Link>
-          <h1 className="mt-1 truncate text-xl font-semibold text-iusia-navy">{m.title}</h1>
-          <p className="mt-1 text-[14px] text-iusia-mist">
-            {m.reference} · {m.clientName} · {m.jurisdiction}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <StatusChip
-            label={m.materiality}
-            tone={m.materiality === "HIGH_STAKES" ? "warning" : "neutral"}
-          />
-          <MatterStatusChip status={m.status} />
-        </div>
-      </div>
+      <PageHeader
+        eyebrow={<Link to="/casos" className="hover:underline">← Casos</Link>}
+        title={m.title}
+        description={`${m.reference} · ${m.clientName} · ${m.jurisdiction}`}
+        actions={
+          <>
+            <StatusChip
+              label={m.materiality}
+              tone={m.materiality === "HIGH_STAKES" ? "warning" : "neutral"}
+            />
+            <MatterStatusChip status={m.status} />
+          </>
+        }
+      />
 
       {data.access.via_supervision ? (
-        <div className="rounded-lg border border-iusia-action/30 bg-iusia-action/5 px-4 py-3 text-[14px] text-iusia-action">
-          Estás viendo este expediente por supervisión de dirección, no por asignación.
-          El acceso quedó registrado en la auditoría del caso.
+        <div className="rounded-[10px] border border-iusia-action/25 bg-iusia-action/5 px-4 py-2.5 text-[13.5px] text-iusia-action">
+          Acceso por supervisión de dirección, no por asignación — registrado en la auditoría.
         </div>
       ) : null}
 
-      <nav className="flex gap-1 border-b border-iusia-mist/30">
+      <nav className="flex gap-0.5 border-b border-iusia-mist/30">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -91,8 +91,8 @@ export function MatterWorkspace() {
             onClick={() => setTab(t.id)}
             className={
               tab === t.id
-                ? "border-b-2 border-iusia-action px-4 py-2 text-[14px] font-medium text-iusia-navy"
-                : "px-4 py-2 text-[14px] text-iusia-mist hover:text-iusia-carbon"
+                ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[14px] font-medium text-iusia-navy"
+                : "px-3.5 py-2.5 text-[14px] text-iusia-mist transition-colors hover:text-iusia-carbon"
             }
           >
             {t.label}
@@ -103,43 +103,72 @@ export function MatterWorkspace() {
       {tab === "resumen" ? <Resumen matterId={matterId} data={data} /> : null}
       {tab === "documentos" ? <Documentos data={data} /> : null}
       {tab === "hechos" ? <Hechos data={data} /> : null}
+      {tab === "tareas" ? <Tareas matterId={matterId} /> : null}
       {tab === "estrategia" ? <Estrategia matterId={matterId} data={data} /> : null}
       {tab === "actividad" ? <Actividad data={data} /> : null}
     </div>
   );
 }
 
-type Detail = NonNullable<ReturnType<typeof useQuery<Awaited<ReturnType<typeof api.getMatter>>>>["data"]>;
+function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
+  const brief = useQuery({
+    queryKey: ["brief", matterId],
+    queryFn: () => api.caseBrief(matterId),
+  });
+  const b: CaseBriefData | undefined = brief.data?.brief;
 
-function Resumen({ matterId, data }: { matterId: string; data: Detail }) {
   return (
-    <div className="grid grid-cols-3 gap-5">
-      <div className="col-span-2 flex flex-col gap-5">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <div className="flex flex-col gap-5 lg:col-span-2">
         <Card>
-          <CardHeader title="Qué pasa" />
+          <CardHeader title="Qué pasa" subtitle="Objetivo del encargo" />
           <div className="px-6 py-5">
             <p className="text-[15px] leading-relaxed text-iusia-carbon">
               {data.matter.objective ?? "Sin objetivo registrado para este expediente."}
             </p>
+            {b && b.parties.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {b.parties.map((p, i) => (
+                  <StatusChip key={i} label={`${p.kind}: ${p.name}`} tone="neutral" />
+                ))}
+              </div>
+            ) : null}
           </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Qué recomienda IUSIA"
+            subtitle="Preguntas abiertas derivadas del expediente"
+          />
+          {brief.isLoading ? (
+            <div className="p-5">
+              <Skeleton className="h-16" />
+            </div>
+          ) : (b?.open_questions.length ?? 0) === 0 ? (
+            <StateBlock kind="empty" title="Sin preguntas abiertas" hint="No hay hechos por verificar." />
+          ) : (
+            <ul className="divide-y divide-iusia-mist/20">
+              {b?.open_questions.slice(0, 6).map((q, i) => (
+                <li key={i} className="px-6 py-3 text-[14px] text-iusia-carbon">
+                  {q}
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
         <Card>
           <CardHeader title="Equipo del caso" />
           {data.members.length === 0 ? (
-            <EmptyState title="Sin miembros asignados" />
+            <StateBlock kind="empty" title="Sin miembros asignados" />
           ) : (
             <ul className="divide-y divide-iusia-mist/20">
               {data.members.map((member) => (
-                <li
-                  key={member.userId}
-                  className="flex items-center justify-between px-6 py-3 text-[14px]"
-                >
-                  <span className="font-mono text-[13px] text-iusia-mist">{member.userId}</span>
+                <li key={member.userId} className="flex items-center justify-between px-6 py-3 text-[14px]">
+                  <span className="font-mono text-[12.5px] text-iusia-mist">{member.userId}</span>
                   <span className="flex items-center gap-2">
-                    {member.delegatedByUserId ? (
-                      <StatusChip label="Delegado" tone="info" />
-                    ) : null}
+                    {member.delegatedByUserId ? <StatusChip label="Delegado" tone="info" /> : null}
                     <StatusChip label={member.role} />
                   </span>
                 </li>
@@ -151,71 +180,81 @@ function Resumen({ matterId, data }: { matterId: string; data: Detail }) {
 
       <div className="flex flex-col gap-5">
         <Card className="px-6 py-5">
-          <p className="mb-3 text-[15px] font-semibold text-iusia-navy">Riesgo</p>
+          <p className="mb-3 text-[14px] font-semibold text-iusia-navy">Riesgo</p>
           <RiskIndicator
             level={data.matter.riskLevel as RiskLevel}
             rationale={data.matter.riskRationale}
           />
         </Card>
 
-        <Card>
-          <CardHeader title="Ejecuciones de IA" />
-          {data.executions.length === 0 ? (
-            <EmptyState
-              title="Sin ejecuciones"
-              hint="Inicia una orquestación desde la pestaña Estrategia."
+        <Card className="px-6 py-5">
+          <p className="mb-3 text-[14px] font-semibold text-iusia-navy">Situación</p>
+          <dl className="space-y-2.5 text-[13.5px]">
+            <Row label="Documentos" value={String(b?.document_count ?? data.documents.length)} />
+            <Row label="Hechos" value={String(b?.facts.length ?? data.facts.length)} />
+            <Row label="Autoridades" value={String(b?.authorities.length ?? data.authorities.length)} />
+            <Row label="Tareas abiertas" value={String(b?.open_task_count ?? "—")} />
+            <Row
+              label="Ejecuciones IA"
+              value={
+                b
+                  ? `${b.ai_executions.completed}✓ · ${b.ai_executions.failed}✗ / ${b.ai_executions.total}`
+                  : String(data.executions.filter((e) => e.parentExecutionId).length)
+              }
             />
-          ) : (
-            <ul className="divide-y divide-iusia-mist/20">
-              {data.executions.slice(0, 6).map((e) => (
-                <li key={e.id} className="flex items-center justify-between px-6 py-3">
-                  <span className="min-w-0 text-[14px]">
-                    <span className="block truncate">{e.agentId}</span>
-                    <span className="block text-[13px] text-iusia-mist">
-                      {e.model ?? "—"}
-                      {e.creditsConsumed ? ` · ${e.creditsConsumed} créditos` : ""}
-                    </span>
-                  </span>
-                  <ExecutionStatusChip status={e.status as ExecutionStatus} />
-                </li>
-              ))}
-            </ul>
-          )}
+          </dl>
         </Card>
-
-        <Link
-          to={`/casos/${matterId}?tab=estrategia`}
-          className="text-[14px] text-iusia-action hover:underline"
-        >
-          Ver Strategy Room →
-        </Link>
       </div>
     </div>
   );
 }
 
-function Documentos({ data }: { data: Detail }) {
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <dt className="text-iusia-mist">{label}</dt>
+      <dd className="font-medium text-iusia-carbon tnum">{value}</dd>
+    </div>
+  );
+}
+
+function Documentos({ data }: { data: MatterDetail }) {
+  const integrations = useQuery({ queryKey: ["integrations"], queryFn: api.integrationsStatus });
   return (
     <Card>
-      <CardHeader title="Expediente documental" />
-      <div className="border-b border-iusia-mist/25 px-6 py-3 text-[13px] text-iusia-mist">
-        Los archivos permanecen en Google Drive. IUSIA administra referencias, clasificación
-        y estado de revisión — no duplica el archivo.
-      </div>
+      <CardHeader
+        title="Expediente documental"
+        subtitle="Los archivos viven en Google Drive; IUSIA administra metadata y estado."
+        action={
+          integrations.data ? (
+            <StatusChip
+              label={
+                integrations.data.storage.status === "CONNECTED" ? "Drive conectado" : "Drive no conectado"
+              }
+              tone={integrations.data.storage.status === "CONNECTED" ? "success" : "warning"}
+              dot
+            />
+          ) : null
+        }
+      />
       {data.documents.length === 0 ? (
-        <EmptyState
+        <StateBlock
+          kind="not_configured"
           title="Sin documentos vinculados"
-          hint="La vinculación desde Google Drive Picker requiere credenciales OAuth aún no aprovisionadas."
+          hint="La vinculación con Google Drive Picker requiere OAuth aún no aprovisionado."
         />
       ) : (
         <ul className="divide-y divide-iusia-mist/20">
           {data.documents.map((d) => (
             <li key={d.id} className="flex items-center justify-between px-6 py-3">
               <span className="min-w-0">
-                <span className="block truncate text-[15px]">{d.name}</span>
-                <span className="block text-[13px] text-iusia-mist">{d.classification}</span>
+                <span className="block truncate text-[14.5px]">{d.name}</span>
+                <span className="block text-[12.5px] text-iusia-mist">{d.classification}</span>
               </span>
-              <StatusChip label={d.status} />
+              <StatusChip
+                label={d.status}
+                tone={d.status === "APROBADO" ? "success" : d.status === "CRITICO" ? "critical" : "neutral"}
+              />
             </li>
           ))}
         </ul>
@@ -225,35 +264,26 @@ function Documentos({ data }: { data: Detail }) {
 }
 
 const CERTAINTY_LABEL: Record<string, string> = {
-  "[F]": "Hecho acreditado",
-  "[A]": "Alegado",
-  "[D]": "Documental",
-  "[I]": "Inferido",
-  "[C]": "Contradicho",
-  "[U]": "No verificado",
-  "[R]": "Referido",
-  "[X]": "Descartado",
+  "[F]": "Acreditado", "[A]": "Alegado", "[D]": "Documental", "[I]": "Inferido",
+  "[C]": "Contradicho", "[U]": "No verificado", "[R]": "Referido", "[X]": "Descartado",
 };
 
-function Hechos({ data }: { data: Detail }) {
+function Hechos({ data }: { data: MatterDetail }) {
   return (
-    <div className="grid grid-cols-2 gap-5">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <Card>
-        <CardHeader title="Fact Ledger" />
+        <CardHeader title="Fact Ledger" subtitle="Base fáctica trazable" />
         {data.facts.length === 0 ? (
-          <EmptyState
-            title="Sin hechos registrados"
-            hint="El agente 01 de intake establece la base fáctica al ejecutarse."
-          />
+          <StateBlock kind="empty" title="Sin hechos" hint="El agente 01 establece la base fáctica." />
         ) : (
           <ul className="divide-y divide-iusia-mist/20">
             {data.facts.map((f) => (
               <li key={f.id} className="px-6 py-3">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-[15px] leading-snug">{f.statement}</p>
+                  <p className="text-[14.5px] leading-snug">{f.statement}</p>
                   <StatusChip label={CERTAINTY_LABEL[f.certainty] ?? f.certainty} />
                 </div>
-                <p className="mt-1 text-[13px] text-iusia-mist">Fuente: {f.primarySource}</p>
+                <p className="mt-1 text-[12.5px] text-iusia-mist">Fuente: {f.primarySource}</p>
               </li>
             ))}
           </ul>
@@ -261,24 +291,21 @@ function Hechos({ data }: { data: Detail }) {
       </Card>
 
       <Card>
-        <CardHeader title="Authority Ledger" />
+        <CardHeader title="Authority Ledger" subtitle="Normas y jurisprudencia verificables" />
         {data.authorities.length === 0 ? (
-          <EmptyState
-            title="Sin autoridades registradas"
-            hint="El agente 03 de investigación registra normas y jurisprudencia verificables."
-          />
+          <StateBlock kind="empty" title="Sin autoridades" hint="El agente 03 registra fuentes verificadas." />
         ) : (
           <ul className="divide-y divide-iusia-mist/20">
             {data.authorities.map((a) => (
               <li key={a.id} className="px-6 py-3">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-[15px] font-medium">{a.citation}</p>
+                  <p className="text-[14.5px] font-medium">{a.citation}</p>
                   <StatusChip
-                    label={a.status}
+                    label={a.status === "VERIFIED_CURRENT" ? "Vigente" : a.status}
                     tone={a.status === "VERIFIED_CURRENT" ? "success" : "warning"}
                   />
                 </div>
-                <p className="mt-1 text-[13px] text-iusia-mist">{a.ruleSummary}</p>
+                <p className="mt-1 text-[12.5px] text-iusia-mist">{a.ruleSummary}</p>
               </li>
             ))}
           </ul>
@@ -288,9 +315,78 @@ function Hechos({ data }: { data: Detail }) {
   );
 }
 
-function Estrategia({ matterId, data }: { matterId: string; data: Detail }) {
+function Tareas({ matterId }: { matterId: string }) {
+  const queryClient = useQueryClient();
+  const tasks = useQuery({ queryKey: ["tasks", matterId], queryFn: () => api.listTasks(matterId) });
+  const [title, setTitle] = useState("");
+
+  const create = useMutation({
+    mutationFn: () => api.createTask(matterId, { title }),
+    onSuccess: () => {
+      setTitle("");
+      void queryClient.invalidateQueries({ queryKey: ["tasks", matterId] });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader title="Tareas y términos" subtitle="El cálculo jurídico de términos es propio de IUSIA" />
+      <form
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (title.trim()) create.mutate();
+        }}
+        className="flex items-end gap-3 border-b border-iusia-mist/20 px-6 py-4"
+      >
+        <Field label="Nueva tarea" className="flex-1">
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Describe la tarea…" />
+        </Field>
+        <Button type="submit" disabled={create.isPending || !title.trim()}>
+          Añadir
+        </Button>
+      </form>
+      {tasks.isLoading ? (
+        <div className="p-5"><Skeleton className="h-10" /></div>
+      ) : (tasks.data?.tasks.length ?? 0) === 0 ? (
+        <StateBlock kind="empty" title="Sin tareas" hint="Añade una tarea o registra un término procesal." />
+      ) : (
+        <ul className="divide-y divide-iusia-mist/20">
+          {tasks.data?.tasks.map((t) => (
+            <li key={t.id} className="flex items-center justify-between px-6 py-3">
+              <span className="min-w-0">
+                <span className="block truncate text-[14.5px]">{t.title}</span>
+                {t.deadlineRule ? (
+                  <span className="block text-[12px] text-iusia-mist">
+                    {t.deadlineRule} · {t.deadlineSource}
+                  </span>
+                ) : null}
+              </span>
+              <span className="flex items-center gap-3">
+                {t.dueAt ? (
+                  <time className="text-[12.5px] text-iusia-mist tnum">
+                    {new Date(t.dueAt).toLocaleDateString("es-CO")}
+                  </time>
+                ) : null}
+                <StatusChip
+                  label={t.kind === "PROCEDURAL_DEADLINE" ? "Término" : "Tarea"}
+                  tone={t.kind === "PROCEDURAL_DEADLINE" ? "warning" : "neutral"}
+                />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function Estrategia({ matterId, data }: { matterId: string; data: MatterDetail }) {
   const queryClient = useQueryClient();
   const [objective, setObjective] = useState(data.matter.objective ?? "");
+  const routing = useQuery({
+    queryKey: ["routing", matterId],
+    queryFn: () => api.routingPreview(matterId),
+  });
 
   const roots = data.executions.filter((e) => e.parentExecutionId === null);
   const latestRoot = roots[0]?.rootExecutionId ?? null;
@@ -302,45 +398,62 @@ function Estrategia({ matterId, data }: { matterId: string; data: Detail }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <Card>
-        <CardHeader title="Iniciar orquestación jurídica" />
-        <div className="px-6 py-5">
-          <p className="mb-3 text-[14px] text-iusia-mist">
-            Se ejecutarán agentes reales del piloto (00 Managing Partner → 01 Intake → 03
-            Investigación). Cada ejecución queda registrada en el Execution Ledger con su
-            propio identificador, proveedor, modelo y costo.
-          </p>
-          <textarea
-            value={objective}
-            onChange={(e) => setObjective(e.target.value)}
-            rows={3}
-            placeholder="Objetivo jurídico concreto del encargo (mínimo 10 caracteres)"
-            className="w-full rounded-lg border border-iusia-mist/60 px-3 py-2 text-[15px]"
-          />
-          {start.error ? (
-            <p role="alert" className="mt-2 text-[14px] text-iusia-critical">
-              {start.error instanceof ApiError ? start.error.message : "Error al iniciar"}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader title="Iniciar orquestación jurídica" />
+          <div className="px-6 py-5">
+            <p className="mb-3 text-[13.5px] text-iusia-mist">
+              Se ejecutan agentes reales del piloto (00 → 01 → 03). Cada ejecución queda
+              registrada en el Execution Ledger con su proveedor, modelo y costo.
             </p>
-          ) : null}
-          <div className="mt-3">
-            <Button
-              onClick={() => start.mutate()}
-              disabled={start.isPending || objective.trim().length < 10}
-            >
-              {start.isPending ? "Despachando…" : "Ejecutar orquestación"}
-            </Button>
+            <Textarea
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              rows={3}
+              placeholder="Objetivo jurídico concreto del encargo (mínimo 10 caracteres)"
+            />
+            {start.error ? (
+              <p role="alert" className="mt-2 text-[13.5px] text-iusia-critical">
+                {start.error instanceof ApiError ? start.error.message : "Error al iniciar"}
+              </p>
+            ) : null}
+            <div className="mt-3">
+              <Button onClick={() => start.mutate()} disabled={start.isPending || objective.trim().length < 10}>
+                {start.isPending ? "Despachando…" : "Ejecutar orquestación"}
+              </Button>
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+
+        <Card>
+          <CardHeader title="Plan de routing" subtitle="Decisión determinista por materialidad" />
+          {routing.isLoading ? (
+            <div className="p-5"><Skeleton className="h-24" /></div>
+          ) : (
+            <ul className="max-h-64 divide-y divide-iusia-mist/15 overflow-y-auto">
+              {routing.data?.plan.agents.map((a) => (
+                <li key={a.agent_id} className="flex items-center justify-between gap-2 px-5 py-2">
+                  <span className="min-w-0 truncate text-[13px] text-iusia-carbon">{a.agent_id}</span>
+                  <StatusChip
+                    label={a.executable_now ? "Activo" : "Planificado"}
+                    tone={a.executable_now ? "intel" : "neutral"}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
 
       {latestRoot ? (
         <StrategyRoom rootExecutionId={latestRoot} />
       ) : (
         <Card>
           <CardHeader title="Strategy Room" />
-          <EmptyState
+          <StateBlock
+            kind="empty"
             title="Sin ejecuciones registradas"
-            hint="El grafo se construye a partir de eventos reales del Execution Ledger. Sin ejecución no hay nodos."
+            hint="El grafo se construye a partir de eventos reales del Execution Ledger."
           />
         </Card>
       )}
@@ -348,22 +461,19 @@ function Estrategia({ matterId, data }: { matterId: string; data: Detail }) {
   );
 }
 
-function Actividad({ data }: { data: Detail }) {
+function Actividad({ data }: { data: MatterDetail }) {
   return (
     <Card>
-      <CardHeader title="Auditoría del expediente" />
-      <div className="border-b border-iusia-mist/25 px-6 py-3 text-[13px] text-iusia-mist">
-        Registro jurídico de decisiones y accesos, separado de los logs técnicos.
-      </div>
+      <CardHeader title="Auditoría del expediente" subtitle="Registro jurídico de decisiones y accesos" />
       {data.activity.length === 0 ? (
-        <EmptyState title="Sin actividad registrada" />
+        <StateBlock kind="empty" title="Sin actividad registrada" />
       ) : (
         <ul className="divide-y divide-iusia-mist/20">
           {data.activity.map((a) => (
             <li key={a.id} className="flex items-center justify-between px-6 py-3">
               <span>
                 <span className="block text-[14px]">{a.action}</span>
-                <span className="block text-[13px] text-iusia-mist">
+                <span className="block text-[12.5px] text-iusia-mist">
                   {a.resourceType}
                   {a.reason ? ` · ${a.reason}` : ""}
                 </span>
@@ -371,11 +481,9 @@ function Actividad({ data }: { data: Detail }) {
               <span className="flex items-center gap-3">
                 <StatusChip
                   label={a.outcome}
-                  tone={
-                    a.outcome === "DENIED" || a.outcome === "FAILURE" ? "critical" : "success"
-                  }
+                  tone={a.outcome === "DENIED" || a.outcome === "FAILURE" ? "critical" : "success"}
                 />
-                <time className="text-[13px] tabular-nums text-iusia-mist">
+                <time className="text-[12.5px] tabular-nums text-iusia-mist">
                   {new Date(a.occurredAt).toLocaleString("es-CO")}
                 </time>
               </span>

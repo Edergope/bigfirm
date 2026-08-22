@@ -1,12 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Button, Card } from "@iusia/ui";
+import { Button, Field, Input } from "@iusia/ui";
 import { authClient, signIn, signUp } from "../auth-client.js";
 
 /**
- * Autenticación y creación de firma.
- *
- * Todo el trabajo criptográfico y de sesión lo hace Better Auth. Esta vista sólo
- * recoge datos y crea la organización (= firma), que es el tenant raíz.
+ * Acceso y registro de firma. Todo el trabajo criptográfico/sesión lo hace Better Auth.
+ * Login sobrio y premium: marca clara, acceso directo, sin ilustraciones cliché.
  */
 export function SignIn() {
   const [mode, setMode] = useState<"in" | "up">("in");
@@ -28,8 +26,6 @@ export function SignIn() {
       } else {
         const res = await signUp.email({ email, password, name });
         if (res.error) throw new Error(res.error.message ?? "No fue posible crear la cuenta");
-
-        // La firma es la entidad superior del multitenancy: sin ella no hay contexto.
         const org = await authClient.organization.create({
           name: firmName,
           slug: firmName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40),
@@ -46,77 +42,98 @@ export function SignIn() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-iusia-navy px-4">
-      <Card className="w-full max-w-md px-8 py-8">
-        <p className="text-lg font-bold tracking-[0.14em] text-iusia-navy">IUSIA</p>
-        <p className="mt-0.5 text-[13px] text-iusia-mist">
-          {mode === "in" ? "Acceso a la plataforma" : "Registro de firma"}
-        </p>
+    <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
+      {/* Panel de marca — autoridad institucional, sin decoración gratuita. */}
+      <div className="relative hidden flex-col justify-between bg-iusia-navy px-14 py-12 text-white lg:flex">
+        <div>
+          <p className="text-[22px] font-bold tracking-[0.2em]">IUSIA</p>
+          <p className="mt-1 text-[11px] font-medium tracking-[0.16em] text-white/45">
+            INTELLIGENCE · LAW · ADVANTAGE
+          </p>
+        </div>
+        <div className="max-w-md">
+          <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em]">
+            El sistema operativo jurídico de tu firma.
+          </h1>
+          <p className="mt-4 text-[15px] leading-relaxed text-white/65">
+            Expedientes, hechos, autoridades y orquestación multiagente en un solo lugar —
+            con trazabilidad auditable de cada decisión.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-[13px] text-white/40">
+          <span className="h-1.5 w-1.5 rounded-full bg-iusia-intel" />
+          Go Legaltech · Confidencial
+        </div>
+      </div>
 
-        <form onSubmit={submit} className="mt-6 flex flex-col gap-3">
-          {mode === "up" ? (
-            <>
-              <Field label="Nombre" value={name} onChange={setName} required />
-              <Field label="Nombre de la firma" value={firmName} onChange={setFirmName} required />
-            </>
-          ) : null}
-          <Field label="Correo" type="email" value={email} onChange={setEmail} required />
-          <Field
-            label="Contraseña"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            required
-          />
+      {/* Panel de acceso */}
+      <div className="flex items-center justify-center bg-iusia-surface px-6 py-12">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 lg:hidden">
+            <p className="text-[20px] font-bold tracking-[0.18em] text-iusia-navy">IUSIA</p>
+          </div>
+          <h2 className="text-[22px] font-semibold text-iusia-navy">
+            {mode === "in" ? "Acceso a la plataforma" : "Registrar firma"}
+          </h2>
+          <p className="mt-1 text-[14px] text-iusia-mist">
+            {mode === "in"
+              ? "Continúa donde lo dejaste."
+              : "Crea tu firma y su primer usuario de dirección."}
+          </p>
 
-          {error ? (
-            <p role="alert" className="text-[14px] text-iusia-critical">
-              {error}
-            </p>
-          ) : null}
+          <form onSubmit={submit} className="mt-7 flex flex-col gap-4">
+            {mode === "up" ? (
+              <>
+                <Field label="Nombre">
+                  <Input value={name} onChange={(e) => setName(e.target.value)} required />
+                </Field>
+                <Field label="Nombre de la firma">
+                  <Input value={firmName} onChange={(e) => setFirmName(e.target.value)} required />
+                </Field>
+              </>
+            ) : null}
+            <Field label="Correo">
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+            </Field>
+            <Field label="Contraseña">
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete={mode === "in" ? "current-password" : "new-password"}
+              />
+            </Field>
 
-          <div className="mt-2">
-            <Button type="submit" disabled={busy}>
+            {error ? (
+              <p role="alert" className="text-[13.5px] text-iusia-critical">
+                {error}
+              </p>
+            ) : null}
+
+            <Button type="submit" disabled={busy} className="mt-1 w-full">
               {busy ? "Procesando…" : mode === "in" ? "Entrar" : "Crear firma"}
             </Button>
-          </div>
-        </form>
+          </form>
 
-        <button
-          type="button"
-          onClick={() => setMode(mode === "in" ? "up" : "in")}
-          className="mt-5 text-[13px] text-iusia-action hover:underline"
-        >
-          {mode === "in" ? "Registrar una firma nueva" : "Ya tengo cuenta"}
-        </button>
-      </Card>
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === "in" ? "up" : "in");
+              setError(null);
+            }}
+            className="mt-6 text-[13.5px] text-iusia-action hover:underline"
+          >
+            {mode === "in" ? "Registrar una firma nueva" : "Ya tengo una cuenta"}
+          </button>
+        </div>
+      </div>
     </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-  required,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  type?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[14px] text-iusia-carbon">{label}</span>
-      <input
-        type={type}
-        value={value}
-        required={required}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-10 rounded-lg border border-iusia-mist/60 px-3 text-[15px] outline-none focus:border-iusia-action"
-      />
-    </label>
   );
 }
