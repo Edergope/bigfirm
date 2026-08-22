@@ -20,6 +20,7 @@ import {
 } from "@iusia/db";
 import type { Env } from "../env.js";
 import type { LegalWorker, RunResult } from "../agents/legal-worker.js";
+import { NotificationService } from "../services/notifications.js";
 
 export interface MatterOrchestrationParams {
   organization_id: string;
@@ -272,6 +273,28 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         type: failed.length > 0 ? "execution.failed" : "execution.completed",
         status: failed.length > 0 ? "FAILED" : "COMPLETED",
         detail: { completed: completed.length, failed: failed.length },
+      });
+    });
+
+    // Notifica al owner del matter el cierre de la orquestación. NO bloquea:
+    // sin Resend configurado, la notificación queda NOT_CONFIGURED y el DAG termina igual.
+    await step.do("notify-owner", async () => {
+      const matter = await matters.findById(params.organization_id, params.matter_id);
+      const email = await matters.ownerEmail(params.matter_id);
+      if (!email) return;
+      const svc = NotificationService.forEnv(this.env);
+      await svc.notify({
+        firm_id: params.organization_id,
+        matter_id: params.matter_id,
+        recipient: email,
+        event: failed.length > 0 ? "EXECUTION_FAILED" : "EXECUTION_COMPLETED",
+        execution_id: params.root_execution_id,
+        correlation_id: event.instanceId,
+        payload: {
+          matter_reference: matter?.reference ?? params.matter_id,
+          completed: completed.length,
+          failed: failed.length,
+        },
       });
     });
 

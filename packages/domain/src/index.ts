@@ -10,5 +10,6 @@ export * from "./deadlines.js";
 export * from "./case-brief.js";
 export * from "./templates.js";
 export * from "./billing.js";
+export * from "./notifications.js";
 export * from "./document-storage.js";
 export * from "./errors.js";

@@ -7,6 +7,7 @@ import {
 } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { matters, matterMembers } from "../schema/iusia.js";
+import { user } from "../schema/auth.js";
 
 export interface MatterRow {
   id: string;
@@ -186,6 +187,23 @@ export class MatterRepository {
       .select()
       .from(matterMembers)
       .where(and(eq(matterMembers.matterId, matterId), isNull(matterMembers.revokedAt)));
+  }
+
+  /** Email del OWNER activo del matter (para notificaciones), o null. */
+  async ownerEmail(matterId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ email: user.email })
+      .from(matterMembers)
+      .innerJoin(user, eq(matterMembers.userId, user.id))
+      .where(
+        and(
+          eq(matterMembers.matterId, matterId),
+          eq(matterMembers.role, "OWNER"),
+          isNull(matterMembers.revokedAt),
+        ),
+      )
+      .limit(1);
+    return row?.email ?? null;
   }
 
   async setRisk(

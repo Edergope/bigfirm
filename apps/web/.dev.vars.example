@@ -10,3 +10,7 @@ AI_GATEWAY_TOKEN=""
 # OAuth de Google (Drive Picker / Docs). Opcional hasta aprovisionar credenciales.
 GOOGLE_CLIENT_ID=""
 GOOGLE_CLIENT_SECRET=""
+
+# Resend (NotificationService). Sin API key, las notificaciones quedan NOT_CONFIGURED.
+RESEND_API_KEY=""
+RESEND_FROM="IUSIA <notificaciones@iusia.legal>"

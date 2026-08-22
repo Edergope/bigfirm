@@ -15,6 +15,9 @@ export interface IusiaSecrets {
   /** OAuth de Google para Drive. Aún no aprovisionado; ver docs/PENDIENTES.md. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** Resend (NotificationService). Sin esto, las notificaciones quedan NOT_CONFIGURED. */
+  RESEND_API_KEY?: string;
+  RESEND_FROM?: string;
 }
 
 declare global {
