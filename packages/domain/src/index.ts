@@ -8,5 +8,7 @@ export * from "./events.js";
 export * from "./credits.js";
 export * from "./deadlines.js";
 export * from "./case-brief.js";
+export * from "./templates.js";
+export * from "./billing.js";
 export * from "./document-storage.js";
 export * from "./errors.js";
