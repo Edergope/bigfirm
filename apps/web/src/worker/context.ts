@@ -10,6 +10,7 @@ import {
   ExecutionRepository,
   FactRepository,
   MatterRepository,
+  TaskRepository,
   createDb,
   schema,
   type IusiaDb,
@@ -28,6 +29,7 @@ export interface RequestContext {
   authorities: AuthorityRepository;
   credits: CreditRepository;
   audit: AuditRepository;
+  tasks: TaskRepository;
   authz: AuthorizationService;
 }
 
@@ -56,6 +58,7 @@ function buildContext(env: Env): RequestContext {
     facts: new FactRepository(db),
     authorities: new AuthorityRepository(db),
     credits: new CreditRepository(db),
+    tasks: new TaskRepository(db),
     authz: new AuthorizationService(db, matters, audit),
   };
 }

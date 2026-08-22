@@ -6,3 +6,4 @@ export * from "./repositories/credits.js";
 export * from "./repositories/agents.js";
 export * from "./repositories/documents.js";
 export * from "./repositories/ledgers.js";
+export * from "./repositories/tasks.js";

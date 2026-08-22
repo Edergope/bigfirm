@@ -6,5 +6,7 @@ export * from "./work-package.js";
 export * from "./execution.js";
 export * from "./events.js";
 export * from "./credits.js";
+export * from "./deadlines.js";
+export * from "./case-brief.js";
 export * from "./document-storage.js";
 export * from "./errors.js";

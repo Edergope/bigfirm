@@ -14,6 +14,7 @@ import {
   ExecutionRepository,
   FactRepository,
   MatterRepository,
+  TaskRepository,
 } from "@iusia/db";
 import { AuthorizationService } from "../services/authorization.js";
 
@@ -36,6 +37,7 @@ export interface TestDb {
   authorities: AuthorityRepository;
   credits: CreditRepository;
   audit: AuditRepository;
+  tasks: TaskRepository;
   authz: AuthorizationService;
   raw: Database.Database;
 }
@@ -77,6 +79,7 @@ export function createTestDb(): TestDb {
     facts: new FactRepository(db),
     authorities: new AuthorityRepository(db),
     credits: new CreditRepository(db),
+    tasks: new TaskRepository(db),
     authz: new AuthorizationService(db, matters, audit),
   };
 }
