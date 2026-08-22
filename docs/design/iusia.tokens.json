@@ -1,0 +1,53 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "IUSIA design tokens. Derivados de IUSIA_UI_UX_Design_System_MVP_v1.pdf. Fuente única de verdad visual; espejo de packages/ui/src/tokens.",
+  "color": {
+    "navy":    { "$value": "#0B1D3A", "$type": "color", "$description": "Marca, navegación, autoridad" },
+    "carbon":  { "$value": "#1F2937", "$type": "color", "$description": "Texto principal" },
+    "action":  { "$value": "#2563EB", "$type": "color", "$description": "CTA, foco, selección" },
+    "intel":   { "$value": "#22C7E8", "$type": "color", "$description": "IA, nodos, flujos" },
+    "gold":    { "$value": "#C9A24B", "$type": "color", "$description": "Acento premium mínimo" },
+    "mist":    { "$value": "#A7ADB5", "$type": "color", "$description": "Bordes, metadata" },
+    "surface": { "$value": "#F7F8FA", "$type": "color", "$description": "Superficies generales" },
+    "paper":   { "$value": "#FFFFFF", "$type": "color", "$description": "Lectura y tarjetas" },
+    "success": { "$value": "#16A34A", "$type": "color" },
+    "warning": { "$value": "#D97706", "$type": "color" },
+    "critical":{ "$value": "#DC2626", "$type": "color" },
+    "info":    { "$value": "#2563EB", "$type": "color" }
+  },
+  "font": {
+    "family": { "$value": "Inter, \"Geist Sans\", ui-sans-serif, system-ui, sans-serif", "$type": "fontFamily" },
+    "size": {
+      "meta":  { "$value": "13px", "$type": "dimension" },
+      "body":  { "$value": "15px", "$type": "dimension" },
+      "bodyLg":{ "$value": "16px", "$type": "dimension" },
+      "h4":    { "$value": "17px", "$type": "dimension" },
+      "h3":    { "$value": "20px", "$type": "dimension" },
+      "h2":    { "$value": "24px", "$type": "dimension" },
+      "h1":    { "$value": "30px", "$type": "dimension" }
+    }
+  },
+  "space": {
+    "1": { "$value": "8px", "$type": "dimension" },
+    "2": { "$value": "12px", "$type": "dimension" },
+    "3": { "$value": "16px", "$type": "dimension" },
+    "4": { "$value": "24px", "$type": "dimension" },
+    "5": { "$value": "32px", "$type": "dimension" },
+    "6": { "$value": "48px", "$type": "dimension" }
+  },
+  "radius": {
+    "sm":   { "$value": "8px", "$type": "dimension" },
+    "md":   { "$value": "10px", "$type": "dimension" },
+    "card": { "$value": "14px", "$type": "dimension" },
+    "pill": { "$value": "9999px", "$type": "dimension" }
+  },
+  "shadow": {
+    "hairline": { "$value": "0 1px 2px rgba(11,29,58,0.06)", "$type": "shadow" },
+    "raised":   { "$value": "0 4px 16px -6px rgba(11,29,58,0.16)", "$type": "shadow" },
+    "overlay":  { "$value": "0 24px 60px -20px rgba(11,29,58,0.35)", "$type": "shadow" }
+  },
+  "layout": {
+    "sidebarWidth":  { "$value": "236px", "$type": "dimension" },
+    "topbarHeight":  { "$value": "64px", "$type": "dimension" }
+  }
+}

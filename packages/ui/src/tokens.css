@@ -1,41 +1,49 @@
 /**
- * Design tokens de IUSIA.
- * Fuente normativa: documentacion/IUSIA_UI_UX_Design_System_MVP_v1.pdf §01 y §02.
- * No introducir paletas ni tipografías nuevas sin decisión explícita.
+ * Design tokens de IUSIA (capa CSS para Tailwind v4).
+ * Fuente normativa: documentacion/IUSIA_UI_UX_Design_System_MVP_v1.pdf §01–§02.
+ * Espejo en código: packages/ui/src/tokens/index.ts. No inventar paletas nuevas.
  */
 
 @theme {
   /* Paleta operativa */
-  --color-iusia-navy: #0b1d3a; /* Marca, navegación, autoridad */
-  --color-iusia-carbon: #1f2937; /* Texto principal */
-  --color-iusia-action: #2563eb; /* CTA, foco, selección */
-  --color-iusia-intel: #22c7e8; /* IA, nodos, flujos */
-  --color-iusia-gold: #c9a24b; /* Acento premium mínimo */
-  --color-iusia-mist: #a7adb5; /* Bordes, metadata */
-  --color-iusia-surface: #f7f8fa; /* Superficies generales */
-  --color-iusia-paper: #ffffff; /* Lectura y tarjetas */
+  --color-iusia-navy: #0b1d3a;
+  --color-iusia-carbon: #1f2937;
+  --color-iusia-action: #2563eb;
+  --color-iusia-intel: #22c7e8;
+  --color-iusia-gold: #c9a24b;
+  --color-iusia-mist: #a7adb5;
+  --color-iusia-surface: #f7f8fa;
+  --color-iusia-paper: #ffffff;
 
-  /* Estados semánticos. Nunca depender sólo del color: siempre texto o icono. */
+  /* Estados semánticos. Nunca depender sólo del color. */
   --color-iusia-success: #16a34a;
   --color-iusia-warning: #d97706;
   --color-iusia-critical: #dc2626;
   --color-iusia-info: #2563eb;
 
-  /* Tipografía de UI */
+  /* Tipografía */
   --font-sans: Inter, "Geist Sans", ui-sans-serif, system-ui, sans-serif;
 
-  /* Grid base 8 px */
+  /* Grid base 8px */
   --spacing-1: 8px;
   --spacing-2: 12px;
   --spacing-3: 16px;
   --spacing-4: 24px;
   --spacing-5: 32px;
+  --spacing-6: 48px;
 
-  /* Radios de tarjeta: 12–16 px */
+  /* Radios */
+  --radius-sm: 8px;
+  --radius-md: 10px;
   --radius-card: 14px;
 
+  /* Sombras mínimas */
+  --shadow-hairline: 0 1px 2px rgba(11, 29, 58, 0.06);
+  --shadow-raised: 0 4px 16px -6px rgba(11, 29, 58, 0.16);
+  --shadow-overlay: 0 24px 60px -20px rgba(11, 29, 58, 0.35);
+
   /* Estructura del shell */
-  --iusia-sidebar-width: 232px;
+  --iusia-sidebar-width: 236px;
   --iusia-topbar-height: 64px;
 }
 
@@ -47,9 +55,15 @@ body {
   background: var(--color-iusia-surface);
   color: var(--color-iusia-carbon);
   font-family: var(--font-sans);
-  /* Mínimos: 15–16 px texto operativo, 14 px metadata. */
   font-size: 15px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Números tabulares por defecto en metadata numérica de trabajo jurídico. */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Foco de teclado siempre visible (WCAG AA). */
@@ -57,4 +71,21 @@ body {
   outline: 2px solid var(--color-iusia-action);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Respeta la preferencia del sistema: motion sólo cuando se permite. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Barra de scroll discreta e institucional. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-iusia-mist) transparent;
 }

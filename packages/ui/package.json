@@ -10,7 +10,8 @@
   "dependencies": {
     "@iusia/domain": "workspace:*",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.552.0"
+    "lucide-react": "^0.552.0",
+    "motion": "^13.1.1"
   },
   "peerDependencies": {
     "react": "^19.0.0"
