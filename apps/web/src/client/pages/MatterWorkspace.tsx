@@ -106,7 +106,7 @@ export function MatterWorkspace() {
               className={
                 selected
                   ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[14px] font-medium text-iusia-navy"
-                  : "px-3.5 py-2.5 text-[14px] text-iusia-mist transition-colors hover:text-iusia-carbon"
+                  : "px-3.5 py-2.5 text-[14px] text-iusia-mist-text transition-colors hover:text-iusia-carbon"
               }
             >
               {t.label}
@@ -183,7 +183,7 @@ function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
             <ul className="divide-y divide-iusia-mist/20">
               {data.members.map((member) => (
                 <li key={member.userId} className="flex items-center justify-between px-6 py-3 text-[14px]">
-                  <span className="font-mono text-[12.5px] text-iusia-mist">{member.userId}</span>
+                  <span className="font-mono text-[12.5px] text-iusia-mist-text">{member.userId}</span>
                   <span className="flex items-center gap-2">
                     {member.delegatedByUserId ? <StatusChip label="Delegado" tone="info" /> : null}
                     <StatusChip label={member.role} />
@@ -229,7 +229,7 @@ function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <dt className="text-iusia-mist">{label}</dt>
+      <dt className="text-iusia-mist-text">{label}</dt>
       <dd className="font-medium text-iusia-carbon tnum">{value}</dd>
     </div>
   );
@@ -266,7 +266,7 @@ function Documentos({ data }: { data: MatterDetail }) {
             <li key={d.id} className="flex items-center justify-between px-6 py-3">
               <span className="min-w-0">
                 <span className="block truncate text-[14.5px]">{d.name}</span>
-                <span className="block text-[12.5px] text-iusia-mist">{d.classification}</span>
+                <span className="block text-[12.5px] text-iusia-mist-text">{d.classification}</span>
               </span>
               <StatusChip
                 label={d.status}
@@ -300,7 +300,7 @@ function Hechos({ data }: { data: MatterDetail }) {
                   <p className="text-[14.5px] leading-snug">{f.statement}</p>
                   <StatusChip label={CERTAINTY_LABEL[f.certainty] ?? f.certainty} />
                 </div>
-                <p className="mt-1 text-[12.5px] text-iusia-mist">Fuente: {f.primarySource}</p>
+                <p className="mt-1 text-[12.5px] text-iusia-mist-text">Fuente: {f.primarySource}</p>
               </li>
             ))}
           </ul>
@@ -322,7 +322,7 @@ function Hechos({ data }: { data: MatterDetail }) {
                     tone={a.status === "VERIFIED_CURRENT" ? "success" : "warning"}
                   />
                 </div>
-                <p className="mt-1 text-[12.5px] text-iusia-mist">{a.ruleSummary}</p>
+                <p className="mt-1 text-[12.5px] text-iusia-mist-text">{a.ruleSummary}</p>
               </li>
             ))}
           </ul>
@@ -373,14 +373,14 @@ function Tareas({ matterId }: { matterId: string }) {
               <span className="min-w-0">
                 <span className="block truncate text-[14.5px]">{t.title}</span>
                 {t.deadlineRule ? (
-                  <span className="block text-[12px] text-iusia-mist">
+                  <span className="block text-[12px] text-iusia-mist-text">
                     {t.deadlineRule} · {t.deadlineSource}
                   </span>
                 ) : null}
               </span>
               <span className="flex items-center gap-3">
                 {t.dueAt ? (
-                  <time className="text-[12.5px] text-iusia-mist tnum">
+                  <time className="text-[12.5px] text-iusia-mist-text tnum">
                     {new Date(t.dueAt).toLocaleDateString("es-CO")}
                   </time>
                 ) : null}
@@ -419,7 +419,7 @@ function Estrategia({ matterId, data }: { matterId: string; data: MatterDetail }
         <Card className="lg:col-span-2">
           <CardHeader title="Iniciar orquestación jurídica" />
           <div className="px-6 py-5">
-            <p className="mb-3 text-[13.5px] text-iusia-mist">
+            <p className="mb-3 text-[13.5px] text-iusia-mist-text">
               Se ejecutan agentes reales del piloto (00 → 01 → 03). Cada ejecución queda
               registrada en el Execution Ledger con su proveedor, modelo y costo.
             </p>
@@ -490,7 +490,7 @@ function Actividad({ data }: { data: MatterDetail }) {
             <li key={a.id} className="flex items-center justify-between px-6 py-3">
               <span>
                 <span className="block text-[14px]">{a.action}</span>
-                <span className="block text-[12.5px] text-iusia-mist">
+                <span className="block text-[12.5px] text-iusia-mist-text">
                   {a.resourceType}
                   {a.reason ? ` · ${a.reason}` : ""}
                 </span>
@@ -500,7 +500,7 @@ function Actividad({ data }: { data: MatterDetail }) {
                   label={a.outcome}
                   tone={a.outcome === "DENIED" || a.outcome === "FAILURE" ? "critical" : "success"}
                 />
-                <time className="text-[12.5px] tabular-nums text-iusia-mist">
+                <time className="text-[12.5px] tabular-nums text-iusia-mist-text">
                   {new Date(a.occurredAt).toLocaleString("es-CO")}
                 </time>
               </span>

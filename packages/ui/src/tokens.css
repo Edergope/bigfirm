@@ -12,12 +12,26 @@
   --color-iusia-intel: #22c7e8;
   --color-iusia-gold: #c9a24b;
   --color-iusia-mist: #a7adb5;
+  /* Texto mudo (metadata, hints, labels): mismo tono de mist, oscurecido a ≥4.5:1
+     sobre paper/surface Y sobre el tinte mist/15 (badges). No usar `mist` para texto. */
+  --color-iusia-mist-text: #68707b;
+  /* Borde de control interactivo (Input/Select/Textarea, botón secundario):
+     mismo tono de mist, oscurecido a ≥3:1 (WCAG 1.4.11, límite de componente). */
+  --color-iusia-mist-strong: #89919b;
   --color-iusia-surface: #f7f8fa;
   --color-iusia-paper: #ffffff;
+  /* Compañeros "-text" de intel/gold: mismo tono, oscurecido a ≥4.5:1 sobre
+     paper/surface y su propio tinte /15. Formaliza como token único un patrón que
+     ya existía hardcoded ad-hoc (StatusChip, Strategy Room, CreditBadge), pero sin
+     garantía de contraste — aquí sí se calcula contra el peor fondo real. */
+  --color-iusia-intel-text: #0f798f;
+  --color-iusia-gold-text: #8b6d2a;
 
   /* Estados semánticos. Nunca depender sólo del color. */
   --color-iusia-success: #16a34a;
+  --color-iusia-success-text: #11803a; /* success a ≥4.5:1 sobre paper y success/10 */
   --color-iusia-warning: #d97706;
+  --color-iusia-warning-text: #a65b05; /* warning a ≥4.5:1 sobre paper y warning/10 */
   --color-iusia-critical: #dc2626;
   --color-iusia-info: #2563eb;
 

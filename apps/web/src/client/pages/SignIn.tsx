@@ -47,7 +47,7 @@ export function SignIn() {
       <div className="relative hidden flex-col justify-between bg-iusia-navy px-14 py-12 text-white lg:flex">
         <div>
           <p className="text-[22px] font-bold tracking-[0.2em]">IUSIA</p>
-          <p className="mt-1 text-[11px] font-medium tracking-[0.16em] text-white/45">
+          <p className="mt-1 text-[11px] font-medium tracking-[0.16em] text-white/55">
             INTELLIGENCE · LAW · ADVANTAGE
           </p>
         </div>
@@ -60,7 +60,7 @@ export function SignIn() {
             con trazabilidad auditable de cada decisión.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-[13px] text-white/40">
+        <div className="flex items-center gap-2 text-[13px] text-white/55">
           <span className="h-1.5 w-1.5 rounded-full bg-iusia-intel" />
           Go Legaltech · Confidencial
         </div>
@@ -75,7 +75,7 @@ export function SignIn() {
           <h2 className="text-[22px] font-semibold text-iusia-navy">
             {mode === "in" ? "Acceso a la plataforma" : "Registrar firma"}
           </h2>
-          <p className="mt-1 text-[14px] text-iusia-mist">
+          <p className="mt-1 text-[14px] text-iusia-mist-text">
             {mode === "in"
               ? "Continúa donde lo dejaste."
               : "Crea tu firma y su primer usuario de dirección."}

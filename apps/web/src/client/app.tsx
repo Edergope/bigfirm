@@ -15,7 +15,7 @@ export function App() {
 
   if (isPending) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-[15px] text-iusia-mist">
+      <div className="flex min-h-screen items-center justify-center text-[15px] text-iusia-mist-text">
         Cargando…
       </div>
     );

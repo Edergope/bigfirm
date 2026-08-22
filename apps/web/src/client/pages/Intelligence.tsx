@@ -60,7 +60,7 @@ export function Intelligence() {
                     <Link to={`/casos/${r.matter_id}`} className="text-[14.5px] font-medium text-iusia-carbon hover:text-iusia-action">
                       {r.title}
                     </Link>
-                    {r.rationale ? <p className="mt-0.5 text-[12.5px] text-iusia-mist line-clamp-2">{r.rationale}</p> : null}
+                    {r.rationale ? <p className="mt-0.5 text-[12.5px] text-iusia-mist-text line-clamp-2">{r.rationale}</p> : null}
                   </div>
                   <StatusChip
                     label={r.risk_level}
@@ -85,7 +85,7 @@ export function Intelligence() {
                   <Link to={`/casos/${m.matter_id}`} className="truncate text-[14.5px] text-iusia-carbon hover:text-iusia-action">
                     {m.title}
                   </Link>
-                  <time className="shrink-0 text-[12.5px] text-iusia-mist tnum">
+                  <time className="shrink-0 text-[12.5px] text-iusia-mist-text tnum">
                     {new Date(m.updated_at).toLocaleDateString("es-CO")}
                   </time>
                 </li>

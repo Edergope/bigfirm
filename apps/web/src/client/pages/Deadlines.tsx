@@ -35,7 +35,7 @@ export function Deadlines() {
                     {t.title}
                   </Link>
                   <span className="flex shrink-0 items-center gap-3">
-                    <time className="text-[12.5px] text-iusia-mist tnum">
+                    <time className="text-[12.5px] text-iusia-mist-text tnum">
                       {t.due_at ? new Date(t.due_at).toLocaleDateString("es-CO") : "—"}
                     </time>
                     <StatusChip label="Vencido" tone="critical" dot />
@@ -60,11 +60,11 @@ export function Deadlines() {
                     <Link to={`/casos/${d.matter_id}`} className="truncate text-[14.5px] text-iusia-carbon hover:text-iusia-action">
                       {d.title}
                     </Link>
-                    <time className="shrink-0 text-[12.5px] text-iusia-mist tnum">
+                    <time className="shrink-0 text-[12.5px] text-iusia-mist-text tnum">
                       {d.due_at ? new Date(d.due_at).toLocaleDateString("es-CO") : "—"}
                     </time>
                   </div>
-                  {d.rule ? <p className="mt-0.5 text-[12px] text-iusia-mist">{d.rule} · {d.source}</p> : null}
+                  {d.rule ? <p className="mt-0.5 text-[12px] text-iusia-mist-text">{d.rule} · {d.source}</p> : null}
                 </li>
               ))}
             </ul>

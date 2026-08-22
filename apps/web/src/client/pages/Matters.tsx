@@ -67,7 +67,7 @@ export function Matters() {
             onChange={(e) => setFilter(e.target.value)}
             className="h-9 max-w-sm"
           />
-          <span className="ml-auto text-[13px] text-iusia-mist tnum">
+          <span className="ml-auto text-[13px] text-iusia-mist-text tnum">
             {rows.length} expediente{rows.length === 1 ? "" : "s"}
           </span>
         </div>
@@ -88,7 +88,7 @@ export function Matters() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left">
               <thead>
-                <tr className="border-b border-iusia-mist/25 text-[12.5px] font-medium text-iusia-mist">
+                <tr className="border-b border-iusia-mist/25 text-[12.5px] font-medium text-iusia-mist-text">
                   <th className="px-5 py-2.5">Referencia</th>
                   <th className="px-5 py-2.5">Asunto</th>
                   <th className="px-5 py-2.5">Cliente</th>
@@ -99,7 +99,7 @@ export function Matters() {
               <tbody className="divide-y divide-iusia-mist/15">
                 {rows.map((m) => (
                   <tr key={m.id} className="group transition-colors hover:bg-iusia-surface">
-                    <td className="px-5 py-3 text-[13px] tabular-nums text-iusia-mist">{m.reference}</td>
+                    <td className="px-5 py-3 text-[13px] tabular-nums text-iusia-mist-text">{m.reference}</td>
                     <td className="px-5 py-3">
                       <Link
                         to={`/casos/${m.id}`}

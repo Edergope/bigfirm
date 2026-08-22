@@ -1,5 +1,6 @@
 import type { ExecutionStatus, RiskLevel } from "@iusia/domain";
 import { StatusChip } from "./primitives.js";
+import { colors } from "./tokens/index.js";
 
 /**
  * Componentes de dominio jurídico. Encapsulan las reglas del Design System para
@@ -50,7 +51,7 @@ export function RiskIndicator({
       {rationale && effective !== "UNASSESSED" ? (
         <p className="text-[13px] leading-snug text-iusia-carbon/70">{rationale}</p>
       ) : (
-        <p className="text-[13px] text-iusia-mist">
+        <p className="text-[13px] text-iusia-mist-text">
           Se mostrará cuando exista metodología registrada.
         </p>
       )}
@@ -58,18 +59,23 @@ export function RiskIndicator({
   );
 }
 
-/** Estados de ejecución con el tratamiento cromático fijado en Design System §05. */
+/**
+ * Estados de ejecución con el tratamiento cromático fijado en Design System §05.
+ * `color` se usa como texto Y como borde/dot en Strategy Room (StrategyRoom.tsx) —
+ * por eso usa las variantes "-text" (≥4.5:1 AA), que también superan el ≥3:1 no-texto.
+ * WAITING/FAILED usan el tono base porque ya cumplen ≥4.5:1 sin oscurecer.
+ */
 export const EXECUTION_STATUS_PRESENTATION: Record<
   ExecutionStatus,
   { label: string; tone: string; color: string }
 > = {
-  PENDING: { label: "En cola", tone: "neutral", color: "#A7ADB5" },
-  RUNNING: { label: "Ejecutando", tone: "intel", color: "#22C7E8" },
-  WAITING: { label: "En espera", tone: "info", color: "#2563EB" },
-  BLOCKED: { label: "Bloqueado", tone: "warning", color: "#D97706" },
-  COMPLETED: { label: "Completado", tone: "success", color: "#16A34A" },
-  FAILED: { label: "Fallido", tone: "critical", color: "#DC2626" },
-  CANCELLED: { label: "Cancelado", tone: "neutral", color: "#A7ADB5" },
+  PENDING: { label: "En cola", tone: "neutral", color: colors.mistText },
+  RUNNING: { label: "Ejecutando", tone: "intel", color: colors.intelText },
+  WAITING: { label: "En espera", tone: "info", color: colors.info },
+  BLOCKED: { label: "Bloqueado", tone: "warning", color: colors.warningText },
+  COMPLETED: { label: "Completado", tone: "success", color: colors.successText },
+  FAILED: { label: "Fallido", tone: "critical", color: colors.critical },
+  CANCELLED: { label: "Cancelado", tone: "neutral", color: colors.mistText },
 };
 
 export function ExecutionStatusChip({ status }: { status: ExecutionStatus }) {
@@ -79,7 +85,7 @@ export function ExecutionStatusChip({ status }: { status: ExecutionStatus }) {
 
 export function CreditBadge({ balance }: { balance: number }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-iusia-gold/40 bg-iusia-gold/10 px-3 py-1 text-[13px] font-medium text-[#8a6d24]">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-iusia-gold/40 bg-iusia-gold/10 px-3 py-1 text-[13px] font-medium text-iusia-gold-text">
       <span aria-hidden>◆</span>
       {balance.toLocaleString("es-CO")} créditos
     </span>

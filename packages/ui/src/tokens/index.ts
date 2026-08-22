@@ -12,16 +12,22 @@ export const colors = {
   navy: "#0B1D3A", // marca, navegación, autoridad
   carbon: "#1F2937", // texto principal
   action: "#2563EB", // CTA, foco, selección
-  intel: "#22C7E8", // IA, nodos, flujos
-  gold: "#C9A24B", // acento premium mínimo
-  mist: "#A7ADB5", // bordes, metadata
+  intel: "#22C7E8", // IA, nodos, flujos (decorativo/no-texto: iconos, bordes, dots)
+  intelText: "#0F798F", // intel a ≥4.5:1 AA sobre paper y su tinte /15 — usar cuando intel es texto
+  gold: "#C9A24B", // acento premium mínimo (decorativo/no-texto)
+  goldText: "#8B6D2A", // gold a ≥4.5:1 AA sobre paper y su tinte /10 — usar cuando gold es texto
+  mist: "#A7ADB5", // bordes decorativos, dividers, tintes de fondo (no usar como texto)
+  mistText: "#68707B", // texto mudo (metadata/hints/labels) — mist a ≥4.5:1 AA
+  mistStrong: "#89919B", // borde de control interactivo — mist a ≥3:1 (WCAG 1.4.11)
   surface: "#F7F8FA", // superficies generales
   paper: "#FFFFFF", // lectura y tarjetas
   // Estados semánticos — nunca únicos portadores de significado.
-  success: "#16A34A",
-  warning: "#D97706",
-  critical: "#DC2626",
-  info: "#2563EB",
+  success: "#16A34A", // decorativo/no-texto (dots, iconos, fondos)
+  successText: "#11803A", // success a ≥4.5:1 AA sobre paper y su tinte /10 — usar cuando success es texto
+  warning: "#D97706", // decorativo/no-texto (dots, iconos, fondos)
+  warningText: "#A65B05", // warning a ≥4.5:1 AA sobre paper y su tinte /10 — usar cuando warning es texto
+  critical: "#DC2626", // ya ≥4.5:1 AA como texto, no requiere variante
+  info: "#2563EB", // ya ≥4.5:1 AA como texto, no requiere variante
 } as const;
 
 /** Escala tipográfica. Mínimos: 14px metadata, 15–16px texto operativo (§07). */

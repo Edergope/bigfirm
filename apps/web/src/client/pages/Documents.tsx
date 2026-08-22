@@ -34,7 +34,7 @@ export function Documents() {
               label={integrations.data?.storage.status ?? "…"}
               tone={storageConnected ? "success" : "warning"}
             />
-            <p className="mt-3 text-[13.5px] text-iusia-mist">
+            <p className="mt-3 text-[13.5px] text-iusia-mist-text">
               {integrations.data?.notes.storage ??
                 "Estado de la integración de almacenamiento documental."}
             </p>
@@ -48,7 +48,7 @@ export function Documents() {
               label={integrations.data?.retrieval.status ?? "…"}
               tone={integrations.data?.retrieval.status === "CONNECTED" ? "success" : "warning"}
             />
-            <p className="mt-3 text-[13.5px] text-iusia-mist">
+            <p className="mt-3 text-[13.5px] text-iusia-mist-text">
               {integrations.data?.notes.retrieval ??
                 "El aislamiento por firma/matter se calcula en el servidor antes de consultar."}
             </p>

@@ -36,7 +36,7 @@ export function AppShell() {
       <aside className="fixed inset-y-0 left-0 flex w-[236px] flex-col border-r border-black/10 bg-iusia-navy text-white/85">
         <div className="px-6 pb-5 pt-6">
           <p className="text-[19px] font-bold tracking-[0.18em] text-white">IUSIA</p>
-          <p className="mt-1 text-[10.5px] font-medium tracking-[0.14em] text-white/45">
+          <p className="mt-1 text-[10.5px] font-medium tracking-[0.14em] text-white/55">
             INTELLIGENCE · LAW · ADVANTAGE
           </p>
         </div>
@@ -75,7 +75,7 @@ export function AppShell() {
           <p className="truncate text-[14px] font-medium text-white">
             {me.data?.user.name ?? "…"}
           </p>
-          <p className="mt-0.5 text-[12px] text-white/45">{firmRoleLabel(me.data?.firm_role)}</p>
+          <p className="mt-0.5 text-[12px] text-white/55">{firmRoleLabel(me.data?.firm_role)}</p>
           <button
             type="button"
             onClick={() => void signOut().then(() => window.location.assign("/entrar"))}
@@ -96,11 +96,11 @@ export function AppShell() {
             disabled
             aria-label="Búsqueda global (próximamente)"
             title="Búsqueda global — próximamente"
-            className="flex h-9 max-w-md flex-1 cursor-not-allowed items-center gap-2 rounded-[10px] border border-iusia-mist/40 bg-iusia-surface px-3 text-left text-iusia-mist"
+            className="flex h-9 max-w-md flex-1 cursor-not-allowed items-center gap-2 rounded-[10px] border border-iusia-mist/40 bg-iusia-surface px-3 text-left text-iusia-mist-text"
           >
             <Search size={16} aria-hidden />
             <span className="text-[14px]">Buscar expedientes, documentos…</span>
-            <span className="ml-auto rounded-full bg-iusia-mist/15 px-2 py-0.5 text-[11px] font-medium">
+            <span className="ml-auto rounded-full bg-iusia-mist/15 px-2 py-0.5 text-[13px] font-medium">
               Pronto
             </span>
           </button>

@@ -114,7 +114,7 @@ export function Home() {
                       <span className="block truncate text-[14.5px] font-medium text-iusia-carbon">
                         {m.title}
                       </span>
-                      <span className="block text-[12.5px] text-iusia-mist tnum">
+                      <span className="block text-[12.5px] text-iusia-mist-text tnum">
                         {m.reference} · {m.clientName}
                       </span>
                     </span>
@@ -152,7 +152,7 @@ export function Home() {
                 <li key={d.task_id} className="flex items-start justify-between gap-3 px-5 py-3">
                   <div className="min-w-0">
                     <p className="truncate text-[14px] text-iusia-carbon">{d.title}</p>
-                    <p className="text-[12px] text-iusia-mist tnum">
+                    <p className="text-[12px] text-iusia-mist-text tnum">
                       {d.due_at ? new Date(d.due_at).toLocaleDateString("es-CO") : "—"}
                     </p>
                   </div>

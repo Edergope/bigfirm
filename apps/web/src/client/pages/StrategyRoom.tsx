@@ -10,7 +10,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { motion, useReducedMotion } from "motion/react";
-import { Card, CardHeader, StateBlock, EXECUTION_STATUS_PRESENTATION } from "@iusia/ui";
+import { Card, CardHeader, StateBlock, EXECUTION_STATUS_PRESENTATION, colors } from "@iusia/ui";
 import type { ExecutionStatus } from "@iusia/domain";
 import { api } from "../api.js";
 
@@ -62,7 +62,7 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
               <p className="mt-1 text-[11.5px]" style={{ color: p.color }}>
                 {p.label}
               </p>
-              <p className="mt-1 text-[10.5px] text-iusia-mist">
+              <p className="mt-1 text-[10.5px] text-iusia-mist-text">
                 {exec?.model ?? "—"}
                 {exec?.creditsConsumed ? ` · ${exec.creditsConsumed} cr` : ""}
               </p>
@@ -94,7 +94,7 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
         label: e.event_type,
         animated: live && e.event_type === "work_package.sent",
         style: { stroke: "#22C7E8", strokeWidth: 1.5 },
-        labelStyle: { fontSize: 10.5, fill: "#0c7d95" },
+        labelStyle: { fontSize: 10.5, fill: colors.intelText },
         labelBgStyle: { fill: "#EAF9FC" },
         markerEnd: { type: MarkerType.ArrowClosed, color: "#22C7E8" },
       });
@@ -113,12 +113,12 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
           title="Strategy Room"
           subtitle="Cada nodo y cada pulso corresponden a un evento real"
           action={
-            <span className="flex items-center gap-2 text-[12.5px] text-iusia-mist">
+            <span className="flex items-center gap-2 text-[12.5px] text-iusia-mist-text">
               {running ? (
                 <motion.span
                   className="h-2 w-2 rounded-full bg-iusia-intel"
                   animate={reduce ? {} : { opacity: [1, 0.3, 1] }}
-                  transition={{ duration: 1.4, repeat: Infinity }}
+                  transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
                 />
               ) : null}
               {nodes.length} ejec · {edges.length} transf
@@ -152,9 +152,9 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
                 <li key={e.event_id} className="px-5 py-2.5">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="font-mono text-[11.5px] text-iusia-carbon">{e.type}</span>
-                    <span className="text-[10.5px] tabular-nums text-iusia-mist">#{e.sequence}</span>
+                    <span className="text-[10.5px] tabular-nums text-iusia-mist-text">#{e.sequence}</span>
                   </div>
-                  <p className="mt-0.5 text-[11.5px] text-iusia-mist">
+                  <p className="mt-0.5 text-[11.5px] text-iusia-mist-text">
                     {e.from_agent_id ? `${shortName(e.from_agent_id)} → ` : ""}
                     {e.to_agent_id ? shortName(e.to_agent_id) : "orquestación"}
                   </p>

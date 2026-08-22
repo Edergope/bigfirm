@@ -47,7 +47,7 @@ export function CardHeader({
     <header className="flex items-start justify-between gap-3 border-b border-iusia-mist/25 px-6 py-4">
       <div className="min-w-0">
         <h2 className="text-[15px] font-semibold text-iusia-navy">{title}</h2>
-        {subtitle ? <p className="mt-0.5 text-[13px] text-iusia-mist">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-0.5 text-[13px] text-iusia-mist-text">{subtitle}</p> : null}
       </div>
       {action}
     </header>
@@ -75,7 +75,7 @@ export function PageHeader({
           {title}
         </h1>
         {description ? (
-          <p className="mt-1 max-w-2xl text-[14px] text-iusia-mist">{description}</p>
+          <p className="mt-1 max-w-2xl text-[14px] text-iusia-mist-text">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
@@ -108,12 +108,12 @@ export function Button({
       disabled={disabled}
       onClick={onClick}
       className={clsx(
-        "inline-flex items-center justify-center gap-2 rounded-[10px] font-medium transition-colors",
-        "disabled:cursor-not-allowed disabled:opacity-45",
+        "inline-flex items-center justify-center gap-2 rounded-[10px] font-medium transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
+        "disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100",
         size === "md" ? "h-9 px-4 text-[14px]" : "h-8 px-3 text-[13px]",
         variant === "primary" && "bg-iusia-action text-white hover:bg-[#1d4fd0]",
         variant === "secondary" &&
-          "border border-iusia-mist/50 bg-iusia-paper text-iusia-carbon hover:bg-iusia-surface",
+          "border border-iusia-mist-strong bg-iusia-paper text-iusia-carbon hover:bg-iusia-surface",
         variant === "ghost" && "text-iusia-carbon hover:bg-iusia-mist/15",
         variant === "destructive" && "bg-iusia-critical text-white hover:bg-[#b91c1c]",
         className,
@@ -139,13 +139,13 @@ export function Field({
     <label className={clsx("flex flex-col gap-1.5", className)}>
       <span className="text-[13px] font-medium text-iusia-carbon">{label}</span>
       {children}
-      {hint ? <span className="text-[12px] text-iusia-mist">{hint}</span> : null}
+      {hint ? <span className="text-[12px] text-iusia-mist-text">{hint}</span> : null}
     </label>
   );
 }
 
 const CONTROL =
-  "h-10 w-full rounded-[10px] border border-iusia-mist/50 bg-iusia-paper px-3 text-[15px] text-iusia-carbon outline-none transition-colors placeholder:text-iusia-mist focus:border-iusia-action";
+  "h-10 w-full rounded-[10px] border border-iusia-mist-strong bg-iusia-paper px-3 text-[15px] text-iusia-carbon outline-none transition-colors placeholder:text-iusia-mist-text focus:border-iusia-action";
 
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={clsx(CONTROL, props.className)} />;
@@ -166,12 +166,14 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
 
 // ─────────────────────────────── Señales ───────────────────────────────
 
+// Fondo/ring usan el tono decorativo (sólo necesita ≥3:1); el texto usa la
+// variante "-text" oscurecida a ≥4.5:1 AA. info/critical ya cumplen con el tono base.
 const STATUS_TONE: Record<string, string> = {
   neutral: "bg-iusia-mist/15 text-iusia-carbon ring-iusia-mist/40",
   info: "bg-iusia-action/10 text-iusia-action ring-iusia-action/25",
-  intel: "bg-iusia-intel/15 text-[#0c7d95] ring-iusia-intel/40",
-  success: "bg-iusia-success/10 text-iusia-success ring-iusia-success/25",
-  warning: "bg-iusia-warning/10 text-iusia-warning ring-iusia-warning/25",
+  intel: "bg-iusia-intel/15 text-iusia-intel-text ring-iusia-intel/40",
+  success: "bg-iusia-success/10 text-iusia-success-text ring-iusia-success/25",
+  warning: "bg-iusia-warning/10 text-iusia-warning-text ring-iusia-warning/25",
   critical: "bg-iusia-critical/10 text-iusia-critical ring-iusia-critical/25",
 };
 
@@ -222,7 +224,7 @@ export function KpiTile({
           : "text-iusia-navy";
   return (
     <Card className="px-5 py-4">
-      <p className="text-[13px] text-iusia-mist">{label}</p>
+      <p className="text-[13px] text-iusia-mist-text">{label}</p>
       <p className={clsx("mt-1.5 text-[28px] font-semibold leading-none tnum", valueColor)}>
         {value}
       </p>
@@ -264,14 +266,14 @@ export function StateBlock({
       ? "text-iusia-critical"
       : kind === "not_configured"
         ? "text-iusia-warning"
-        : "text-iusia-mist";
+        : "text-iusia-mist-text";
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
       <span className={clsx("text-2xl leading-none", tone)} aria-hidden>
         {icon}
       </span>
       <p className="text-[15px] font-medium text-iusia-carbon">{title}</p>
-      {hint ? <p className="max-w-md text-[13.5px] text-iusia-mist">{hint}</p> : null}
+      {hint ? <p className="max-w-md text-[13.5px] text-iusia-mist-text">{hint}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
@@ -347,7 +349,7 @@ export function Drawer({
                 type="button"
                 onClick={onClose}
                 aria-label="Cerrar"
-                className="rounded-md px-2 py-1 text-iusia-mist hover:bg-iusia-surface hover:text-iusia-carbon"
+                className="rounded-md px-2 py-1 text-iusia-mist-text hover:bg-iusia-surface hover:text-iusia-carbon"
               >
                 ✕
               </button>
