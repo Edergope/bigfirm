@@ -5,6 +5,7 @@ import {
   type NotificationProvider,
   type NotificationRequest,
 } from "@iusia/domain";
+import { NotificationRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
 import { ResendNotificationProvider } from "../integrations/notifications.js";
 
@@ -17,7 +18,11 @@ import { ResendNotificationProvider } from "../integrations/notifications.js";
  * viajan en el contrato y como tags de correlación (aislamiento operativo).
  */
 export class NotificationService {
-  constructor(private readonly provider: NotificationProvider) {}
+  constructor(
+    private readonly provider: NotificationProvider,
+    /** Ledger de trazabilidad. Opcional para permitir tests sin DB. */
+    private readonly ledger?: NotificationRepository,
+  ) {}
 
   static forEnv(env: Env): NotificationService {
     return new NotificationService(
@@ -25,6 +30,7 @@ export class NotificationService {
         apiKey: env.RESEND_API_KEY ?? null,
         from: env.RESEND_FROM ?? "IUSIA <notificaciones@iusia.legal>",
       }),
+      new NotificationRepository(createDb(env.DB)),
     );
   }
 
@@ -50,6 +56,25 @@ export class NotificationService {
       provider: this.provider.id,
     };
 
+    // El ledger es la fuente de trazabilidad: se registra PENDING antes de intentar
+    // el envío, de modo que toda notificación queda registrada aunque el proveedor
+    // esté NOT_CONFIGURED o falle. Un fallo del ledger no revierte el envío.
+    if (this.ledger) {
+      await this.ledger.recordPending({
+        id: base.notification_id,
+        organizationId: base.firm_id,
+        matterId: base.matter_id,
+        executionId: base.execution_id,
+        recipient: base.recipient,
+        channel: base.channel,
+        event: base.event,
+        subject: base.subject,
+        provider: base.provider,
+        correlationId: base.correlation_id,
+        detail: payload,
+      });
+    }
+
     const result = await this.provider.send({
       to: request.recipient,
       subject,
@@ -61,6 +86,13 @@ export class NotificationService {
         event: request.event,
       },
     });
+
+    if (this.ledger) {
+      await this.ledger.markResult(base.firm_id, base.notification_id, result.status, {
+        providerMessageId: result.provider_message_id ?? null,
+        error: result.error ?? null,
+      });
+    }
 
     return {
       ...base,

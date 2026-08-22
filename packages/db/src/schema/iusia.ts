@@ -362,3 +362,39 @@ export const creditTransactions = sqliteTable(
     index("credit_transactions_org_idx").on(t.organizationId, t.createdAt),
   ],
 );
+
+// ─────────────────────────── Notification Ledger ───────────────────────────
+
+/**
+ * Ledger persistente de notificaciones. Fuente de trazabilidad de todo envío,
+ * incluso cuando el proveedor está NOT_CONFIGURED o falla. Nunca almacena
+ * secretos ni el contenido jurídico completo — sólo metadata suficiente.
+ */
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    organizationId: orgId(),
+    matterId: text("matter_id"),
+    executionId: text("execution_id"),
+    recipient: text("recipient").notNull(),
+    channel: text("channel").notNull().default("EMAIL"),
+    event: text("event").notNull(),
+    subject: text("subject"),
+    provider: text("provider").notNull(),
+    providerMessageId: text("provider_message_id"),
+    /** PENDING | SENT | NOT_CONFIGURED | FAILED */
+    status: text("status").notNull().default("PENDING"),
+    normalizedError: text("normalized_error"),
+    correlationId: text("correlation_id"),
+    /** Metadata operativa no sensible (referencias, conteos). */
+    detail: text("detail", { mode: "json" }).$type<Record<string, unknown>>(),
+    createdAt: text("created_at").notNull(),
+    attemptedAt: text("attempted_at"),
+    sentAt: text("sent_at"),
+  },
+  (t) => [
+    index("notifications_org_created_idx").on(t.organizationId, t.createdAt),
+    index("notifications_matter_idx").on(t.matterId),
+  ],
+);

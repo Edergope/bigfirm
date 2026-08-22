@@ -7,3 +7,4 @@ export * from "./repositories/agents.js";
 export * from "./repositories/documents.js";
 export * from "./repositories/ledgers.js";
 export * from "./repositories/tasks.js";
+export * from "./repositories/notifications.js";

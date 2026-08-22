@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -14,6 +14,7 @@ import {
   ExecutionRepository,
   FactRepository,
   MatterRepository,
+  NotificationRepository,
   TaskRepository,
 } from "@iusia/db";
 import { AuthorizationService } from "../services/authorization.js";
@@ -25,7 +26,7 @@ import { AuthorizationService } from "../services/authorization.js";
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATION = join(here, "../../../migrations/0000_iusia_initial.sql");
+const MIGRATIONS_DIR = join(here, "../../../migrations");
 
 export interface TestDb {
   db: IusiaDb;
@@ -38,6 +39,7 @@ export interface TestDb {
   credits: CreditRepository;
   audit: AuditRepository;
   tasks: TaskRepository;
+  notifications: NotificationRepository;
   authz: AuthorizationService;
   raw: Database.Database;
 }
@@ -46,11 +48,16 @@ export function createTestDb(): TestDb {
   const raw = new Database(":memory:");
   raw.pragma("foreign_keys = ON");
 
-  // Drizzle-kit separa sentencias con este marcador.
-  const sql = readFileSync(MIGRATION, "utf8");
-  for (const stmt of sql.split("--> statement-breakpoint")) {
-    const trimmed = stmt.trim();
-    if (trimmed) raw.exec(trimmed);
+  // Aplica TODAS las migraciones en orden (0000, 0001, …) — el mismo schema de prod.
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  for (const file of files) {
+    const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
+    for (const stmt of sql.split("--> statement-breakpoint")) {
+      const trimmed = stmt.trim();
+      if (trimmed) raw.exec(trimmed);
+    }
   }
 
   const db = drizzle(raw, { schema }) as unknown as IusiaDb;
@@ -80,6 +87,7 @@ export function createTestDb(): TestDb {
     authorities: new AuthorityRepository(db),
     credits: new CreditRepository(db),
     tasks: new TaskRepository(db),
+    notifications: new NotificationRepository(db),
     authz: new AuthorizationService(db, matters, audit),
   };
 }
