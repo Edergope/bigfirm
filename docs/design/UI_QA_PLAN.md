@@ -19,3 +19,26 @@ Hallazgos de juicio (Taste/Impeccable/Emil), priorizados:
 
 **Correcciones aplicadas:** #1, #2, #3 (justificadas y compatibles con el DS). #4/#5 diferidas
 por restraint del Design System (no sobre-diseñar; desktop-first es la prioridad declarada).
+
+## Round-trip Figma (`mvp-design-v0.4`)
+
+Conectado via figma-cli **Safe Mode** (plugin FigCli, sin parchear Figma Desktop) al archivo
+"IUSIA — MVP Design System". Estado sincronizado, 1:1 con `packages/ui` y `docs/design/iusia.tokens.json`:
+
+- **Colección de variables `IUSIA`** — 35 variables reales (color/font/space/radius/shadow/layout),
+  creadas con `var create-batch` porque `figma-cli tokens import` tiene un bug de compatibilidad
+  con el formato DTCG (`$value`/`$type`) de nuestro `iusia.tokens.json` — genera variables basura
+  (`color/navy/$value`, etc.) en vez de fallar. Reportado en `docs/design/UI_QA_PLAN.md`, no
+  reportado upstream (fuera de alcance). Workaround: variables creadas directo vía `var create-batch`
+  con nombres/tipos ya resueltos desde el JSON.
+- **Componentes base** (Component Sets con ejes reales): `Button` (variant×size, 8), `StatusChip`
+  (tone, 6). Componentes simples: `Input`, `Select`, `Textarea`, `Card`, `KpiTile`.
+- **Vistas MVP** (frames 1440px, Auto Layout, variables reales): `App Shell`, `Home`, `Matters`,
+  `Matter Workspace`, `Strategy Room`.
+- **a11y audit** (`figma-cli a11y audit`) marca contraste <4.5:1 en texto `iusia-mist` y tamaños
+  <12px (tagline sidebar 10.5px, badge "Pronto" 11px). Verificado contra el código: coincide
+  exactamente con `AppShell.tsx` (líneas 39, 103) — no es drift de Figma, es una característica
+  preexistente del Design System ya certificado en `mvp-design-v0.3`. No se corrigió en Figma
+  (habría creado drift respecto a React); queda como deuda de accesibilidad a nivel de sistema,
+  pendiente de decisión conjunta código+tokens.
+- Sin drift real encontrado entre Figma y React más allá de lo anterior.
