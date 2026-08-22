@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ReactFlow,
   Background,
@@ -102,6 +102,13 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
     return { nodes: flowNodes, edges: [...edgeMap.values()] };
   }, [query.data]);
 
+  const queryClient = useQueryClient();
+  const cancel = useMutation({
+    mutationFn: () => api.cancelExecution(rootExecutionId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["execution-events", rootExecutionId] }),
+  });
+
   const events = query.data?.events ?? [];
   const rootExec = query.data?.executions.find((e) => e.id === rootExecutionId);
   const running = rootExec && !["COMPLETED", "FAILED", "CANCELLED"].includes(rootExec.status);
@@ -113,7 +120,7 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
           title="Strategy Room"
           subtitle="Cada nodo y cada pulso corresponden a un evento real"
           action={
-            <span className="flex items-center gap-2 text-[12.5px] text-iusia-mist-text">
+            <span className="flex items-center gap-3 text-[12.5px] text-iusia-mist-text">
               {running ? (
                 <motion.span
                   className="h-2 w-2 rounded-full bg-iusia-intel"
@@ -122,6 +129,16 @@ export function StrategyRoom({ rootExecutionId }: { rootExecutionId: string }) {
                 />
               ) : null}
               {nodes.length} ejec · {edges.length} transf
+              {running ? (
+                <button
+                  type="button"
+                  onClick={() => cancel.mutate()}
+                  disabled={cancel.isPending}
+                  className="text-[13px] font-medium text-iusia-critical hover:underline disabled:opacity-50"
+                >
+                  {cancel.isPending ? "Cancelando…" : "Cancelar"}
+                </button>
+              ) : null}
             </span>
           }
         />

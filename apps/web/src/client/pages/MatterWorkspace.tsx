@@ -337,12 +337,18 @@ function Tareas({ matterId }: { matterId: string }) {
   const tasks = useQuery({ queryKey: ["tasks", matterId], queryFn: () => api.listTasks(matterId) });
   const [title, setTitle] = useState("");
 
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["tasks", matterId] });
   const create = useMutation({
     mutationFn: () => api.createTask(matterId, { title }),
     onSuccess: () => {
       setTitle("");
-      void queryClient.invalidateQueries({ queryKey: ["tasks", matterId] });
+      void invalidate();
     },
+  });
+  const setStatus = useMutation({
+    mutationFn: (v: { id: string; status: "COMPLETADA" | "PENDIENTE" }) =>
+      api.setTaskStatus(matterId, v.id, v.status),
+    onSuccess: () => void invalidate(),
   });
 
   return (
@@ -384,10 +390,27 @@ function Tareas({ matterId }: { matterId: string }) {
                     {new Date(t.dueAt).toLocaleDateString("es-CO")}
                   </time>
                 ) : null}
-                <StatusChip
-                  label={t.kind === "PROCEDURAL_DEADLINE" ? "Término" : "Tarea"}
-                  tone={t.kind === "PROCEDURAL_DEADLINE" ? "warning" : "neutral"}
-                />
+                {t.status === "COMPLETADA" ? (
+                  <StatusChip label="Completada" tone="success" />
+                ) : (
+                  <StatusChip
+                    label={t.kind === "PROCEDURAL_DEADLINE" ? "Término" : "Tarea"}
+                    tone={t.kind === "PROCEDURAL_DEADLINE" ? "warning" : "neutral"}
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStatus.mutate({
+                      id: t.id,
+                      status: t.status === "COMPLETADA" ? "PENDIENTE" : "COMPLETADA",
+                    })
+                  }
+                  disabled={setStatus.isPending}
+                  className="text-[13px] text-iusia-action hover:underline disabled:opacity-50"
+                >
+                  {t.status === "COMPLETADA" ? "Reabrir" : "Completar"}
+                </button>
               </span>
             </li>
           ))}

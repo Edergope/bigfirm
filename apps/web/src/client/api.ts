@@ -209,6 +209,21 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
+  setTaskStatus: (
+    matterId: string,
+    taskId: string,
+    status: "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "CANCELADA",
+  ) =>
+    request<{ ok: boolean }>(`/api/matters/${matterId}/tasks/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
+  cancelExecution: (rootExecutionId: string) =>
+    request<{ ok: boolean; status: string }>(`/api/executions/${rootExecutionId}/cancel`, {
+      method: "POST",
+    }),
+
   integrationsStatus: () =>
     request<{
       storage: { id: string; status: string };

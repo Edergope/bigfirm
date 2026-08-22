@@ -92,6 +92,44 @@ practiceRoutes.post("/matters/:matterId/tasks", async (c) => {
   return c.json({ task_id: taskId }, 201);
 });
 
+const TASK_STATUSES = ["PENDIENTE", "EN_CURSO", "COMPLETADA", "CANCELADA"] as const;
+const UpdateTaskInput = z.object({ status: z.enum(TASK_STATUSES) });
+
+/** Actualiza el estado de una tarea/término (lifecycle CRUD). */
+practiceRoutes.patch("/matters/:matterId/tasks/:taskId", async (c) => {
+  const ctx = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const taskId = c.req.param("taskId");
+  await ctx.authz.authorizeMatter(organizationId, userId, matterId, "task:write");
+
+  const parsed = UpdateTaskInput.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw new IusiaError("VALIDATION_FAILED", "Estado de tarea inválido", {
+      allowed: TASK_STATUSES,
+    });
+  }
+
+  const task = await ctx.tasks.findById(organizationId, taskId);
+  if (!task || task.matterId !== matterId) {
+    throw new IusiaError("NOT_FOUND", "Tarea no encontrada");
+  }
+
+  await ctx.tasks.setStatus(organizationId, taskId, parsed.data.status);
+  await ctx.audit.record({
+    organizationId,
+    matterId,
+    actorUserId: userId,
+    action: "task.status.set",
+    resourceType: "task",
+    resourceId: taskId,
+    outcome: "SUCCESS",
+    detail: { from: task.status, to: parsed.data.status },
+  });
+
+  return c.json({ ok: true });
+});
+
 /** Cálculo de término sin crear tarea (preview). */
 practiceRoutes.post("/deadlines/calculate", async (c) => {
   const parsed = DeadlineCalculationInput.safeParse(await c.req.json());

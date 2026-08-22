@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { IusiaError, projectStrategyGraph } from "@iusia/domain";
+import { IusiaError, TERMINAL_STATUSES, projectStrategyGraph } from "@iusia/domain";
 import type { Materiality } from "@iusia/domain";
 import { listAgentDefinitions } from "@iusia/agents";
 import { WAVE_GATE, buildRoutingPlan, type Wave } from "@iusia/orchestration";
@@ -157,6 +157,63 @@ orchestrationRoutes.post("/executions/:rootExecutionId/gates", async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+/**
+ * Cancela una orquestación en curso: termina el Workflow durable y marca la
+ * ejecución raíz como CANCELLED en el ledger, con evento y auditoría.
+ */
+orchestrationRoutes.post("/executions/:rootExecutionId/cancel", async (c) => {
+  const { authz, executions, events, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const rootExecutionId = c.req.param("rootExecutionId");
+
+  const root = await executions.findById(rootExecutionId);
+  if (!root || root.organizationId !== organizationId) {
+    throw new IusiaError("NOT_FOUND", "Ejecución no encontrada");
+  }
+  await authz.authorizeMatter(organizationId, userId, root.matterId, "execution:cancel");
+
+  if (TERMINAL_STATUSES.includes(root.status as (typeof TERMINAL_STATUSES)[number])) {
+    throw new IusiaError("CONFLICT", "La ejecución ya finalizó y no puede cancelarse", {
+      status: root.status,
+    });
+  }
+
+  // Termina el motor durable si existe; su ausencia no impide cancelar el ledger.
+  if (root.workflowInstanceId) {
+    try {
+      const instance = await c.env.MATTER_ORCHESTRATION.get(root.workflowInstanceId);
+      await instance.terminate();
+    } catch {
+      // El workflow puede haber terminado por su cuenta; se cancela igual el ledger.
+    }
+  }
+
+  await executions.transition(rootExecutionId, "CANCELLED", {
+    errorCode: "CANCELLED_BY_USER",
+    errorMessage: `Cancelada por ${userId}`,
+  });
+  await events.append({
+    organizationId,
+    matterId: root.matterId,
+    rootExecutionId,
+    executionId: rootExecutionId,
+    type: "agent.cancelled",
+    status: "CANCELLED",
+    detail: { cancelled_by: userId },
+  });
+  await audit.record({
+    organizationId,
+    matterId: root.matterId,
+    actorUserId: userId,
+    action: "execution.cancel",
+    resourceType: "execution",
+    resourceId: rootExecutionId,
+    outcome: "SUCCESS",
+  });
+
+  return c.json({ ok: true, status: "CANCELLED" });
 });
 
 /**
