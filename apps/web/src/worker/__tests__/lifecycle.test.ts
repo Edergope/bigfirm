@@ -46,6 +46,53 @@ describe("ciclo de vida de tareas", () => {
   });
 });
 
+describe("ciclo de revisión documental", () => {
+  let t: TestDb;
+  let org: string, user: string, matter: string;
+
+  beforeEach(async () => {
+    t = createTestDb();
+    const seed = await seedFirm(t, { orgName: "Firma D", directorEmail: "d@d.test" });
+    org = seed.organizationId;
+    user = seed.directorUserId;
+    matter = await t.matters.create(
+      org,
+      user,
+      { title: "Caso D", client_name: "C", materiality: "MATERIAL", practice_areas: ["CIVIL"], jurisdiction: "Colombia" },
+      "IUS-D-001",
+    );
+  });
+
+  it("un documento transita PENDIENTE → EN_REVISION → APROBADO y persiste", async () => {
+    const id = await t.documents.link({
+      organizationId: org,
+      matterId: matter,
+      driveFileId: "drive_doc_1",
+      name: "Contrato.pdf",
+      mimeType: "application/pdf",
+      linkedBy: user,
+    });
+    await t.documents.setStatus(org, id, "EN_REVISION");
+    await t.documents.setStatus(org, id, "APROBADO");
+    const doc = await t.documents.findById(org, id);
+    expect(doc?.status).toBe("APROBADO");
+  });
+
+  it("el estado documental está aislado por organización", async () => {
+    const id = await t.documents.link({
+      organizationId: org,
+      matterId: matter,
+      driveFileId: "drive_doc_2",
+      name: "Anexo.pdf",
+      mimeType: "application/pdf",
+      linkedBy: user,
+    });
+    // Otra organización no encuentra el documento por id directo.
+    expect(await t.documents.findById("org_ajena", id)).toBeNull();
+    expect(await t.documents.findById(org, id)).not.toBeNull();
+  });
+});
+
 describe("semántica de cancelación de ejecución", () => {
   let t: TestDb;
   let org: string, user: string, matter: string;

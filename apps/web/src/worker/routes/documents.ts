@@ -58,6 +58,52 @@ documentsRoutes.post("/matters/:matterId/documents/:documentId/reindex", async (
   return c.json({ ok: true, status: "ENQUEUED" }, 202);
 });
 
+const DOCUMENT_STATUSES = [
+  "PENDIENTE",
+  "EN_REVISION",
+  "REVISADO",
+  "CRITICO",
+  "APROBADO",
+  "SUSTITUIDO",
+] as const;
+const SetDocStatusInput = z.object({ status: z.enum(DOCUMENT_STATUSES) });
+
+/** Ciclo de revisión de un documento (Design System §06: estados del expediente). */
+documentsRoutes.patch("/matters/:matterId/documents/:documentId", async (c) => {
+  const { documents, authz, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const documentId = c.req.param("documentId");
+
+  await authz.authorizeMatter(organizationId, userId, matterId, "document:link");
+
+  const parsed = SetDocStatusInput.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw new IusiaError("VALIDATION_FAILED", "Estado de documento inválido", {
+      allowed: DOCUMENT_STATUSES,
+    });
+  }
+
+  const doc = await documents.findById(organizationId, documentId);
+  if (!doc || doc.matterId !== matterId) {
+    throw new IusiaError("NOT_FOUND", "Documento no encontrado");
+  }
+
+  await documents.setStatus(organizationId, documentId, parsed.data.status);
+  await audit.record({
+    organizationId,
+    matterId,
+    actorUserId: userId,
+    action: "document.status.set",
+    resourceType: "document",
+    resourceId: documentId,
+    outcome: "SUCCESS",
+    detail: { from: doc.status, to: parsed.data.status },
+  });
+
+  return c.json({ ok: true });
+});
+
 const RetrievalInput = z.object({
   query: z.string().min(3).max(1000),
   max_results: z.number().int().min(1).max(20).optional(),
