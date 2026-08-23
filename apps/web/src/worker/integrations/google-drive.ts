@@ -60,7 +60,9 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
     private readonly credentials: GoogleDriveCredentials | null,
     fetchImpl?: typeof fetch,
   ) {
-    this.fetchImpl = fetchImpl ?? fetch;
+    // `fetch` global de Workers exige `this = globalThis`; el wrapper preserva el
+    // binding para evitar "Illegal invocation" al llamarlo como propiedad de instancia.
+    this.fetchImpl = fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   status(): IntegrationState {

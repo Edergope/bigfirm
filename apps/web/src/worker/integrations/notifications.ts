@@ -20,7 +20,9 @@ export class ResendNotificationProvider implements NotificationProvider {
   private readonly timeoutMs: number;
 
   constructor(private readonly cfg: ResendConfig) {
-    this.fetchImpl = cfg.fetchImpl ?? fetch;
+    // `fetch` global de Workers exige `this = globalThis`; el wrapper preserva el
+    // binding para evitar "Illegal invocation" al llamarlo como propiedad de instancia.
+    this.fetchImpl = cfg.fetchImpl ?? ((input, init) => fetch(input, init));
     this.timeoutMs = cfg.timeoutMs ?? 15_000;
   }
 

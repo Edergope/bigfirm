@@ -200,6 +200,29 @@ describe("compatibilidad del parámetro de límite de salida (CODE_GAP MODEL_PAR
     expect(outputTokenParam(provider, model, 16000)).toEqual({ max_tokens: 16000 });
   });
 
+  it("usa el fetch global con binding correcto cuando no se inyecta (no Illegal invocation)", async () => {
+    // Regresión del CODE_GAP WORKERS_FETCH_THIS_BINDING. Reproduce la guardia de
+    // workerd: el fetch nativo lanza "Illegal invocation" si se invoca con un `this`
+    // que no es el objeto global. Si el gateway guardara el fetch como propiedad y lo
+    // llamara como `this.fetchImpl(...)`, `this` sería la instancia → lanzaría. El
+    // wrapper por defecto invoca `fetch(...)` a secas y preserva el binding global.
+    const nativeFetch = globalThis.fetch;
+    globalThis.fetch = function (this: unknown): Promise<Response> {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(okResponse("ok"));
+    } as unknown as typeof fetch;
+    try {
+      // Sin deps.fetch → usa el wrapper por defecto sobre el fetch global.
+      const gw = new ModelGateway(env(), { maxAttemptsPerCandidate: 1, backoffBaseMs: 1 });
+      const r = await gw.complete(POLICY, MESSAGES, CTX);
+      expect(r.text).toBe("ok");
+    } finally {
+      globalThis.fetch = nativeFetch;
+    }
+  });
+
   it("nunca emite max_tokens y max_completion_tokens a la vez", () => {
     const cases: Array<[string, string]> = [
       ["openai", "gpt-5"],

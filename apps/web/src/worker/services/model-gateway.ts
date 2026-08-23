@@ -89,7 +89,10 @@ export class ModelGateway {
     private readonly env: Env,
     deps: ModelGatewayDeps = {},
   ) {
-    this.fetchImpl = deps.fetch ?? fetch;
+    // `fetch` global de Workers exige `this = globalThis`; almacenarlo como propiedad
+    // y llamarlo como `this.fetchImpl(...)` provoca "Illegal invocation". El wrapper
+    // preserva el binding global (y sigue siendo inyectable en tests).
+    this.fetchImpl = deps.fetch ?? ((input, init) => fetch(input, init));
     this.sleep = deps.sleep ?? DEFAULT_SLEEP;
     this.maxAttempts = Math.max(1, deps.maxAttemptsPerCandidate ?? 3);
     this.backoffBaseMs = deps.backoffBaseMs ?? 250;
