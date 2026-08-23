@@ -195,7 +195,8 @@ export class ModelGateway {
           model: `${candidate.provider}/${candidate.model}`,
           messages,
           temperature: policy.temperature,
-          max_tokens: policy.max_output_tokens,
+          // Compatibilidad de parámetro por familia de modelo (nunca ambos a la vez).
+          ...outputTokenParam(candidate.provider, candidate.model, policy.max_output_tokens),
         }),
         signal: controller.signal,
       });
@@ -243,6 +244,34 @@ export class ModelGateway {
 
 function errMsg(error: unknown): string {
   return error instanceof Error ? error.message : "error desconocido";
+}
+
+/**
+ * Los modelos de razonamiento de OpenAI (familias gpt-5 y o1/o3/o4/oN) rechazan
+ * `max_tokens` con HTTP 400 `unsupported_parameter` y exigen `max_completion_tokens`.
+ * El endpoint `/compat` del AI Gateway NO traduce el parámetro: lo reenvía tal cual.
+ * El resto de modelos conserva el contrato tradicional `max_tokens`.
+ *
+ * Verificado live contra `/compat` (2026-08): con `max_tokens` responde 400; con
+ * `max_completion_tokens` responde 200.
+ */
+export function requiresMaxCompletionTokens(provider: string, model: string): boolean {
+  if (provider !== "openai") return false;
+  return /^(gpt-5|o[1-9])/.test(model);
+}
+
+/**
+ * Devuelve EXACTAMENTE una clave de límite de salida según la familia del modelo.
+ * Por construcción nunca emite `max_tokens` y `max_completion_tokens` a la vez.
+ */
+export function outputTokenParam(
+  provider: string,
+  model: string,
+  maxOutputTokens: number,
+): { max_tokens: number } | { max_completion_tokens: number } {
+  return requiresMaxCompletionTokens(provider, model)
+    ? { max_completion_tokens: maxOutputTokens }
+    : { max_tokens: maxOutputTokens };
 }
 
 /**

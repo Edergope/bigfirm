@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isIusiaError } from "@iusia/domain";
 import type { ModelPolicy } from "@iusia/agents";
-import { ModelGateway, type ModelGatewayDeps } from "../services/model-gateway.js";
+import {
+  ModelGateway,
+  outputTokenParam,
+  requiresMaxCompletionTokens,
+  type ModelGatewayDeps,
+} from "../services/model-gateway.js";
 import type { Env } from "../env.js";
 
 /**
@@ -155,5 +160,80 @@ describe("ModelGateway hardening", () => {
     // empty no es retryable: 1 intento por candidato = 2 llamadas, sin backoff
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(deps.slept.length).toBe(0);
+  });
+});
+
+/** Extrae y parsea el body JSON del enésimo fetch capturado. */
+function bodyOfCall(
+  fetchImpl: ReturnType<typeof vi.fn>,
+  index: number,
+): Record<string, unknown> {
+  const call = fetchImpl.mock.calls[index];
+  if (!call) throw new Error(`no hubo llamada fetch en índice ${index}`);
+  return JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>;
+}
+
+describe("compatibilidad del parámetro de límite de salida (CODE_GAP MODEL_PARAMETER_COMPATIBILITY)", () => {
+  // Familia de razonamiento de OpenAI → max_completion_tokens.
+  it.each([
+    ["openai", "gpt-5"],
+    ["openai", "gpt-5-mini"],
+    ["openai", "gpt-5-nano"],
+    ["openai", "o1"],
+    ["openai", "o3-mini"],
+    ["openai", "o4-mini"],
+  ])("%s/%s exige max_completion_tokens", (provider, model) => {
+    expect(requiresMaxCompletionTokens(provider, model)).toBe(true);
+    expect(outputTokenParam(provider, model, 16000)).toEqual({ max_completion_tokens: 16000 });
+  });
+
+  // Contrato tradicional → max_tokens.
+  it.each([
+    ["openai", "gpt-4.1"],
+    ["openai", "gpt-4o"],
+    ["google", "gemini-2.5-pro"],
+    ["anthropic", "claude-sonnet-4"],
+  ])("%s/%s conserva max_tokens", (provider, model) => {
+    expect(requiresMaxCompletionTokens(provider, model)).toBe(false);
+    expect(outputTokenParam(provider, model, 16000)).toEqual({ max_tokens: 16000 });
+  });
+
+  it("nunca emite max_tokens y max_completion_tokens a la vez", () => {
+    const cases: Array<[string, string]> = [
+      ["openai", "gpt-5"],
+      ["openai", "o3"],
+      ["openai", "gpt-4.1"],
+      ["google", "gemini-2.5-pro"],
+    ];
+    for (const [p, m] of cases) {
+      const param = outputTokenParam(p, m, 100) as Record<string, number>;
+      expect(Object.keys(param)).toHaveLength(1);
+      const hasBoth = "max_tokens" in param && "max_completion_tokens" in param;
+      expect(hasBoth).toBe(false);
+    }
+  });
+
+  it("callOnce envía max_completion_tokens en el body para openai/gpt-5 (no max_tokens)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse("ok"));
+    const gw = new ModelGateway(env(), fakeDeps(fetchImpl as unknown as typeof fetch));
+    await gw.complete(POLICY, MESSAGES, CTX); // POLICY.preferred = openai/gpt-5
+    const body = bodyOfCall(fetchImpl, 0);
+    expect(body.model).toBe("openai/gpt-5");
+    expect(body.max_completion_tokens).toBe(POLICY.max_output_tokens);
+    expect("max_tokens" in body).toBe(false);
+  });
+
+  it("callOnce envía max_tokens en el body para el fallback google/gemini-2.5-pro", async () => {
+    // preferred (openai/gpt-5) devuelve 400 no-reintentable → conmuta al fallback gemini.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(statusResponse(400))
+      .mockResolvedValueOnce(okResponse("ok"));
+    const gw = new ModelGateway(env(), fakeDeps(fetchImpl as unknown as typeof fetch));
+    await gw.complete(POLICY, MESSAGES, CTX);
+    const body = bodyOfCall(fetchImpl, 1);
+    expect(body.model).toBe("google/gemini-2.5-pro");
+    expect(body.max_tokens).toBe(POLICY.max_output_tokens);
+    expect("max_completion_tokens" in body).toBe(false);
   });
 });
