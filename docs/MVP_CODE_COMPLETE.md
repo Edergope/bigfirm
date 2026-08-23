@@ -1,8 +1,13 @@
 # IUSIA — MVP CODE COMPLETE
 
-**Estado:** `MVP_CODE_COMPLETE — EXTERNAL_INTEGRATIONS_REQUIRED`
+**Estado:** `LLM_LAYER_LIVE_VALIDATED — NOT_PRODUCTION_READY`
 **Agentes:** `AGENT_PROMPT_SYSTEM_READY — 30/30`
 **Fecha:** 2026-08-22 · **Tag:** `mvp-code-complete-v0.4`
+
+> `LLM_LAYER_LIVE_VALIDATED` ≠ `MVP_PRODUCTION_READY`: la capa LLM (AI Gateway →
+> BYOK OpenAI → DAG real) quedó validada live end-to-end, pero siguen pendientes
+> las demás integraciones externas (Gemini, Drive OAuth, AI Search, Resend live,
+> recursos Cloudflare de staging) y el hardening de producción.
 
 ## Verificación
 - `typecheck` · `lint` · **116 tests** · `build` — verdes.
