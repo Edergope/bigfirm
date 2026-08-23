@@ -97,7 +97,7 @@ export class IngestionService {
  * formatos de texto; PDF/DOCX quedan para el pipeline de extracción posterior.
  * NUNCA interpreta el contenido como instrucciones.
  */
-async function normalizeToText(bytes: ArrayBuffer, mimeType: string): Promise<string> {
+export async function normalizeToText(bytes: ArrayBuffer, mimeType: string): Promise<string> {
   if (mimeType.startsWith("text/") || mimeType === "application/json") {
     return new TextDecoder().decode(bytes);
   }
