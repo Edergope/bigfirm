@@ -91,6 +91,43 @@ describe("ciclo de revisión documental", () => {
     expect(await t.documents.findById("org_ajena", id)).toBeNull();
     expect(await t.documents.findById(org, id)).not.toBeNull();
   });
+
+  it("re-link del mismo (matter, driveFileId) es idempotente: mismo id, sin duplicar", async () => {
+    const first = await t.documents.link({
+      organizationId: org,
+      matterId: matter,
+      driveFileId: "drive_dup_1",
+      name: "Fixture.txt",
+      mimeType: "text/plain",
+      linkedBy: user,
+    });
+    const second = await t.documents.link({
+      organizationId: org,
+      matterId: matter,
+      driveFileId: "drive_dup_1",
+      name: "Fixture-otra-vez.txt", // metadata distinta: no debe crear otro documento
+      mimeType: "text/plain",
+      linkedBy: user,
+    });
+    // Devuelve el id EXISTENTE (nunca un id fantasma no persistido).
+    expect(second).toBe(first);
+    expect(await t.documents.findById(org, second)).not.toBeNull();
+    // Sólo hay un documento lógico para esa clave.
+    const rows = await t.documents.listForMatter(org, matter);
+    expect(rows.filter((r) => r.driveFileId === "drive_dup_1")).toHaveLength(1);
+  });
+
+  it("distinto driveFileId sí crea documentos distintos", async () => {
+    const a = await t.documents.link({
+      organizationId: org, matterId: matter, driveFileId: "drive_a",
+      name: "A.txt", mimeType: "text/plain", linkedBy: user,
+    });
+    const b = await t.documents.link({
+      organizationId: org, matterId: matter, driveFileId: "drive_b",
+      name: "B.txt", mimeType: "text/plain", linkedBy: user,
+    });
+    expect(a).not.toBe(b);
+  });
 });
 
 describe("semántica de cancelación de ejecución", () => {

@@ -22,7 +22,11 @@ export class DocumentRepository {
   }): Promise<string> {
     const id = newId("document");
     const now = new Date().toISOString();
-    await this.db
+    // Idempotente por (matterId, driveFileId): un re-link del MISMO archivo no crea un
+    // segundo documento lógico. `returning()` distingue inserción real de conflicto;
+    // en conflicto se devuelve el id del documento YA existente (nunca un id fantasma
+    // no persistido, que dejaría al caller apuntando a una fila inexistente).
+    const inserted = await this.db
       .insert(documents)
       .values({
         id,
@@ -41,8 +45,24 @@ export class DocumentRepository {
         createdAt: now,
         updatedAt: now,
       })
-      .onConflictDoNothing();
-    return id;
+      .onConflictDoNothing()
+      .returning({ id: documents.id });
+
+    if (inserted[0]) return inserted[0].id;
+
+    // Conflicto de unicidad: recupera el documento existente para esa clave.
+    const [existing] = await this.db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.matterId, input.matterId),
+          eq(documents.driveFileId, input.driveFileId),
+        ),
+      )
+      .limit(1);
+    if (!existing) throw new Error("link: conflicto sin documento existente resoluble");
+    return existing.id;
   }
 
   async listForMatter(organizationId: string, matterId: string) {
