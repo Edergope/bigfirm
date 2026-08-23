@@ -8,9 +8,7 @@ interface __BaseEnv_Env {
 	USAGE_ANALYTICS: AnalyticsEngineDataset;
 	DOCUMENT_INGESTION: Queue;
 	ASSETS: Fetcher;
-	IUSIA_ENV: "development";
 	AI_GATEWAY_NAME: "iusia";
-	APP_URL: "http://localhost:5173";
 	BETTER_AUTH_SECRET: string;
 	CLOUDFLARE_ACCOUNT_ID: string;
 	LegalWorker: DurableObjectNamespace<import("./src/worker/index").LegalWorker>;
@@ -28,7 +26,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "IUSIA_ENV" | "AI_GATEWAY_NAME" | "APP_URL" | "BETTER_AUTH_SECRET" | "CLOUDFLARE_ACCOUNT_ID">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "AI_GATEWAY_NAME" | "BETTER_AUTH_SECRET" | "CLOUDFLARE_ACCOUNT_ID">> {}
 }
 
 // Begin runtime types

@@ -12,6 +12,14 @@ export interface IusiaSecrets {
   BETTER_AUTH_SECRET: string;
   CLOUDFLARE_ACCOUNT_ID: string;
   AI_GATEWAY_TOKEN?: string;
+  /**
+   * Entorno de ejecución. Suministrado por entorno, NO por la config base deployable:
+   * en local vía `.dev.vars` (=development). Ausente/!= "development" ⇒ el harness dev
+   * queda cerrado (fail-closed). Nunca se declara "development" en wrangler.jsonc.
+   */
+  IUSIA_ENV?: string;
+  /** URL pública de la app (baseURL de Better Auth). Local vía `.dev.vars`; deploy la aporta. */
+  APP_URL: string;
   /** OAuth de Google para Drive. Aún no aprovisionado; ver docs/PENDIENTES.md. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

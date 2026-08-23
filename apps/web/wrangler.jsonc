@@ -76,10 +76,16 @@
 
   "analytics_engine_datasets": [{ "binding": "USAGE_ANALYTICS", "dataset": "iusia_usage" }],
 
+  // SEGURIDAD (fail-closed): la config base/deployable NUNCA declara IUSIA_ENV ni APP_URL.
+  //  - `IUSIA_ENV` sólo se activa en desarrollo LOCAL vía `.dev.vars` (IUSIA_ENV=development);
+  //    un `wrangler deploy` sin selección explícita de entorno deja IUSIA_ENV=undefined, y el
+  //    gate del harness (igualdad estricta a "development") bloquea las rutas dev (fail-closed).
+  //  - `APP_URL` se suministra por entorno: en local vía `.dev.vars`; en staging/producción debe
+  //    aportarse explícitamente (wrangler deploy --var APP_URL=... o config por-entorno). Ver
+  //    docs/PENDIENTES.md → DEPLOY_APP_URL_CONFIGURATION_REQUIRED. No se hardcodea aquí.
   "vars": {
-    "IUSIA_ENV": "development",
-    // Ruta lógica del AI Gateway. Los secretos van por `wrangler secret`, nunca aquí.
-    "AI_GATEWAY_NAME": "iusia",
-    "APP_URL": "http://localhost:5173"
+    // Ruta lógica del AI Gateway (idéntica en todos los entornos). Los secretos van por
+    // `wrangler secret`/`.dev.vars`, nunca aquí.
+    "AI_GATEWAY_NAME": "iusia"
   }
 }

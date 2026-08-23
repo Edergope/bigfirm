@@ -112,3 +112,17 @@ instala figma-cli **fuera** del repo IUSIA (no debe ser dependencia del runtime)
 el campo `issuer` de la tabla `account`. Está añadido a mano en
 `packages/db/src/schema/auth.ts` con un comentario. **Al actualizar la CLI, regenerar
 y comprobar si el parche sigue siendo necesario.**
+
+## DEPLOY_APP_URL_CONFIGURATION_REQUIRED (seguridad de despliegue)
+
+Por seguridad fail-closed, `wrangler.jsonc` ya NO declara `IUSIA_ENV` ni `APP_URL` en
+`vars` (config base deployable). En desarrollo LOCAL ambos se activan vía `.dev.vars`
+(`IUSIA_ENV=development`, `APP_URL=http://localhost:5173`). Un `wrangler deploy` deja
+`IUSIA_ENV` undefined → el harness `/api/dev/*` queda cerrado (404).
+
+**Al desplegar a staging/producción hay que suministrar explícitamente:**
+- `APP_URL` = la URL pública real (baseURL de Better Auth y trustedOrigins). Sin ella el
+  login no funciona. Ej.: `wrangler deploy --var APP_URL=https://<dominio-real>` o config
+  por-entorno. **No inventar el valor; lo aporta infraestructura.**
+- `IUSIA_ENV` = `production`/`staging` (nunca `development`). No es obligatorio para que
+  el harness quede cerrado (undefined ya lo cierra), pero conviene fijarlo explícito.

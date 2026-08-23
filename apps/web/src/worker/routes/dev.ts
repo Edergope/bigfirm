@@ -17,8 +17,21 @@ import { normalizeToText } from "../services/ingestion.js";
  */
 export const devRoutes = new Hono<AppBindings>();
 
+/**
+ * Fail-closed: SÓLO el valor exacto "development" habilita el harness. Cualquier otro
+ * estado (production, staging, test, undefined, null, "", valor desconocido) lo cierra.
+ * Nunca se usa `!== "production"` (sería fail-open).
+ */
+export function isDevelopmentEnv(iusiaEnv: string | undefined | null): boolean {
+  return iusiaEnv === "development";
+}
+
+/**
+ * Gate del harness dev. Se ejecuta ANTES que withContext/requireSession y cualquier
+ * side-effect: fuera de development responde 404 sin tocar D1, créditos ni Drive.
+ */
 devRoutes.use("*", async (c, next) => {
-  if (c.env.IUSIA_ENV !== "development") {
+  if (!isDevelopmentEnv(c.env.IUSIA_ENV)) {
     throw new IusiaError("NOT_FOUND", "Ruta no disponible");
   }
   await next();
