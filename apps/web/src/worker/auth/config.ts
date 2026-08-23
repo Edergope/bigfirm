@@ -12,6 +12,28 @@ import { firmAccessControl, firmRoles } from "./roles.js";
  * Lo que Better Auth NO decide: qué puede hacer una persona dentro de un Matter.
  * Eso lo resuelve `AuthorizationService`.
  */
+/** Scope de SÓLO LECTURA de Drive. Mínimo privilegio: nunca se pide escritura. */
+export const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+
+/**
+ * Construye la config del social provider de Google. Además de la identidad
+ * (openid/email/profile), IUSIA solicita `drive.readonly` con `accessType: "offline"`
+ * para poder ingerir documentos en background; `prompt: "consent"` asegura que Google
+ * emita refresh_token en la primera autorización. Sin credenciales, queda vacío.
+ */
+export function buildGoogleSocialProvider(env: Env) {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return {};
+  return {
+    google: {
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+      scope: [DRIVE_READONLY_SCOPE],
+      accessType: "offline" as const,
+      prompt: "consent" as const,
+    },
+  };
+}
+
 export function createAuth(env: Env) {
   const db = createDb(env.DB);
 
@@ -44,16 +66,9 @@ export function createAuth(env: Env) {
       requireEmailVerification: false,
     },
 
-    // OAuth de Google queda listo pero inactivo hasta aprovisionar credenciales.
-    socialProviders:
-      env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
-        ? {
-            google: {
-              clientId: env.GOOGLE_CLIENT_ID,
-              clientSecret: env.GOOGLE_CLIENT_SECRET,
-            },
-          }
-        : {},
+    // OAuth de Google (ver `buildGoogleSocialProvider`): identidad + Drive de sólo
+    // lectura con acceso offline. Inactivo hasta aprovisionar credenciales.
+    socialProviders: buildGoogleSocialProvider(env),
 
     plugins: [
       organization({

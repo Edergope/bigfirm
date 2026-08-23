@@ -2,11 +2,10 @@ import {
   StorageNotConfiguredError,
   documentMirrorKey,
   type DocumentIngestionMessage,
-  type DocumentStorageProvider,
 } from "@iusia/domain";
 import { DocumentRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
-import { GoogleDriveAdapter } from "../integrations/google-drive.js";
+import { DriveConnectionError, DriveCredentialResolver } from "./drive-credentials.js";
 
 /**
  * Servicio de ingestión documental.
@@ -26,13 +25,12 @@ export interface IngestionOutcome {
 export class IngestionService {
   constructor(
     private readonly env: Env,
-    private readonly storage: DocumentStorageProvider,
+    /** Resuelve credenciales de Drive del usuario que vinculó el documento. */
+    private readonly driveCredentials: DriveCredentialResolver,
   ) {}
 
   static forEnv(env: Env): IngestionService {
-    // Sin OAuth de Google no hay credenciales: el adapter queda NOT_CONFIGURED.
-    const storage = new GoogleDriveAdapter(null);
-    return new IngestionService(env, storage);
+    return new IngestionService(env, DriveCredentialResolver.forEnv(env));
   }
 
   async ingest(message: DocumentIngestionMessage): Promise<IngestionOutcome> {
@@ -42,14 +40,22 @@ export class IngestionService {
     const doc = await documents.findById(message.organization_id, message.document_id);
     if (!doc) return { status: "SKIPPED", detail: "documento no encontrado en el registro" };
 
-    if (this.storage.status() !== "CONNECTED") {
-      // No se simula contenido: se deja el documento pendiente de indexar.
-      await documents.setStatus(message.organization_id, message.document_id, "PENDIENTE");
-      return { status: "STORAGE_NOT_CONFIGURED" };
+    // Las credenciales de Drive pertenecen al usuario que vinculó el archivo (tiene
+    // acceso de lectura sobre él). Sin conexión válida, el documento queda PENDIENTE
+    // y el mensaje se ACK-ea: ningún reintento resolverá una reconexión OAuth pendiente.
+    let storage;
+    try {
+      storage = await this.driveCredentials.resolveAdapter(doc.linkedBy);
+    } catch (error) {
+      if (error instanceof DriveConnectionError) {
+        await documents.setStatus(message.organization_id, message.document_id, "PENDIENTE");
+        return { status: "STORAGE_NOT_CONFIGURED", detail: error.code };
+      }
+      throw error;
     }
 
     try {
-      const bytes = await this.storage.download(message.drive_file_id);
+      const bytes = await storage.download(message.drive_file_id);
       const text = await normalizeToText(bytes, doc.mimeType);
 
       const key = documentMirrorKey(
