@@ -42,6 +42,11 @@ export class DriveConnectionError extends Error {
 
 /** Metadata NO sensible de la cuenta Google. Nunca incluye tokens. */
 export interface GoogleAccountRef {
+  /**
+   * ID de la FILA de cuenta de Better Auth (`account.id`, PK), NO el `account_id`
+   * del proveedor (el `sub` de Google). `auth.api.getAccessToken` selecciona la
+   * cuenta por `account.id === accountId`; pasar el `sub` provoca ACCOUNT_NOT_FOUND.
+   */
   accountId: string;
   scope: string | null;
   hasRefreshToken: boolean;
@@ -87,7 +92,8 @@ export class DriveCredentialResolver {
     const find: FindGoogleAccountFn = async (userId) => {
       const rows = await db
         .select({
-          accountId: schema.account.accountId,
+          // `account.id` (PK de Better Auth), que es lo que getAccessToken selecciona.
+          id: schema.account.id,
           scope: schema.account.scope,
           refreshToken: schema.account.refreshToken,
         })
@@ -97,7 +103,7 @@ export class DriveCredentialResolver {
       const row = rows[0];
       if (!row) return null;
       return {
-        accountId: row.accountId,
+        accountId: row.id,
         scope: row.scope,
         hasRefreshToken: Boolean(row.refreshToken),
       };
