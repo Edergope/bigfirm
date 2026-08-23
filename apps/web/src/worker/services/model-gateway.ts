@@ -194,9 +194,9 @@ export class ModelGateway {
         body: JSON.stringify({
           model: `${candidate.provider}/${candidate.model}`,
           messages,
-          temperature: policy.temperature,
-          // Compatibilidad de parámetro por familia de modelo (nunca ambos a la vez).
-          ...outputTokenParam(candidate.provider, candidate.model, policy.max_output_tokens),
+          // Parámetros dependientes de la familia del modelo (token limit + temperature).
+          // Punto único de compatibilidad; nunca emite claves incompatibles.
+          ...modelRequestParams(candidate.provider, candidate.model, policy),
         }),
         signal: controller.signal,
       });
@@ -247,17 +247,21 @@ function errMsg(error: unknown): string {
 }
 
 /**
- * Los modelos de razonamiento de OpenAI (familias gpt-5 y o1/o3/o4/oN) rechazan
- * `max_tokens` con HTTP 400 `unsupported_parameter` y exigen `max_completion_tokens`.
- * El endpoint `/compat` del AI Gateway NO traduce el parámetro: lo reenvía tal cual.
- * El resto de modelos conserva el contrato tradicional `max_tokens`.
- *
- * Verificado live contra `/compat` (2026-08): con `max_tokens` responde 400; con
- * `max_completion_tokens` responde 200.
+ * Familia de razonamiento de OpenAI (gpt-5 y o1/o3/o4/oN). Estos modelos imponen
+ * dos restricciones de contrato distintas al resto, verificadas live contra el
+ * endpoint `/compat` del AI Gateway (2026-08), que reenvía los parámetros tal cual
+ * sin traducirlos:
+ *   1) rechazan `max_tokens` (400 `unsupported_parameter`) y exigen `max_completion_tokens`;
+ *   2) rechazan `temperature` != default (400 `unsupported_value`): sólo admiten 1.
  */
-export function requiresMaxCompletionTokens(provider: string, model: string): boolean {
+export function isOpenAiReasoningModel(provider: string, model: string): boolean {
   if (provider !== "openai") return false;
   return /^(gpt-5|o[1-9])/.test(model);
+}
+
+/** Alias explícito para la restricción (1). Se conserva por claridad en los tests. */
+export function requiresMaxCompletionTokens(provider: string, model: string): boolean {
+  return isOpenAiReasoningModel(provider, model);
 }
 
 /**
@@ -272,6 +276,27 @@ export function outputTokenParam(
   return requiresMaxCompletionTokens(provider, model)
     ? { max_completion_tokens: maxOutputTokens }
     : { max_tokens: maxOutputTokens };
+}
+
+/**
+ * Compone el subconjunto de parámetros del cuerpo que depende de la familia del
+ * modelo: límite de salida (siempre) y `temperature` (sólo cuando el modelo admite
+ * un valor personalizado). Para la familia de razonamiento de OpenAI se OMITE
+ * `temperature` para usar el default (1), en vez de enviar un valor que sería
+ * rechazado. Punto único de compatibilidad: no se dispersan condiciones por el código.
+ */
+export function modelRequestParams(
+  provider: string,
+  model: string,
+  policy: { temperature: number; max_output_tokens: number },
+): Record<string, number> {
+  const params: Record<string, number> = {
+    ...outputTokenParam(provider, model, policy.max_output_tokens),
+  };
+  if (!isOpenAiReasoningModel(provider, model)) {
+    params.temperature = policy.temperature;
+  }
+  return params;
 }
 
 /**

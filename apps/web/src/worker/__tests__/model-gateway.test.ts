@@ -3,6 +3,8 @@ import { isIusiaError } from "@iusia/domain";
 import type { ModelPolicy } from "@iusia/agents";
 import {
   ModelGateway,
+  isOpenAiReasoningModel,
+  modelRequestParams,
   outputTokenParam,
   requiresMaxCompletionTokens,
   type ModelGatewayDeps,
@@ -213,7 +215,32 @@ describe("compatibilidad del parámetro de límite de salida (CODE_GAP MODEL_PAR
     }
   });
 
-  it("callOnce envía max_completion_tokens en el body para openai/gpt-5 (no max_tokens)", async () => {
+  // Restricción (2): la familia de razonamiento sólo admite temperature=default(1).
+  it.each([
+    ["openai", "gpt-5", true],
+    ["openai", "o3-mini", true],
+    ["openai", "gpt-4.1", false],
+    ["google", "gemini-2.5-pro", false],
+  ])("isOpenAiReasoningModel(%s/%s) = %s", (provider, model, expected) => {
+    expect(isOpenAiReasoningModel(provider, model)).toBe(expected);
+  });
+
+  it("modelRequestParams OMITE temperature para openai/gpt-5 (default 1)", () => {
+    const p = modelRequestParams("openai", "gpt-5", { temperature: 0.2, max_output_tokens: 16000 });
+    expect(p).toEqual({ max_completion_tokens: 16000 });
+    expect("temperature" in p).toBe(false);
+  });
+
+  it("modelRequestParams conserva temperature para modelos tradicionales", () => {
+    expect(
+      modelRequestParams("google", "gemini-2.5-pro", { temperature: 0.2, max_output_tokens: 16000 }),
+    ).toEqual({ max_tokens: 16000, temperature: 0.2 });
+    expect(
+      modelRequestParams("openai", "gpt-4.1", { temperature: 0.7, max_output_tokens: 8000 }),
+    ).toEqual({ max_tokens: 8000, temperature: 0.7 });
+  });
+
+  it("callOnce: gpt-5 → max_completion_tokens y SIN temperature; nunca max_tokens", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(okResponse("ok"));
     const gw = new ModelGateway(env(), fakeDeps(fetchImpl as unknown as typeof fetch));
     await gw.complete(POLICY, MESSAGES, CTX); // POLICY.preferred = openai/gpt-5
@@ -221,9 +248,10 @@ describe("compatibilidad del parámetro de límite de salida (CODE_GAP MODEL_PAR
     expect(body.model).toBe("openai/gpt-5");
     expect(body.max_completion_tokens).toBe(POLICY.max_output_tokens);
     expect("max_tokens" in body).toBe(false);
+    expect("temperature" in body).toBe(false);
   });
 
-  it("callOnce envía max_tokens en el body para el fallback google/gemini-2.5-pro", async () => {
+  it("callOnce: fallback gemini → max_tokens + temperature; nunca max_completion_tokens", async () => {
     // preferred (openai/gpt-5) devuelve 400 no-reintentable → conmuta al fallback gemini.
     const fetchImpl = vi
       .fn()
@@ -234,6 +262,7 @@ describe("compatibilidad del parámetro de límite de salida (CODE_GAP MODEL_PAR
     const body = bodyOfCall(fetchImpl, 1);
     expect(body.model).toBe("google/gemini-2.5-pro");
     expect(body.max_tokens).toBe(POLICY.max_output_tokens);
+    expect(body.temperature).toBe(POLICY.temperature);
     expect("max_completion_tokens" in body).toBe(false);
   });
 });
