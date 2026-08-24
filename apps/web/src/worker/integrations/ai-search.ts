@@ -1,32 +1,50 @@
 import {
   allowedFolderPrefixes,
-  folderIsInScope,
   type IntegrationState,
   type RetrievalProvider,
   type RetrievalQuery,
   type RetrievalResult,
+  type RetrievalScope,
 } from "@iusia/domain";
 
 /**
- * Adapter de recuperación sobre Cloudflare AI Search.
+ * Adapter de recuperación sobre Cloudflare AI Search (binding `ai_search`).
  *
- * Estado: ADAPTER listo; la instancia de AI Search es un POC pendiente (Blueprint §07,
- * "validar ACL/aislamiento antes de producción"). Sin binding configurado,
- * `status()` es NOT_CONFIGURED.
+ * Estado: ADAPTER migrado a la API vigente de AI Search. La instancia real
+ * (`iusia-rag-e2e`) es un POC pendiente de aprovisionar; sin binding,
+ * `status()` es NOT_CONFIGURED y `search()` no toca ningún índice.
  *
- * AISLAMIENTO TÉCNICO (no textual): toda consulta se ancla a los prefijos de carpeta
- * autorizados (`org/{org}/matter/{matter}/`). Si el alcance no tiene matters, no se
- * consulta nada. Además, los resultados se filtran de nuevo por prefijo como defensa
- * en profundidad, por si el índice devolviera algo fuera de alcance.
+ * AISLAMIENTO (no negociable, no textual): el alcance lo construye SIEMPRE el
+ * servidor a partir de la autorización real (organization + matters autorizados).
+ * El filtro se aplica ANTES del retrieval como metadata filter sobre
+ * `organization_id` + `matter_id`, y los resultados se REVALIDAN después contra
+ * `chunk.item.metadata` (defensa en profundidad). Nunca se usa `folder` como única
+ * frontera de seguridad.
  */
 
-/** Binding de AI Search. Su forma exacta la fija Cloudflare; se tipa laxo a propósito. */
+/** Filtro de metadata compatible con Vectorize/AI Search (subconjunto usado). */
+export type MetadataFilter = Record<string, string | { $in: string[] }>;
+
+/**
+ * Forma mínima del binding `ai_search` (estructuralmente compatible con el tipo
+ * global `AiSearchInstance` de @cloudflare/workers-types).
+ */
 export interface AiSearchBinding {
-  search(input: {
+  search(params: {
     query: string;
-    filters?: unknown;
-    max_num_results?: number;
-  }): Promise<{ data?: Array<{ filename?: string; score?: number; content?: string }> }>;
+    ai_search_options?: {
+      retrieval?: {
+        filters?: MetadataFilter;
+        max_num_results?: number;
+      };
+    };
+  }): Promise<{
+    chunks?: Array<{
+      score?: number;
+      text?: string;
+      item?: { key?: string; metadata?: Record<string, unknown> };
+    }>;
+  }>;
 }
 
 export class AiSearchRetrievalProvider implements RetrievalProvider {
@@ -38,38 +56,56 @@ export class AiSearchRetrievalProvider implements RetrievalProvider {
   }
 
   async search(query: RetrievalQuery): Promise<RetrievalResult[]> {
-    const prefixes = allowedFolderPrefixes(query.scope);
     // Sin matters autorizados no hay nada que buscar: se corta antes de tocar el índice.
-    if (prefixes.length === 0) return [];
+    if (allowedFolderPrefixes(query.scope).length === 0) return [];
     if (!this.binding) return [];
-
-    // Filtro OR sobre las carpetas autorizadas. El índice nunca ve otras firmas.
-    const filters =
-      prefixes.length === 1
-        ? { folder: prefixes[0] }
-        : { $or: prefixes.map((p) => ({ folder: p })) };
 
     const raw = await this.binding.search({
       query: query.query,
-      filters,
-      max_num_results: query.max_results ?? 8,
+      ai_search_options: {
+        retrieval: {
+          // Filtro PRE-retrieval por tenant/matter: el índice nunca ve otras firmas.
+          filters: buildMetadataFilter(query.scope),
+          max_num_results: query.max_results ?? 8,
+        },
+      },
     });
 
     const results: RetrievalResult[] = [];
-    for (const item of raw.data ?? []) {
-      const folder = folderOf(item.filename ?? "");
-      // Defensa en profundidad: descarta cualquier resultado fuera de alcance.
-      if (!folderIsInScope(folder, query.scope)) continue;
+    for (const chunk of raw.chunks ?? []) {
+      const metadata = chunk.item?.metadata ?? {};
+      const organizationId = str(metadata.organization_id);
+      const matterId = str(metadata.matter_id);
+      const documentId = str(metadata.document_id);
+
+      // Defensa en profundidad: revalida org + matter contra la metadata del chunk.
+      // Descarta cualquier resultado fuera de alcance aunque el índice lo devolviera.
+      if (organizationId !== query.scope.organization_id) continue;
+      if (!query.scope.authorized_matter_ids.includes(matterId)) continue;
+
+      const key = str(chunk.item?.key);
       results.push({
-        document_id: documentIdOf(item.filename ?? ""),
-        matter_id: matterIdOf(folder),
-        score: item.score ?? 0,
-        excerpt: (item.content ?? "").slice(0, 600),
-        source_folder: folder,
+        document_id: documentId || documentIdOf(key),
+        matter_id: matterId,
+        score: chunk.score ?? 0,
+        excerpt: (chunk.text ?? "").slice(0, 600),
+        source_folder: folderOf(key),
       });
     }
     return results;
   }
+}
+
+/** Filtro de metadata: organización exacta + matter dentro de los autorizados. */
+export function buildMetadataFilter(scope: RetrievalScope): MetadataFilter {
+  return {
+    organization_id: scope.organization_id,
+    matter_id: { $in: [...scope.authorized_matter_ids] },
+  };
+}
+
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function folderOf(filename: string): string {
@@ -79,11 +115,5 @@ function folderOf(filename: string): string {
 
 function documentIdOf(filename: string): string {
   const base = filename.slice(filename.lastIndexOf("/") + 1);
-  return base.replace(/\.txt$/, "");
-}
-
-function matterIdOf(folder: string): string {
-  // org/{org}/matter/{matter}/doc/  →  {matter}
-  const m = folder.match(/matter\/([^/]+)\//);
-  return m?.[1] ?? "";
+  return base.replace(/\.(txt|json)$/, "");
 }

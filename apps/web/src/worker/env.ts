@@ -26,6 +26,12 @@ export interface IusiaSecrets {
   /** Resend (NotificationService). Sin esto, las notificaciones quedan NOT_CONFIGURED. */
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
+  /**
+   * Binding de la instancia AI Search (`ai_search`). Opcional hasta aprovisionar la
+   * instancia `iusia-rag-e2e`; ausente ⇒ recuperación NOT_CONFIGURED. Se tipa con el
+   * global `AiSearchInstance` de @cloudflare/workers-types.
+   */
+  AI_SEARCH?: AiSearchInstance;
 }
 
 declare global {

@@ -17,8 +17,8 @@ export const documentsRoutes = new Hono<AppBindings>();
  */
 documentsRoutes.get("/integrations/status", (c) => {
   const storage = new GoogleDriveAdapter(null);
-  // El binding de AI Search aún no existe en wrangler (POC): NOT_CONFIGURED.
-  const retrieval = new AiSearchRetrievalProvider(null);
+  // Estado real del binding AI Search: CONNECTED si la instancia está aprovisionada.
+  const retrieval = new AiSearchRetrievalProvider(c.env.AI_SEARCH ?? null);
   return c.json({
     storage: { id: storage.id, status: storage.status() },
     retrieval: { id: retrieval.id, status: retrieval.status() },
@@ -131,7 +131,7 @@ documentsRoutes.post("/matters/:matterId/retrieval", async (c) => {
     authorized_matter_ids: [matterId],
   };
 
-  const retrieval = new AiSearchRetrievalProvider(null);
+  const retrieval = new AiSearchRetrievalProvider(c.env.AI_SEARCH ?? null);
   if (retrieval.status() !== "CONNECTED") {
     return c.json({
       status: "NOT_CONFIGURED",
