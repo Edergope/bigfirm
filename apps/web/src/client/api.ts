@@ -173,6 +173,9 @@ export const api = {
       last_sequence: number;
     }>(`/api/executions/${rootExecutionId}/events?since=${since}`),
 
+  executionResult: (rootExecutionId: string) =>
+    request<ExecutionResult>(`/api/executions/${rootExecutionId}/result`),
+
   agents: () =>
     request<{
       agents: Array<{
@@ -254,6 +257,26 @@ export const api = {
       ),
   },
 };
+
+export interface ExecutionResult {
+  root_execution_id: string;
+  status: string;
+  outcome: "RUNNING" | "COMPLETED" | "INSUFFICIENT_EVIDENCE" | "BLOCKED" | "FAILED" | "CANCELLED";
+  outputs: Array<{
+    execution_id: string;
+    agent_id: string;
+    node_code: string;
+    agent_name: string;
+    text: string;
+    provider: string | null;
+    model: string | null;
+    produced_at: string | null;
+  }>;
+  evidence: {
+    chunk_count: number;
+    documents: Array<{ document_id: string; document_name: string }>;
+  };
+}
 
 export interface CaseBriefData {
   matter_id: string;

@@ -13,18 +13,17 @@ import {
   Skeleton,
   StateBlock,
   StatusChip,
-  Textarea,
 } from "@iusia/ui";
 import type { RiskLevel } from "@iusia/domain";
 import { api, ApiError, type CaseBriefData, type MatterDetail } from "../api.js";
-import { StrategyRoom } from "./StrategyRoom.js";
+import { MatterOrchestration } from "./MatterOrchestration.js";
 
 const TABS = [
   { id: "resumen", label: "Resumen" },
   { id: "documentos", label: "Documentos" },
   { id: "hechos", label: "Hechos y fuentes" },
   { id: "tareas", label: "Tareas y términos" },
-  { id: "estrategia", label: "Estrategia" },
+  { id: "estrategia", label: "Análisis IUSIA" },
   { id: "actividad", label: "Actividad" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -421,84 +420,7 @@ function Tareas({ matterId }: { matterId: string }) {
 }
 
 function Estrategia({ matterId, data }: { matterId: string; data: MatterDetail }) {
-  const queryClient = useQueryClient();
-  const [objective, setObjective] = useState(data.matter.objective ?? "");
-  const routing = useQuery({
-    queryKey: ["routing", matterId],
-    queryFn: () => api.routingPreview(matterId),
-  });
-
-  const roots = data.executions.filter((e) => e.parentExecutionId === null);
-  const latestRoot = roots[0]?.rootExecutionId ?? null;
-
-  const start = useMutation({
-    mutationFn: () => api.startOrchestration(matterId, objective),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["matter", matterId] }),
-  });
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader title="Iniciar orquestación jurídica" />
-          <div className="px-6 py-5">
-            <p className="mb-3 text-[13.5px] text-iusia-mist-text">
-              Se ejecutan agentes reales del piloto (00 → 01 → 03). Cada ejecución queda
-              registrada en el Execution Ledger con su proveedor, modelo y costo.
-            </p>
-            <Textarea
-              value={objective}
-              onChange={(e) => setObjective(e.target.value)}
-              rows={3}
-              placeholder="Objetivo jurídico concreto del encargo (mínimo 10 caracteres)"
-            />
-            {start.error ? (
-              <p role="alert" className="mt-2 text-[13.5px] text-iusia-critical">
-                {start.error instanceof ApiError ? start.error.message : "Error al iniciar"}
-              </p>
-            ) : null}
-            <div className="mt-3">
-              <Button onClick={() => start.mutate()} disabled={start.isPending || objective.trim().length < 10}>
-                {start.isPending ? "Despachando…" : "Ejecutar orquestación"}
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader title="Plan de routing" subtitle="Decisión determinista por materialidad" />
-          {routing.isLoading ? (
-            <div className="p-5"><Skeleton className="h-24" /></div>
-          ) : (
-            <ul className="max-h-64 divide-y divide-iusia-mist/15 overflow-y-auto">
-              {routing.data?.plan.agents.map((a) => (
-                <li key={a.agent_id} className="flex items-center justify-between gap-2 px-5 py-2">
-                  <span className="min-w-0 truncate text-[13px] text-iusia-carbon">{a.agent_id}</span>
-                  <StatusChip
-                    label={a.executable_now ? "Activo" : "Planificado"}
-                    tone={a.executable_now ? "intel" : "neutral"}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
-
-      {latestRoot ? (
-        <StrategyRoom rootExecutionId={latestRoot} />
-      ) : (
-        <Card>
-          <CardHeader title="Strategy Room" />
-          <StateBlock
-            kind="empty"
-            title="Sin ejecuciones registradas"
-            hint="El grafo se construye a partir de eventos reales del Execution Ledger."
-          />
-        </Card>
-      )}
-    </div>
-  );
+  return <MatterOrchestration matterId={matterId} data={data} />;
 }
 
 function Actividad({ data }: { data: MatterDetail }) {

@@ -1,8 +1,14 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { IusiaError, TERMINAL_STATUSES, projectStrategyGraph } from "@iusia/domain";
+import {
+  IusiaError,
+  TERMINAL_STATUSES,
+  deriveOutcome,
+  projectStrategyGraph,
+  resolveEvidenceDocuments,
+} from "@iusia/domain";
 import type { Materiality } from "@iusia/domain";
-import { listAgentDefinitions } from "@iusia/agents";
+import { getAgentDefinition, listAgentDefinitions } from "@iusia/agents";
 import { WAVE_GATE, buildRoutingPlan, type Wave } from "@iusia/orchestration";
 import type { AppBindings } from "../context.js";
 
@@ -111,6 +117,91 @@ orchestrationRoutes.get("/executions/:rootExecutionId/events", async (c) => {
     graph: projectStrategyGraph(list),
     executions: nodes,
     last_sequence: list.at(-1)?.sequence ?? since,
+  });
+});
+
+/**
+ * Read-model del RESULTADO de una orquestación para la experiencia del abogado.
+ *
+ * Sólo LEE lo que el motor ya produjo: el texto de salida vive en R2 (la tabla
+ * guarda el puntero `outputRef`) y este endpoint lo resuelve junto con la evidencia
+ * usada y el desenlace de producto. No ejecuta agentes, no toca el DAG, el RAG, los
+ * prompts, el gateway ni el wallet: es la capa de lectura que faltaba para la UI.
+ */
+orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
+  const { authz, executions, events, documents } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const rootExecutionId = c.req.param("rootExecutionId");
+
+  const root = await executions.findById(rootExecutionId);
+  if (!root || root.organizationId !== organizationId) {
+    throw new IusiaError("NOT_FOUND", "Ejecución no encontrada");
+  }
+  await authz.authorizeMatter(organizationId, userId, root.matterId, "execution:read");
+
+  const [nodes, eventList, docs] = await Promise.all([
+    executions.listByRoot(rootExecutionId),
+    events.listByRoot(rootExecutionId),
+    documents.listForMatter(organizationId, root.matterId),
+  ]);
+  const documentNames = new Map(docs.map((d) => [d.id, d.name]));
+
+  // Evidencia: proviene del tool call real de recuperación registrado en el ledger.
+  const retrieval = eventList.find(
+    (e) => e.type === "agent.tool.called" && e.detail?.tool === "ai_search.retrieval",
+  );
+  const evidenceChunkCount = Number(retrieval?.detail?.chunk_count ?? 0);
+  const rawDocIds = String(retrieval?.detail?.document_ids ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const evidenceDocuments = resolveEvidenceDocuments(rawDocIds, documentNames);
+
+  // Salidas de agente: se leen de R2 los nodos COMPLETED con puntero de salida.
+  // La fila raíz es el contenedor de la orquestación, no tiene salida propia.
+  const agentNodes = nodes.filter(
+    (n) => n.id !== rootExecutionId && n.status === "COMPLETED" && n.outputRef,
+  );
+  const outputs = (
+    await Promise.all(
+      agentNodes.map(async (n) => {
+        const obj = await c.env.ARTIFACTS.get(n.outputRef!);
+        if (!obj) return null;
+        const stored = await obj.json<{
+          text?: string;
+          provenance?: { model?: string; provider?: string; produced_at?: string };
+        }>();
+        let name = n.agentId;
+        let nodeCode = "";
+        try {
+          const def = getAgentDefinition(n.agentId);
+          name = def.name;
+          nodeCode = def.node_code;
+        } catch {
+          // Agente no registrado: se muestra el id crudo, sin inventar metadata.
+        }
+        return {
+          execution_id: n.id,
+          agent_id: n.agentId,
+          node_code: nodeCode,
+          agent_name: name,
+          text: stored.text ?? "",
+          provider: stored.provenance?.provider ?? n.provider ?? null,
+          model: stored.provenance?.model ?? n.model ?? null,
+          produced_at: stored.provenance?.produced_at ?? n.completedAt ?? null,
+        };
+      }),
+    )
+  )
+    .filter((o): o is NonNullable<typeof o> => o !== null)
+    .sort((a, b) => a.node_code.localeCompare(b.node_code));
+
+  return c.json({
+    root_execution_id: rootExecutionId,
+    status: root.status,
+    outcome: deriveOutcome({ rootStatus: root.status, evidenceChunkCount }),
+    outputs,
+    evidence: { chunk_count: evidenceChunkCount, documents: evidenceDocuments },
   });
 });
 
