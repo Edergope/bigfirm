@@ -87,5 +87,55 @@
     // Ruta lógica del AI Gateway (idéntica en todos los entornos). Los secretos van por
     // `wrangler secret`/`.dev.vars`, nunca aquí.
     "AI_GATEWAY_NAME": "iusia"
+  },
+
+  // ENVIRONMENT STAGING (Bloque 3): recursos Cloudflare REALES en la cuenta
+  // e4478495… (perfil wrangler `iusia`). Los environments de Wrangler NO heredan
+  // bindings, así que se redeclaran todos. `migrations`, `main` y `compatibility_*`
+  // sí se heredan del nivel base. IUSIA_ENV=staging cierra el harness dev (404).
+  // APP_URL NO se declara aquí: se aporta al desplegar (Bloque 5). El desarrollo
+  // local (`pnpm dev`, sin --env) sigue usando la config base (Miniflare).
+  "env": {
+    "staging": {
+      "vars": {
+        "AI_GATEWAY_NAME": "iusia",
+        "IUSIA_ENV": "staging"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "iusia-db",
+          "database_id": "ead5c7aa-fd00-4515-9964-dc0c09db3046",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "PROMPTS", "bucket_name": "iusia-prompts" },
+        { "binding": "ARTIFACTS", "bucket_name": "iusia-artifacts" }
+      ],
+      "durable_objects": {
+        "bindings": [{ "name": "LegalWorker", "class_name": "LegalWorker" }]
+      },
+      "workflows": [
+        {
+          "name": "iusia-matter-orchestration",
+          "binding": "MATTER_ORCHESTRATION",
+          "class_name": "MatterOrchestrationWorkflow"
+        }
+      ],
+      "queues": {
+        "producers": [{ "binding": "DOCUMENT_INGESTION", "queue": "iusia-document-ingestion" }],
+        "consumers": [
+          {
+            "queue": "iusia-document-ingestion",
+            "max_batch_size": 10,
+            "max_retries": 3,
+            "dead_letter_queue": "iusia-document-ingestion-dlq"
+          }
+        ]
+      },
+      "ai_search": [{ "binding": "AI_SEARCH", "instance_name": "iusia-rag-e2e" }],
+      "analytics_engine_datasets": [{ "binding": "USAGE_ANALYTICS", "dataset": "iusia_usage" }]
+    }
   }
 }

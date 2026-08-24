@@ -17,11 +17,22 @@ interface R2Binding {
   remote?: boolean;
 }
 
+interface WranglerConfig {
+  vars?: Record<string, unknown>;
+  r2_buckets?: R2Binding[];
+  env?: {
+    staging?: {
+      vars?: Record<string, unknown>;
+      d1_databases?: Array<{ binding: string; database_id?: string }>;
+    };
+  };
+}
+
 /** Quita comentarios JSONC (bloque y línea) para poder parsear el objeto real. */
-function parseJsonc(text: string): { vars?: Record<string, unknown>; r2_buckets?: R2Binding[] } {
+function parseJsonc(text: string): WranglerConfig {
   const noBlock = text.replace(/\/\*[\s\S]*?\*\//g, "");
   const noLine = noBlock.replace(/^\s*\/\/.*$/gm, "");
-  return JSON.parse(noLine) as { vars?: Record<string, unknown>; r2_buckets?: R2Binding[] };
+  return JSON.parse(noLine) as WranglerConfig;
 }
 
 describe("deployment safety: wrangler.jsonc base config (fail-closed)", () => {
@@ -49,6 +60,25 @@ describe("deployment safety: wrangler.jsonc base config (fail-closed)", () => {
     const artifacts = (config.r2_buckets ?? []).find((b) => b.binding === "ARTIFACTS");
     expect(artifacts, "ARTIFACTS debe existir en r2_buckets base").toBeDefined();
     expect(artifacts?.remote).not.toBe(true);
+  });
+});
+
+describe("environment staging (recursos remotos)", () => {
+  const config = parseJsonc(readFileSync(WRANGLER, "utf8"));
+  const staging = config.env?.staging;
+
+  it("existe env.staging", () => {
+    expect(staging).toBeDefined();
+  });
+
+  it("staging fija IUSIA_ENV=staging (nunca development → harness dev cerrado)", () => {
+    expect(staging?.vars?.IUSIA_ENV).toBe("staging");
+  });
+
+  it("staging usa un database_id real (no el placeholder)", () => {
+    const db = (staging?.d1_databases ?? []).find((d) => d.binding === "DB");
+    expect(db?.database_id).toBeDefined();
+    expect(db?.database_id).not.toMatch(/REPLACE_WITH/i);
   });
 });
 
