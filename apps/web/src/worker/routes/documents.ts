@@ -8,8 +8,51 @@ import {
 import type { AppBindings } from "../context.js";
 import { GoogleDriveAdapter } from "../integrations/google-drive.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
+import { DriveConnectionError, DriveCredentialResolver } from "../services/drive-credentials.js";
 
 export const documentsRoutes = new Hono<AppBindings>();
+
+/** Fixture sintético de validación (self-test de conectividad Drive). NO es un archivo de cliente. */
+const DRIVE_SELF_TEST_FIXTURE_ID = "1hbaKh6KwQGeoNx2It_ED1dyuBxL935NB";
+
+/**
+ * Estado de conexión de Google Drive del usuario autenticado. Resuelve las
+ * credenciales SERVER-SIDE (DriveCredentialResolver → getAccessToken de Better Auth)
+ * y NUNCA devuelve tokens: sólo `{ connected }` o un motivo de reconexión. La UI usa
+ * esto para mostrar "Google Drive conectado".
+ *
+ * `?self_test=1` (validación): lee SÓLO la metadata del fixture sintético de validación
+ * para probar que el token funciona contra la API de Drive. No descarga contenido.
+ */
+documentsRoutes.get("/integrations/drive/status", async (c) => {
+  const { userId } = c.get("session");
+  const resolver = DriveCredentialResolver.forEnv(c.env);
+
+  let adapter;
+  try {
+    adapter = await resolver.resolveAdapter(userId);
+  } catch (error) {
+    if (error instanceof DriveConnectionError) {
+      return c.json({ connected: false, reason: error.code });
+    }
+    throw error;
+  }
+
+  const body: {
+    connected: true;
+    self_test?: { accessible: boolean; mime: string | null };
+  } = { connected: true };
+
+  if (c.req.query("self_test") === "1") {
+    try {
+      const meta = await adapter.getMetadata(DRIVE_SELF_TEST_FIXTURE_ID);
+      body.self_test = { accessible: true, mime: meta.mime_type };
+    } catch {
+      body.self_test = { accessible: false, mime: null };
+    }
+  }
+  return c.json(body);
+});
 
 /**
  * Estado de las integraciones documentales. La UI usa esto para mostrar

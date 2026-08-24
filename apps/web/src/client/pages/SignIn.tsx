@@ -41,6 +41,20 @@ export function SignIn() {
     }
   }
 
+  /** OAuth real de Google (Better Auth). Redirige el navegador; el frontend nunca ve tokens. */
+  async function continueWithGoogle() {
+    setError(null);
+    setBusy(true);
+    try {
+      // callbackURL = destino tras completar el flujo (relativo a APP_URL del entorno).
+      await signIn.social({ provider: "google", callbackURL: "/" });
+      // signIn.social redirige a Google; no se ejecuta más código en éxito.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No fue posible conectar con Google");
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
       {/* Panel de marca — autoridad institucional, sin decoración gratuita. */}
@@ -121,6 +135,20 @@ export function SignIn() {
               {busy ? "Procesando…" : mode === "in" ? "Entrar" : "Crear firma"}
             </Button>
           </form>
+
+          <div className="mt-5 flex items-center gap-3 text-[12px] text-iusia-mist-text">
+            <span className="h-px flex-1 bg-iusia-mist-strong" />o<span className="h-px flex-1 bg-iusia-mist-strong" />
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void continueWithGoogle()}
+            className="mt-4 w-full"
+          >
+            Continuar con Google
+          </Button>
 
           <button
             type="button"
