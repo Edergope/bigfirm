@@ -1,12 +1,11 @@
 # Copia a `.dev.vars` (ignorado por git) y rellena. NUNCA versionar secretos reales.
 #
-# SEGURIDAD (fail-closed): `IUSIA_ENV` y `APP_URL` NO están en wrangler.jsonc (config
-# deployable). El harness dev (/api/dev/*) sólo se habilita cuando IUSIA_ENV="development",
-# lo que se activa EXCLUSIVAMENTE aquí para desarrollo local. Un `wrangler deploy` sin
-# suministrar IUSIA_ENV lo deja undefined → rutas dev bloqueadas (404).
-IUSIA_ENV="development"
-# URL local de la app (baseURL de Better Auth). En staging/producción se suministra por
-# entorno (wrangler deploy --var APP_URL=... o config por-entorno); nunca localhost.
+# SEGURIDAD (fail-closed): `IUSIA_ENV` NO está en wrangler.jsonc (config deployable) NI
+# en `.dev.vars`. Para el runtime LOCAL de Vite lo fija `vite.config.ts` (development en
+# `pnpm dev` normal; staging en modo `IUSIA_RAG_E2E=1`). `vite.config.ts` no lo lee
+# `wrangler deploy`, así que un deploy deja IUSIA_ENV=undefined → rutas dev bloqueadas (404).
+# `APP_URL` local (baseURL de Better Auth); en staging/producción se suministra por entorno,
+# nunca localhost ni en config deployable.
 APP_URL="http://localhost:5173"
 
 # Genera el secreto de sesión con:  openssl rand -base64 32
