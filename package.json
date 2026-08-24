@@ -16,7 +16,10 @@
     "db:generate": "pnpm --filter @iusia/db generate",
     "db:migrate:local": "pnpm --filter @iusia/web migrate:local",
     "prompts:sync": "node scripts/sync-prompts.mjs --local",
-    "prompts:sync:remote": "node scripts/sync-prompts.mjs --remote"
+    "prompts:sync:remote": "node scripts/sync-prompts.mjs --remote",
+    "test:ci": "vitest run --dangerouslyIgnoreUnhandledErrors",
+    "build:staging": "pnpm --filter @iusia/web build:staging",
+    "deploy:staging": "pnpm --filter @iusia/web deploy:staging"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
