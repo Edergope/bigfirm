@@ -24,6 +24,7 @@ interface WranglerConfig {
     staging?: {
       vars?: Record<string, unknown>;
       d1_databases?: Array<{ binding: string; database_id?: string }>;
+      ai_search?: Array<{ binding: string; instance_name?: string }>;
     };
   };
 }
@@ -79,6 +80,15 @@ describe("environment staging (recursos remotos)", () => {
     const db = (staging?.d1_databases ?? []).find((d) => d.binding === "DB");
     expect(db?.database_id).toBeDefined();
     expect(db?.database_id).not.toMatch(/REPLACE_WITH/i);
+  });
+
+  it("staging APP_URL no es localhost", () => {
+    expect(String(staging?.vars?.APP_URL ?? "")).not.toMatch(/localhost/i);
+  });
+
+  it("staging incluye el binding AI_SEARCH (instancia iusia-rag-e2e)", () => {
+    const ai = (staging?.ai_search ?? []).find((a) => a.binding === "AI_SEARCH");
+    expect(ai?.instance_name).toBe("iusia-rag-e2e");
   });
 });
 

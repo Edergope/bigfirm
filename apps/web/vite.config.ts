@@ -13,6 +13,10 @@ import { cloudflare } from "@cloudflare/vite-plugin";
  * para que el harness dev quede cerrado (404); nunca "development".
  */
 const ragE2E = process.env.IUSIA_RAG_E2E === "1";
+// Build/deploy con un environment de Wrangler (p.ej. CLOUDFLARE_ENV=staging): el plugin
+// ya fusiona `env.<name>` de wrangler.jsonc. En ese caso el customizer NO debe tocar la
+// config (evita clobber de IUSIA_ENV/bindings definidos por el environment).
+const wranglerEnv = process.env.CLOUDFLARE_ENV;
 
 /**
  * IUSIA_ENV se fija AQUÍ (customizer del plugin) y NO en `.dev.vars`, porque las
@@ -29,6 +33,8 @@ const cloudflarePlugin = cloudflare({
     ai_search?: Array<{ binding: string; instance_name: string; remote?: boolean }>;
     vars?: Record<string, unknown>;
   }) => {
+    // Deploy/build por environment de Wrangler: no interferir (env.staging manda).
+    if (wranglerEnv) return;
     if (ragE2E) {
       for (const b of cfg.r2_buckets ?? []) {
         if (b.binding === "ARTIFACTS") b.remote = true; // SÓLO ARTIFACTS -> remoto

@@ -99,7 +99,13 @@
     "staging": {
       "vars": {
         "AI_GATEWAY_NAME": "iusia",
-        "IUSIA_ENV": "staging"
+        "IUSIA_ENV": "staging",
+        // URL workers.dev del Worker staging `iusia-staging` (subdominio edergope).
+        // Determinística por convención Cloudflare; verificada tras el primer deploy.
+        "APP_URL": "https://iusia-staging.edergope.workers.dev",
+        // Account de Cloudflare (identificador, NO secreto): lo usa ModelGateway para
+        // construir el endpoint del AI Gateway. Los secretos van por `wrangler secret`.
+        "CLOUDFLARE_ACCOUNT_ID": "e4478495bf6483c58722d92498f0362f"
       },
       "d1_databases": [
         {
@@ -134,8 +140,10 @@
           }
         ]
       },
-      "ai_search": [{ "binding": "AI_SEARCH", "instance_name": "iusia-rag-e2e" }],
-      "analytics_engine_datasets": [{ "binding": "USAGE_ANALYTICS", "dataset": "iusia_usage" }]
+      "ai_search": [{ "binding": "AI_SEARCH", "instance_name": "iusia-rag-e2e" }]
+      // NOTA: `analytics_engine_datasets` (USAGE_ANALYTICS) se omite en staging hasta
+      // habilitar Analytics Engine en la cuenta (backlog/observabilidad). La escritura
+      // en legal-worker.ts es opcional (`?.`) → no-op seguro sin el binding.
     }
   }
 }

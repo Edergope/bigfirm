@@ -13,7 +13,9 @@
     "migrate:remote": "wrangler d1 migrations apply iusia-db --remote",
     "auth:generate": "better-auth generate --config src/worker/auth/config.ts --output ../../packages/db/src/schema/auth.generated.ts",
     "prompts:sync:local": "node ../../scripts/sync-prompts.mjs --local",
-    "prompts:sync:remote": "node ../../scripts/sync-prompts.mjs --remote"
+    "prompts:sync:remote": "node ../../scripts/sync-prompts.mjs --remote",
+    "build:staging": "CLOUDFLARE_ENV=staging vite build",
+    "deploy:staging": "CLOUDFLARE_ENV=staging wrangler deploy"
   },
   "dependencies": {
     "@iusia/agents": "workspace:*",

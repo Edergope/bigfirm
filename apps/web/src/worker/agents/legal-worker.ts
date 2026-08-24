@@ -183,7 +183,9 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
         allowNegative: true,
       });
 
-      this.env.USAGE_ANALYTICS.writeDataPoint({
+      // Analytics Engine es observabilidad opcional: si el binding no está aprovisionado
+      // (p.ej. staging sin Analytics Engine habilitado) la escritura es un no-op seguro.
+      this.env.USAGE_ANALYTICS?.writeDataPoint({
         blobs: [
           execution.organizationId,
           execution.matterId,
