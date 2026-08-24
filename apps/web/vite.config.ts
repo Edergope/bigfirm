@@ -24,11 +24,18 @@ const ragE2E = process.env.IUSIA_RAG_E2E === "1";
  */
 const cloudflarePlugin = cloudflare({
   remoteBindings: ragE2E,
-  config: (cfg: { r2_buckets?: Array<{ binding: string; remote?: boolean }>; vars?: Record<string, unknown> }) => {
+  config: (cfg: {
+    r2_buckets?: Array<{ binding: string; remote?: boolean }>;
+    ai_search?: Array<{ binding: string; instance_name: string; remote?: boolean }>;
+    vars?: Record<string, unknown>;
+  }) => {
     if (ragE2E) {
       for (const b of cfg.r2_buckets ?? []) {
         if (b.binding === "ARTIFACTS") b.remote = true; // SÓLO ARTIFACTS -> remoto
       }
+      // AI Search no tiene emulación local: se añade el binding SÓLO en modo E2E
+      // (remoto). En `pnpm dev` normal no existe → env.AI_SEARCH undefined → NOT_CONFIGURED.
+      cfg.ai_search = [{ binding: "AI_SEARCH", instance_name: "iusia-rag-e2e", remote: true }];
     }
     cfg.vars = { ...(cfg.vars ?? {}), IUSIA_ENV: ragE2E ? "staging" : "development" };
   },

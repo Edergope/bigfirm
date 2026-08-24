@@ -88,7 +88,9 @@ export class AiSearchRetrievalProvider implements RetrievalProvider {
         document_id: documentId || documentIdOf(key),
         matter_id: matterId,
         score: chunk.score ?? 0,
-        excerpt: (chunk.text ?? "").slice(0, 600),
+        // Extracto acotado del chunk recuperado (no es tuning de AI Search, sólo el
+        // tamaño del fragmento que se expone). Suficiente para soportar el hecho jurídico.
+        excerpt: (chunk.text ?? "").slice(0, 2000),
         source_folder: folderOf(key),
       });
     }
