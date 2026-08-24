@@ -129,6 +129,8 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
           objective_length: workPackage.objective.length,
           source_count: workPackage.source_refs.length,
           document_count: workPackage.document_excerpts.length,
+          // Referencias de la evidencia recibida: prueba por-agente del grounding.
+          evidence_refs: workPackage.document_excerpts.map((d) => d.ref_id).join(","),
         },
       });
 

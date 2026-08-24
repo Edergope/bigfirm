@@ -1,6 +1,11 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { getAgentByName } from "agents";
-import { newId, type Materiality, type WorkPackage } from "@iusia/domain";
+import {
+  newId,
+  type DocumentExcerpt,
+  type Materiality,
+  type WorkPackage,
+} from "@iusia/domain";
 import { getAgentDefinition } from "@iusia/agents";
 import {
   dispatchBatches,
@@ -20,6 +25,8 @@ import {
 } from "@iusia/db";
 import type { Env } from "../env.js";
 import type { LegalWorker, RunResult } from "../agents/legal-worker.js";
+import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
+import { collectMatterEvidence } from "./rag-evidence.js";
 import { NotificationService } from "../services/notifications.js";
 
 export interface MatterOrchestrationParams {
@@ -92,7 +99,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       });
     });
 
-    // Contexto documental del matter: sólo referencias autorizadas, no contenido.
+    // Contexto documental del matter: referencias autorizadas (punteros, no contenido).
     const sources = await step.do("collect-authorized-sources", async () => {
       const docs = await documents.listForMatter(params.organization_id, params.matter_id);
       return docs.map((d) => ({
@@ -101,6 +108,45 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         label: d.name,
         locator: d.driveFileId ? `drive://${d.driveFileId}` : `iusia://document/${d.id}`,
       }));
+    });
+
+    // Evidencia RAG scopeada al matter: recuperada del índice AI Search YA validado.
+    // El alcance se deriva SIEMPRE en el servidor (esta organización + este matter);
+    // nunca del modelo, del prompt, del cliente ni de un output previo. Los chunks
+    // autorizados se inyectan como document_excerpts para que los agentes razonen
+    // sobre la evidencia real del expediente y no sobre conocimiento general.
+    const evidence = await step.do(
+      "collect-rag-evidence",
+      async (): Promise<DocumentExcerpt[]> => {
+        const docs = await documents.listForMatter(params.organization_id, params.matter_id);
+        return collectMatterEvidence({
+          retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
+          organizationId: params.organization_id,
+          matterId: params.matter_id,
+          // La query es el objetivo real de la ejecución, no un texto hardcodeado.
+          objective: params.objective,
+          documentNames: new Map(docs.map((d) => [d.id, d.name])),
+          maxResults: 5,
+        });
+      },
+    );
+
+    // Provenance de la recuperación como tool call real (alimenta el ledger de eventos).
+    await step.do("emit-rag-retrieval", async () => {
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.tool.called",
+        status: "RUNNING",
+        detail: {
+          tool: "ai_search.retrieval",
+          chunk_count: evidence.length,
+          document_ids: [
+            ...new Set(evidence.map((e) => e.ref_id.split("#")[0] ?? e.ref_id)),
+          ].join(","),
+          query_source: "execution.objective",
+        },
+      });
     });
 
     const batches = dispatchBatches(plan.nodes);
@@ -155,7 +201,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                 questions: [],
                 fact_refs: [],
                 source_refs: sources,
-                document_excerpts: [],
+                // Evidencia RAG autorizada y scopeada, compartida por los nodos del DAG.
+                document_excerpts: evidence,
                 upstream_outputs: [],
                 constraints: [
                   "Trabaja únicamente con las fuentes autorizadas del WorkPackage.",
