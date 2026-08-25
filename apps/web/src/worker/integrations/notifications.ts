@@ -63,10 +63,22 @@ export class ResendNotificationProvider implements NotificationProvider {
         signal: controller.signal,
       });
       if (!res.ok) {
+        // El motivo del proveedor es lo que permite corregir la configuración (por
+        // ejemplo, un remitente cuyo dominio no está verificado). Se toma sólo el
+        // mensaje de validación, acotado: nunca credenciales ni el cuerpo del correo.
+        const reason = await res
+          .json()
+          .then((b) => {
+            const parsed = b as { message?: unknown; name?: unknown } | null;
+            const message = typeof parsed?.message === "string" ? parsed.message : null;
+            const name = typeof parsed?.name === "string" ? parsed.name : null;
+            return [name, message].filter(Boolean).join(": ").slice(0, 200) || null;
+          })
+          .catch(() => null);
         return {
           status: "FAILED",
           failure_kind: res.status >= 500 ? "http_5xx" : "http_4xx",
-          error: `HTTP ${res.status}`,
+          error: reason ? `HTTP ${res.status} — ${reason}` : `HTTP ${res.status}`,
         };
       }
       const body = (await res.json().catch(() => null)) as { id?: string } | null;
