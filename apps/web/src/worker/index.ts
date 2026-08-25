@@ -45,9 +45,10 @@ protectedApi.use("*", requireSession);
 protectedApi.get("/me", async (c) => {
   const { authz, credits } = c.get("ctx");
   const { userId, userName, organizationId } = c.get("session");
-  const [firmRole, balance] = await Promise.all([
+  const [firmRole, balance, systemRole] = await Promise.all([
     authz.firmRole(organizationId, userId),
     credits.balance(organizationId),
+    authz.systemRole(userId),
   ]);
   if (!firmRole) {
     throw new IusiaError("FORBIDDEN", "El usuario no pertenece a esta firma");
@@ -57,6 +58,10 @@ protectedApi.get("/me", async (c) => {
     organization_id: organizationId,
     firm_role: firmRole,
     credits: balance,
+    // Capacidad de sistema resuelta EN EL SERVIDOR. La UI la lee para decidir qué
+    // mostrar; jamás para autorizar: cada ruta de sistema vuelve a comprobarla.
+    system_role: systemRole,
+    is_system_superadmin: systemRole === "SYSTEM_SUPERADMIN",
   });
 });
 

@@ -16,6 +16,7 @@ import {
 } from "@iusia/ui";
 import type { RiskLevel } from "@iusia/domain";
 import { api, ApiError, type CaseBriefData, type MatterDetail } from "../api.js";
+import { authClient } from "../auth-client.js";
 import { MatterOrchestration } from "./MatterOrchestration.js";
 
 const TABS = [
@@ -234,23 +235,51 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Scope de SÓLO LECTURA de Drive. Se solicita aparte del inicio de sesión. */
+const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+
 function Documentos({ data }: { data: MatterDetail }) {
   const integrations = useQuery({ queryKey: ["integrations"], queryFn: api.integrationsStatus });
+  const driveStatus = useQuery({ queryKey: ["drive-status"], queryFn: api.driveStatus });
+  const connected = driveStatus.data?.connected === true;
+
+  /**
+   * Autorización INCREMENTAL de Google Drive, separada del login: reutiliza
+   * `linkSocial` de Better Auth pidiendo el scope adicional. El navegador va a
+   * Google y vuelve; el frontend nunca ve tokens.
+   */
+  async function connectDrive() {
+    await authClient.linkSocial({
+      provider: "google",
+      scopes: [DRIVE_READONLY_SCOPE],
+      callbackURL: window.location.pathname,
+    });
+  }
+
   return (
     <Card>
       <CardHeader
         title="Expediente documental"
         subtitle="Los archivos viven en Google Drive; IUSIA administra metadata y estado."
         action={
-          integrations.data ? (
-            <StatusChip
-              label={
-                integrations.data.storage.status === "CONNECTED" ? "Drive conectado" : "Drive no conectado"
-              }
-              tone={integrations.data.storage.status === "CONNECTED" ? "success" : "warning"}
-              dot
-            />
-          ) : null
+          <span className="flex items-center gap-3">
+            {integrations.data ? (
+              <StatusChip
+                label={connected ? "Drive conectado" : "Drive no conectado"}
+                tone={connected ? "success" : "warning"}
+                dot
+              />
+            ) : null}
+            {driveStatus.isSuccess && !connected ? (
+              <button
+                type="button"
+                onClick={() => void connectDrive()}
+                className="text-[13px] font-medium text-iusia-action hover:underline"
+              >
+                Conectar Google Drive
+              </button>
+            ) : null}
+          </span>
         }
       />
       {data.documents.length === 0 ? (

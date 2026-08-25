@@ -8,6 +8,22 @@ import { z } from "zod";
  * Blueprint §04: el rol de firma no concede acceso automático a todos los casos.
  */
 
+/**
+ * Rol de SISTEMA. Autoridad global sobre IUSIA como plataforma, NO sobre una firma.
+ *
+ * Deliberadamente fuera de `FIRM_ROLES`: son planos de autorización distintos. Un
+ * SYSTEM_SUPERADMIN no obtiene por ello acceso a los expedientes de ninguna firma;
+ * si además opera dentro de un tenant, lo hace con su rol de firma y su ACL de Matter.
+ */
+export const SYSTEM_ROLES = ["SYSTEM_SUPERADMIN"] as const;
+export const SystemRole = z.enum(SYSTEM_ROLES);
+export type SystemRole = z.infer<typeof SystemRole>;
+
+/** Un rol de firma nunca puede expresar autoridad de sistema. */
+export function isSystemRole(value: string | null | undefined): value is SystemRole {
+  return value === "SYSTEM_SUPERADMIN";
+}
+
 export const FIRM_ROLES = [
   "FIRM_DIRECTOR",
   "PARTNER",

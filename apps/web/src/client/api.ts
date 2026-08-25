@@ -44,6 +44,9 @@ export interface MeResponse {
   organization_id: string;
   firm_role: string;
   credits: number;
+  /** Capacidad de sistema resuelta server-side. La UI la lee; nunca autoriza con ella. */
+  system_role: string | null;
+  is_system_superadmin: boolean;
 }
 
 export interface MatterSummary {
@@ -226,6 +229,9 @@ export const api = {
     request<{ ok: boolean; status: string }>(`/api/executions/${rootExecutionId}/cancel`, {
       method: "POST",
     }),
+
+  driveStatus: () =>
+    request<{ connected: boolean; reason?: string }>("/api/integrations/drive/status"),
 
   integrationsStatus: () =>
     request<{

@@ -3,8 +3,10 @@ import {
   IusiaError,
   decideMatterAccess,
   type AccessDecision,
+  isSystemRole,
   type FirmRole,
   type MatterAction,
+  type SystemRole,
 } from "@iusia/domain";
 import { schema, type IusiaDb, type MatterRepository, type AuditRepository } from "@iusia/db";
 
@@ -35,6 +37,54 @@ export class AuthorizationService {
       )
       .limit(1);
     return (row?.role as FirmRole | undefined) ?? null;
+  }
+
+  /**
+   * Rol de SISTEMA del usuario. Autoridad global de plataforma, ajena a la firma.
+   *
+   * La fuente de verdad es la columna `user.system_role`, que sólo se escribe
+   * server-side: Better Auth la declara con `input: false`, de modo que ni un
+   * cliente ni un perfil de OAuth pueden fijarla.
+   */
+  async systemRole(userId: string): Promise<SystemRole | null> {
+    const [row] = await this.db
+      .select({ role: schema.user.systemRole })
+      .from(schema.user)
+      .where(eq(schema.user.id, userId))
+      .limit(1);
+    return isSystemRole(row?.role) ? row.role : null;
+  }
+
+  async isSystemSuperadmin(userId: string): Promise<boolean> {
+    return (await this.systemRole(userId)) === "SYSTEM_SUPERADMIN";
+  }
+
+  /**
+   * Exige autoridad de sistema para una capacidad global (salud, integraciones,
+   * configuración, diagnóstico). Fail-closed y auditado: la denegación deja rastro.
+   *
+   * NO concede acceso a expedientes de ninguna firma: para eso está `authorizeMatter`.
+   */
+  async requireSystemSuperadmin(
+    userId: string,
+    capability: string,
+    /** Firma activa del request: sólo para atribuir el registro de auditoría. */
+    organizationId: string,
+  ): Promise<void> {
+    if (await this.isSystemSuperadmin(userId)) return;
+    await this.audit.record({
+      organizationId,
+      matterId: null,
+      actorUserId: userId,
+      action: "system.capability.denied",
+      resourceType: "system",
+      resourceId: capability,
+      outcome: "DENIED",
+      reason: "NOT_SYSTEM_SUPERADMIN",
+    });
+    throw new IusiaError("FORBIDDEN", "Esta operación requiere autoridad de sistema", {
+      capability,
+    });
   }
 
   /**

@@ -3,9 +3,11 @@ import { DRIVE_READONLY_SCOPE, buildGoogleSocialProvider } from "../auth/config.
 import type { Env } from "../env.js";
 
 /**
- * G1 — el social provider de Google solicita efectivamente el scope de sólo lectura
- * de Drive con acceso offline y consentimiento (para obtener refresh_token), con
- * mínimo privilegio (sin scopes de escritura) y sin activarse sin credenciales.
+ * Sprint 7.8 — identidad y autorización de Drive son flujos SEPARADOS.
+ *
+ * Iniciar sesión con Google sólo prueba quién eres: no debe pedir acceso a los
+ * documentos del usuario ni forzar la pantalla de consentimiento en cada entrada.
+ * Drive se autoriza después, de forma incremental, con `linkSocial`.
  */
 
 function env(over: Partial<Env> = {}): Env {
@@ -16,25 +18,35 @@ function env(over: Partial<Env> = {}): Env {
   } as unknown as Env;
 }
 
-describe("buildGoogleSocialProvider (G1)", () => {
-  it("solicita drive.readonly, offline y prompt=consent", () => {
-    const cfg = buildGoogleSocialProvider(env()) as {
-      google: { scope: string[]; accessType: string; prompt: string };
-    };
-    expect(cfg.google.scope).toContain(DRIVE_READONLY_SCOPE);
-    expect(cfg.google.accessType).toBe("offline");
-    expect(cfg.google.prompt).toBe("consent");
+function google(e: Env = env()) {
+  const cfg = buildGoogleSocialProvider(e) as {
+    google?: { scope?: string[]; accessType?: string; prompt?: string };
+  };
+  return cfg.google;
+}
+
+describe("buildGoogleSocialProvider — login = sólo identidad", () => {
+  it("GOOGLE_LOGIN_DOES_NOT_REQUEST_DRIVE_SCOPE", () => {
+    const cfg = google();
+    const scopes = cfg?.scope ?? [];
+    expect(scopes).not.toContain(DRIVE_READONLY_SCOPE);
+    expect(scopes.filter((s) => s.includes("googleapis.com/auth/drive"))).toEqual([]);
   });
 
-  it("mínimo privilegio: no incluye ningún scope de escritura de Drive", () => {
-    const cfg = buildGoogleSocialProvider(env()) as { google: { scope: string[] } };
-    const writeish = cfg.google.scope.filter(
-      (s) => /\/auth\/drive$/.test(s) || s.includes("drive.file") || s.includes("drive.appdata"),
-    );
+  it("GOOGLE_LOGIN_DOES_NOT_FORCE_CONSENT", () => {
+    // Sin `prompt: "consent"` Google no vuelve a pedir permisos en cada inicio de sesión.
+    expect(google()?.prompt).toBeUndefined();
+  });
+
+  it("conserva accessType=offline para que la ingesta en background pueda renovar", () => {
+    // No amplía lo que se pide al entrar: gobierna el tipo de token, no el scope.
+    expect(google()?.accessType).toBe("offline");
+  });
+
+  it("mínimo privilegio: nunca declara scopes de escritura de Drive", () => {
+    const scopes = google()?.scope ?? [];
+    const writeish = scopes.filter((s) => /drive(\.file|\.appdata)?$|drive\.write/.test(s));
     expect(writeish).toEqual([]);
-    // El único scope de Drive es el de sólo lectura.
-    const driveScopes = cfg.google.scope.filter((s) => s.includes("/auth/drive"));
-    expect(driveScopes).toEqual([DRIVE_READONLY_SCOPE]);
   });
 
   it("sin credenciales, no activa el provider", () => {

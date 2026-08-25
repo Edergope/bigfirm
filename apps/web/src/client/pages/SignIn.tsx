@@ -1,42 +1,52 @@
 import { useState, type FormEvent } from "react";
 import { Button, Field, Input } from "@iusia/ui";
-import { authClient, signIn, signUp } from "../auth-client.js";
+import { authClient, signIn } from "../auth-client.js";
 
 /**
  * Acceso y registro de firma. Todo el trabajo criptográfico/sesión lo hace Better Auth.
  * Login sobrio y premium: marca clara, acceso directo, sin ilustraciones cliché.
  */
 export function SignIn() {
-  const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [firmName, setFirmName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      if (mode === "in") {
-        const res = await signIn.email({ email, password });
-        if (res.error) throw new Error(res.error.message ?? "No fue posible iniciar sesión");
-      } else {
-        const res = await signUp.email({ email, password, name });
-        if (res.error) throw new Error(res.error.message ?? "No fue posible crear la cuenta");
-        const org = await authClient.organization.create({
-          name: firmName,
-          slug: firmName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40),
-        });
-        if (org.error) throw new Error(org.error.message ?? "No fue posible crear la firma");
-        await authClient.organization.setActive({ organizationId: org.data.id });
-      }
+      const res = await signIn.email({ email, password });
+      if (res.error) throw new Error(res.error.message ?? "No fue posible iniciar sesión");
       window.location.assign("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error inesperado");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Recuperación de contraseña (ruta nativa de Better Auth). La respuesta es siempre
+   * la misma: nunca revela si un correo existe.
+   */
+  async function requestPasswordReset() {
+    setError(null);
+    setNotice(null);
+    if (!email) {
+      setError("Escribe tu correo para enviarte el enlace de recuperación.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await authClient.requestPasswordReset({ email, redirectTo: "/entrar" });
+    } catch {
+      // El resultado no se distingue a propósito.
+    } finally {
+      setNotice("Si el correo corresponde a una cuenta, recibirás un enlace para restablecer la contraseña.");
       setBusy(false);
     }
   }
@@ -87,25 +97,13 @@ export function SignIn() {
             <p className="text-[20px] font-bold tracking-[0.18em] text-iusia-navy">IUSIA</p>
           </div>
           <h2 className="text-[22px] font-semibold text-iusia-navy">
-            {mode === "in" ? "Acceso a la plataforma" : "Registrar firma"}
+            Acceso a la plataforma
           </h2>
           <p className="mt-1 text-[14px] text-iusia-mist-text">
-            {mode === "in"
-              ? "Continúa donde lo dejaste."
-              : "Crea tu firma y su primer usuario de dirección."}
+            Continúa donde lo dejaste.
           </p>
 
           <form onSubmit={submit} className="mt-7 flex flex-col gap-4">
-            {mode === "up" ? (
-              <>
-                <Field label="Nombre">
-                  <Input value={name} onChange={(e) => setName(e.target.value)} required />
-                </Field>
-                <Field label="Nombre de la firma">
-                  <Input value={firmName} onChange={(e) => setFirmName(e.target.value)} required />
-                </Field>
-              </>
-            ) : null}
             <Field label="Correo">
               <Input
                 type="email"
@@ -121,7 +119,7 @@ export function SignIn() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                autoComplete={mode === "in" ? "current-password" : "new-password"}
+                autoComplete="current-password"
               />
             </Field>
 
@@ -130,9 +128,14 @@ export function SignIn() {
                 {error}
               </p>
             ) : null}
+            {notice ? (
+              <p role="status" className="text-[13.5px] text-iusia-mist-text">
+                {notice}
+              </p>
+            ) : null}
 
             <Button type="submit" disabled={busy} className="mt-1 w-full">
-              {busy ? "Procesando…" : mode === "in" ? "Entrar" : "Crear firma"}
+              {busy ? "Procesando…" : "Entrar"}
             </Button>
           </form>
 
@@ -152,14 +155,17 @@ export function SignIn() {
 
           <button
             type="button"
-            onClick={() => {
-              setMode(mode === "in" ? "up" : "in");
-              setError(null);
-            }}
-            className="mt-6 text-[13.5px] text-iusia-action hover:underline"
+            onClick={() => void requestPasswordReset()}
+            disabled={busy}
+            className="mt-6 text-[13.5px] text-iusia-action hover:underline disabled:opacity-50"
           >
-            {mode === "in" ? "Registrar una firma nueva" : "Ya tengo una cuenta"}
+            Olvidé mi contraseña
           </button>
+
+          <p className="mt-6 text-[12.5px] leading-relaxed text-iusia-mist-text">
+            El acceso a IUSIA lo habilita la dirección de tu firma. Si aún no tienes
+            cuenta, solicítala a quien administra la plataforma.
+          </p>
         </div>
       </div>
     </div>

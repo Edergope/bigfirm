@@ -25,6 +25,12 @@ export const user = sqliteTable("user", {
     .default(false)
     .notNull(),
   image: text("image"),
+  /**
+   * Rol de SISTEMA (autoridad global de plataforma), independiente de la firma.
+   * Declarado en Better Auth como additionalField con `input: false`: ningún cliente
+   * —ni el perfil de OAuth— puede fijarlo. Sólo se establece server-side.
+   */
+  systemRole: text("system_role"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),

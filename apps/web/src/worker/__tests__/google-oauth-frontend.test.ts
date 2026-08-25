@@ -22,9 +22,20 @@ describe("botón Continuar con Google (SignIn)", () => {
     expect(SIGNIN).toMatch(/callbackURL:/);
   });
 
-  it("conserva el login email/password", () => {
+  it("EMAIL_PASSWORD_AUTH_STILL_WORKS: conserva el inicio de sesión con contraseña", () => {
     expect(SIGNIN).toMatch(/signIn\.email\(/);
-    expect(SIGNIN).toMatch(/signUp\.email\(/);
+  });
+
+  it("PUBLIC_ORGANIZATION_CREATION_BLOCKED: la pantalla no registra firmas ni cuentas", () => {
+    // Sprint 7.8: IUSIA no es un SaaS de alta self-service. El acceso lo habilita
+    // la dirección de la firma; el frontend no ofrece crear tenant ni usuario.
+    expect(SIGNIN).not.toMatch(/signUp\.email\(/);
+    expect(SIGNIN).not.toMatch(/organization\.create\(/);
+    expect(SIGNIN).not.toMatch(/Registrar una firma/);
+  });
+
+  it("ofrece recuperación de contraseña por la ruta nativa de Better Auth", () => {
+    expect(SIGNIN).toMatch(/requestPasswordReset\(/);
   });
 
   it("el frontend no maneja tokens de Google (sólo redirige)", () => {
