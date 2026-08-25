@@ -21,7 +21,12 @@ export const colors = {
   mistStrong: "#89919B", // borde de control interactivo — mist a ≥3:1 (WCAG 1.4.11)
   surface: "#F7F8FA", // superficies generales
   paper: "#FFFFFF", // lectura y tarjetas
-  canvas: "#EEF1F6", // lienzo de la aplicación, por debajo del workspace (§17 nivel 0)
+  canvas: "#EEF1F6", // lienzo interior de la aplicación
+  ambient: "#E7ECF4", // fondo ambiental sobre el que flota el contenedor
+  ice: "#F4F7FC", // superficie fría interior
+  aqua: "#EAF3F6", // tinte frío de acento
+  navyDeep: "#071429", // navy con más materia (navegación)
+  navySoft: "#12294B", // navy con menos peso (superficies internas)
   line: "#E3E7EE", // trazo estructural entre paneles
   lineStrong: "#D3D9E3", // trazo estructural con más presencia (cabeceras de tabla)
   // Estados semánticos — nunca únicos portadores de significado.

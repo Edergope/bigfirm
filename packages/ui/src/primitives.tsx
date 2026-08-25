@@ -23,9 +23,9 @@ export function Card({
   return (
     <As
       className={clsx(
-        "rounded-[14px] border border-iusia-line bg-iusia-paper shadow-[0_1px_2px_rgba(11,29,58,0.05)]",
+        "rounded-[var(--radius-lg)] bg-iusia-paper shadow-[var(--shadow-surface)]",
         interactive &&
-          "transition-colors hover:border-iusia-action/40 focus-within:border-iusia-action/50",
+          "transition-shadow duration-200 hover:shadow-[var(--shadow-panel)]",
         className,
       )}
     >
@@ -44,7 +44,7 @@ export function CardHeader({
   action?: ReactNode;
 }) {
   return (
-    <header className="flex items-start justify-between gap-3 border-b border-iusia-line px-5 py-3.5">
+    <header className="flex items-start justify-between gap-3 px-5 pb-3 pt-4">
       <div className="min-w-0">
         <h2 className="text-[14.5px] font-semibold tracking-[-0.01em] text-iusia-navy">{title}</h2>
         {subtitle ? <p className="mt-0.5 text-[13px] text-iusia-mist-text">{subtitle}</p> : null}
@@ -108,12 +108,13 @@ export function Button({
       disabled={disabled}
       onClick={onClick}
       className={clsx(
-        "inline-flex items-center justify-center gap-2 rounded-[10px] font-medium transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97]",
+        "inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] font-medium tracking-[-0.005em] transition-[color,background-color,box-shadow,transform] duration-200 active:scale-[0.98]",
         "disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100",
-        size === "md" ? "h-9 px-4 text-[14px]" : "h-8 px-3 text-[13px]",
-        variant === "primary" && "bg-iusia-action text-white hover:bg-[#1d4fd0]",
+        size === "md" ? "h-9.5 px-4 text-[13.5px]" : "h-8 px-3 text-[12.5px]",
+        variant === "primary" &&
+          "bg-iusia-navy text-white shadow-[0_2px_8px_-2px_rgba(11,29,58,0.4)] hover:bg-iusia-navy-soft hover:shadow-[0_4px_14px_-4px_rgba(11,29,58,0.5)]",
         variant === "secondary" &&
-          "border border-iusia-mist-strong bg-iusia-paper text-iusia-carbon hover:bg-iusia-surface",
+          "bg-iusia-ice text-iusia-navy shadow-[var(--shadow-surface)] hover:bg-iusia-aqua",
         variant === "ghost" && "text-iusia-carbon hover:bg-iusia-mist/15",
         variant === "destructive" && "bg-iusia-critical text-white hover:bg-[#b91c1c]",
         className,
@@ -708,6 +709,197 @@ export function SectionLabel({ children, action }: { children: ReactNode; action
         {children}
       </h2>
       {action}
+    </div>
+  );
+}
+
+// ─────────────────────────── Composición modular ───────────────────────────
+
+/**
+ * Módulo de una composición bento.
+ *
+ * Sustituye a la tarjeta genérica como unidad de página: cada módulo declara su
+ * PESO, y el peso decide cuánto espacio ocupa. Una rejilla de bloques idénticos
+ * describe un panel de administración; una composición donde lo importante es
+ * visiblemente más grande describe una decisión.
+ *
+ * `tone="signature"` es la única superficie navy del contenido: se reserva para el
+ * módulo en el que IUSIA habla en primera persona.
+ */
+export function Module({
+  title,
+  eyebrow,
+  action,
+  children,
+  className,
+  tone = "paper",
+  padded = true,
+}: {
+  title?: string;
+  eyebrow?: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  tone?: "paper" | "ice" | "signature";
+  padded?: boolean;
+}) {
+  const surface =
+    tone === "signature"
+      ? "on-navy bg-iusia-navy text-white shadow-[var(--shadow-panel)]"
+      : tone === "ice"
+        ? "bg-iusia-ice shadow-[var(--shadow-surface)]"
+        : "bg-iusia-paper shadow-[var(--shadow-surface)]";
+  return (
+    <section
+      className={clsx(
+        "flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)]",
+        surface,
+        className,
+      )}
+    >
+      {title || action ? (
+        <header className="flex items-start justify-between gap-3 px-5 pb-2.5 pt-4">
+          <div className="min-w-0">
+            {eyebrow ? (
+              <p
+                className={clsx(
+                  "text-[10.5px] font-semibold uppercase tracking-[0.1em]",
+                  tone === "signature" ? "text-white/45" : "text-iusia-mist-text",
+                )}
+              >
+                {eyebrow}
+              </p>
+            ) : null}
+            {title ? (
+              <h2
+                className={clsx(
+                  "text-[15px] font-semibold tracking-[-0.015em]",
+                  eyebrow && "mt-0.5",
+                  tone === "signature" ? "text-white" : "text-iusia-navy",
+                )}
+              >
+                {title}
+              </h2>
+            ) : null}
+          </div>
+          {action}
+        </header>
+      ) : null}
+      <div className={clsx("flex min-h-0 flex-1 flex-col", padded && "px-5 pb-4")}>{children}</div>
+    </section>
+  );
+}
+
+/**
+ * Cifra con contexto. El icono va en un contenedor tonal —no suelto sobre el
+ * fondo— porque un glifo flotando a 16px se lee como decoración, y dentro de su
+ * chip se lee como categoría.
+ */
+export function StatTile({
+  label,
+  value,
+  icon,
+  tone = "navy",
+  hint,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  icon?: ReactNode;
+  tone?: "navy" | "critical" | "warning" | "success" | "gold" | "intel";
+  hint?: string;
+  onClick?: () => void;
+}) {
+  const chip: Record<string, string> = {
+    navy: "bg-iusia-navy/8 text-iusia-navy",
+    critical: "bg-iusia-critical/10 text-iusia-critical",
+    warning: "bg-iusia-warning/12 text-iusia-warning-text",
+    success: "bg-iusia-success/10 text-iusia-success-text",
+    gold: "bg-iusia-gold/15 text-iusia-gold-text",
+    intel: "bg-iusia-intel/15 text-iusia-intel-text",
+  };
+  // Un cero nunca lleva color de alarma: diría lo contrario de lo que ocurre.
+  const empty = value === "0";
+  const valueTone: Record<string, string> = {
+    navy: "text-iusia-navy",
+    critical: "text-iusia-critical",
+    warning: "text-iusia-warning-text",
+    success: "text-iusia-success-text",
+    gold: "text-iusia-gold-text",
+    intel: "text-iusia-intel-text",
+  };
+  const inner = (
+    <>
+      {icon ? (
+        <span
+          className={clsx(
+            "mb-2.5 inline-flex h-8 w-8 items-center justify-center rounded-[10px]",
+            chip[tone],
+          )}
+          aria-hidden
+        >
+          {icon}
+        </span>
+      ) : null}
+      <span className="block text-[10.5px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+        {label}
+      </span>
+      <span className="mt-1 flex items-baseline gap-1.5">
+        <span
+          className={clsx(
+            "text-[26px] font-semibold leading-none tracking-[-0.02em] tnum",
+            empty ? "text-iusia-mist-text" : valueTone[tone],
+          )}
+        >
+          {value}
+        </span>
+        {hint ? <span className="text-[11.5px] text-iusia-mist-text">{hint}</span> : null}
+      </span>
+    </>
+  );
+  const shell =
+    "flex flex-col rounded-[var(--radius-lg)] bg-iusia-paper px-4 py-4 text-left shadow-[var(--shadow-surface)]";
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(shell, "transition-shadow duration-200 hover:shadow-[var(--shadow-panel)]")}
+    >
+      {inner}
+    </button>
+  ) : (
+    <div className={shell}>{inner}</div>
+  );
+}
+
+/** Título de pantalla dentro del nuevo marco. */
+export function ScreenTitle({
+  eyebrow,
+  title,
+  description,
+  actions,
+}: {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+      <div className="min-w-0">
+        {eyebrow ? (
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-iusia-mist-text">
+            {eyebrow}
+          </p>
+        ) : null}
+        <h1 className="mt-1 text-[30px] font-semibold leading-[1.1] tracking-[-0.03em] text-iusia-navy">
+          {title}
+        </h1>
+        {description ? (
+          <p className="mt-1.5 max-w-2xl text-[13.5px] text-iusia-mist-text">{description}</p>
+        ) : null}
+      </div>
+      {actions ? <div className="flex shrink-0 items-center gap-2.5 pt-5">{actions}</div> : null}
     </div>
   );
 }

@@ -2,15 +2,14 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Card,
-  CardHeader,
   Drawer,
-  PageHeader,
-  MetricRail,
+  Module,
+  ScreenTitle,
   Skeleton,
   StateBlock,
   StatusChip,
   matterStatusTerm,
+  riskTerm,
 } from "@iusia/ui";
 import { AlertTriangle, CalendarClock, Clock, Scale } from "lucide-react";
 import { api, type MeResponse } from "../api.js";
@@ -54,194 +53,248 @@ export function CommandCenter({ me }: { me: MeResponse }) {
   });
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="pb-2">
+      <ScreenTitle
+        eyebrow="Dirección de la firma"
         title={`Buen día, ${me.user.name.split(" ")[0] ?? me.user.name}`}
-        description="Dirección de la firma — visión transversal de la cartera."
-        actions={<StatusChip label="Alcance: firma" tone="info" dot />}
+        description="Visión transversal de la cartera, el riesgo y el trabajo de IUSIA."
       />
 
-      {/* Indicadores accionables: cada uno abre la lista que lo sustenta. Comparten
-          una sola superficie porque se leen comparándolos entre sí. */}
-      {loading ? (
-        <Skeleton className="h-[68px]" />
-      ) : (
-        <MetricRail
-          onSelect={(id) => setDrill(id as Drill)}
-          items={[
-            { id: "matters", label: "Activos", value: String(health.data?.total ?? 0) },
-            {
-              id: "risk",
-              label: "Riesgo alto",
-              value: String(health.data?.at_risk ?? 0),
-              tone: "critical",
-            },
-            { id: "overdue", label: "Vencidos", value: String(overdueCount), tone: "critical" },
-            {
-              id: "upcoming",
-              label: "Vencen pronto",
-              value: String(upcomingCount),
-              hint: "15 días",
-              tone: "warning",
-            },
-          ]}
-        />
-      )}
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="flex flex-col gap-4 lg:col-span-2">
-          {/* IUSIA recomienda: derivación determinista de datos reales, sin LLM. */}
-          <Card className="ring-1 ring-iusia-navy/[0.06]">
-            <header className="flex items-start justify-between gap-3 border-b border-iusia-line bg-gradient-to-b from-iusia-surface/70 to-transparent px-5 py-4">
-              <div className="min-w-0">
-                <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-iusia-navy">
-                  Requiere tu decisión
-                </h2>
-                <p className="mt-0.5 text-[13px] text-iusia-mist-text">
-                  Derivado de los términos, riesgos y actividad reales de la cartera
-                </p>
-              </div>
-              {recommendations.length > 0 ? (
-                <StatusChip
-                  label={`${recommendations.length}`}
-                  tone={overdueCount > 0 || riskCount > 0 ? "critical" : "warning"}
-                />
-              ) : null}
-            </header>
-            {recommendations.length === 0 ? (
-              <StateBlock
-                kind="empty"
-                title="Nada que reclame tu atención"
-                hint="Sin términos vencidos, riesgos abiertos ni expedientes detenidos."
-              />
-            ) : (
-              <ul className="divide-y divide-iusia-mist/20">
-                {recommendations.map((r) => (
-                  <li key={r.key} className="flex items-center justify-between gap-4 px-6 py-3.5">
-                    <span className="flex min-w-0 items-start gap-3">
-                      <r.icon size={17} className={r.iconClass} aria-hidden />
-                      <span className="min-w-0">
-                        <span className="block text-[14.5px] text-iusia-carbon">{r.title}</span>
-                        <span className="block text-[12.5px] text-iusia-mist-text">{r.detail}</span>
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setDrill(r.drill)}
-                      className="shrink-0 text-[13px] font-medium text-iusia-action hover:underline"
-                    >
-                      Revisar
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          {/* Operación: estado real de la cartera. */}
-          <Card>
-            <CardHeader title="Operación jurídica" subtitle="Distribución de la cartera por estado" />
-            <div className="px-6 py-5">
-              {Object.keys(health.data?.by_status ?? {}).length === 0 ? (
-                <StateBlock kind="empty" title="Sin expedientes" />
-              ) : (
-                <ul className="flex flex-col gap-2.5">
-                  {Object.entries(health.data?.by_status ?? {}).map(([status, n]) => {
-                    const total = health.data?.total || 1;
-                    const pct = Math.round((n / total) * 100);
-                    return (
-                      <li key={status} className="flex items-center gap-3">
-                        <span className="w-40 shrink-0 truncate text-[13.5px] text-iusia-carbon">
-                          {matterStatusTerm(status).label}
-                        </span>
-                        <span className="h-2 flex-1 overflow-hidden rounded-full bg-iusia-mist/20">
-                          <span
-                            className="block h-full rounded-full bg-iusia-action/70"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </span>
-                        <span className="w-20 shrink-0 whitespace-nowrap text-right text-[13px] tabular-nums text-iusia-mist-text">
-                          {n} · {pct}%
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {inactiveCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setDrill("inactive")}
-                  className="mt-4 text-[13px] font-medium text-iusia-action hover:underline"
-                >
-                  {inactiveCount} expediente{inactiveCount === 1 ? "" : "s"} sin actividad reciente
-                </button>
-              ) : null}
-            </div>
-          </Card>
+      {/*
+        Composición asimétrica. La decisión pendiente ocupa el doble de ancho y todo
+        el alto de la primera banda porque es lo único que puede cambiar el día de
+        quien dirige; IUSIA la acompaña como módulo firma. Debajo, tres módulos de
+        peso decreciente. Nada de rejillas de bloques idénticos.
+      */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <DecisionModule
+            loading={loading}
+            recommendations={recommendations}
+            onDrill={setDrill}
+            metrics={{
+              total: health.data?.total ?? 0,
+              risk: health.data?.at_risk ?? 0,
+              overdue: overdueCount,
+              upcoming: upcomingCount,
+            }}
+          />
         </div>
 
-        <div className="flex flex-col gap-5">
-          {/* IUSIA: actividad real de la inteligencia artificial. */}
-          <Card>
-            <CardHeader title="IUSIA" subtitle="Actividad de la inteligencia jurídica" />
-            <div className="px-6 py-5">
-              <dl className="space-y-2.5 text-[13.5px]">
-                <Row label="Análisis en curso" value={String(activeCount)} />
-                <Row label="Créditos disponibles" value={me.credits.toLocaleString("es-CO")} />
-              </dl>
-              {activeCount > 0 ? (
-                <ul className="mt-4 space-y-2 border-t border-iusia-mist/20 pt-3">
-                  {analyses.slice(0, 3).map((a) => (
-                    <li key={a.root_execution_id}>
-                      <Link
-                        to={`/casos/${a.matter_id}`}
-                        className="block truncate text-[13px] text-iusia-action hover:underline"
-                      >
-                        {a.matter_title}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              <Link
-                to="/iusia"
-                className="mt-4 inline-block text-[13px] font-medium text-iusia-action hover:underline"
-              >
-                Ver toda la actividad de IUSIA
-              </Link>
+        <Module
+          tone="signature"
+          eyebrow="Inteligencia jurídica"
+          title="IUSIA"
+        >
+          <p className="text-[13px] leading-relaxed text-white/55">
+            Orquesta un equipo de especialistas sobre tus expedientes y sigue trabajando
+            aunque cierres la vista.
+          </p>
+          <div className="mt-4 flex items-end gap-7">
+            <div>
+              <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-white/40">
+                En curso
+              </p>
+              <p className="mt-1 flex items-center gap-2 text-[28px] font-semibold leading-none tracking-[-0.02em] tnum text-white">
+                {activeCount}
+                {activeCount > 0 ? (
+                  <span className="relative flex h-2 w-2" aria-hidden>
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iusia-intel opacity-70 motion-reduce:animate-none" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-iusia-intel" />
+                  </span>
+                ) : null}
+              </p>
             </div>
-          </Card>
+            <div>
+              <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-white/40">
+                Créditos
+              </p>
+              <p className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] tnum text-white">
+                {me.credits.toLocaleString("es-CO")}
+              </p>
+            </div>
+          </div>
 
-          {/* Equipo: carga real por persona (endpoint de dirección). */}
-          <Card>
-            <CardHeader title="Equipo" subtitle="Carga de trabajo abierta" />
-            {workload.isLoading ? (
-              <div className="p-5"><Skeleton className="h-20" /></div>
-            ) : (workload.data?.workload.length ?? 0) === 0 ? (
-              <StateBlock kind="empty" title="Sin tareas asignadas" hint="Nadie tiene trabajo pendiente registrado." />
-            ) : (
-              <ul className="divide-y divide-iusia-mist/20">
-                {workload.data?.workload.slice(0, 6).map((w) => (
-                  <li key={w.assignedTo ?? "sin"} className="flex items-center justify-between px-6 py-2.5">
-                    <span className="truncate text-[13.5px] text-iusia-carbon">
-                      {w.name ?? "Sin asignar"}
-                    </span>
-                    <span className="text-[13px] tabular-nums text-iusia-carbon">
-                      {w.openTasks} abiertas
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="px-6 pb-4">
-              <Link to="/equipo" className="text-[13px] font-medium text-iusia-action hover:underline">
-                Administrar equipo
-              </Link>
-            </div>
-          </Card>
-        </div>
+          {activeCount > 0 ? (
+            <ul className="mt-4 space-y-1.5">
+              {analyses.slice(0, 2).map((a) => (
+                <li key={a.root_execution_id}>
+                  <Link
+                    to={`/casos/${a.matter_id}?analisis=${a.root_execution_id}`}
+                    className="block truncate rounded-[8px] bg-white/[0.06] px-2.5 py-1.5 text-[12.5px] text-white/85 transition-colors hover:bg-white/[0.12]"
+                  >
+                    {a.matter_title}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <Link
+            to="/iusia"
+            className="mt-4 inline-block text-[12.5px] font-medium text-iusia-intel transition-opacity hover:opacity-80"
+          >
+            Ver actividad de IUSIA →
+          </Link>
+        </Module>
       </div>
+
+      <div className="mt-4 grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-7">
+        <Module title="Operación jurídica" eyebrow="Cartera por estado" className="lg:col-span-3">
+          {Object.keys(health.data?.by_status ?? {}).length === 0 ? (
+            <p className="py-4 text-[13.5px] text-iusia-mist-text">Sin expedientes todavía.</p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {Object.entries(health.data?.by_status ?? {}).map(([status, n]) => {
+                const total = health.data?.total || 1;
+                const pct = Math.round((n / total) * 100);
+                return (
+                  <li key={status}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-[13px] text-iusia-carbon">
+                        {matterStatusTerm(status).label}
+                      </span>
+                      <span className="shrink-0 text-[12.5px] tnum text-iusia-mist-text">
+                        {n} · {pct}%
+                      </span>
+                    </div>
+                    <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-iusia-ice">
+                      <span
+                        className="block h-full rounded-full bg-iusia-navy/70"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {inactiveCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setDrill("inactive")}
+              className="mt-4 text-[12.5px] font-medium text-iusia-action hover:underline"
+            >
+              {inactiveCount} sin actividad reciente →
+            </button>
+          ) : null}
+        </Module>
+
+        <Module title="Riesgo" eyebrow="Expedientes expuestos" className="lg:col-span-2">
+          {riskCount === 0 ? (
+            <div className="flex h-full flex-col justify-center py-2">
+              <p className="text-[13.5px] font-medium text-iusia-success-text">
+                Ningún expediente con riesgo abierto.
+              </p>
+              <p className="mt-1 text-[12.5px] text-iusia-mist-text">
+                El riesgo sólo se muestra con metodología registrada; sin ella el
+                expediente aparece como no evaluado.
+              </p>
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {(risks.data?.risks ?? []).slice(0, 4).map((r) => (
+                <li key={r.matter_id}>
+                  <Link
+                    to={`/casos/${r.matter_id}`}
+                    className="flex items-center justify-between gap-3 rounded-[10px] px-2.5 py-2 transition-colors hover:bg-iusia-ice"
+                  >
+                    <span className="min-w-0 truncate text-[13.5px] text-iusia-carbon">
+                      {r.title}
+                    </span>
+                    <StatusChip
+                      label={riskTerm(r.risk_level).label}
+                      tone={riskTerm(r.risk_level).tone}
+                      title={r.rationale ?? undefined}
+                      dot
+                    />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Module>
+
+        {/* Equipo pesa menos cuando no hay trabajo repartido: el espacio es finito y
+            un panel vacío del tamaño de uno lleno miente sobre su importancia. */}
+        <Module title="Equipo" eyebrow="Carga abierta" tone="ice" className="lg:col-span-2">
+          {workload.isLoading ? (
+            <Skeleton className="h-16" />
+          ) : (workload.data?.workload.length ?? 0) === 0 ? (
+            <p className="text-[13px] text-iusia-mist-text">
+              Nadie tiene trabajo pendiente registrado.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {workload.data?.workload.slice(0, 5).map((w) => (
+                <li
+                  key={w.assignedTo ?? "sin"}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="truncate text-[13px] text-iusia-carbon">
+                    {w.name ?? "Sin asignar"}
+                  </span>
+                  <span className="shrink-0 text-[12.5px] tnum text-iusia-mist-text">
+                    {w.openTasks}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link
+            to="/equipo"
+            className="mt-3 inline-block text-[12.5px] font-medium text-iusia-action hover:underline"
+          >
+            Administrar →
+          </Link>
+        </Module>
+      </div>
+
+      <Module
+        title="Movimiento reciente"
+        eyebrow="Cartera"
+        className="mt-4"
+        padded={false}
+        action={
+          <Link to="/casos" className="text-[12.5px] font-medium text-iusia-action hover:underline">
+            Ver toda la cartera →
+          </Link>
+        }
+      >
+        {(matters.data?.matters ?? []).length === 0 ? (
+          <p className="px-5 pb-5 text-[13.5px] text-iusia-mist-text">
+            Todavía no hay expedientes en la firma.
+          </p>
+        ) : (
+          <ul className="divide-y divide-iusia-line/70">
+            {(matters.data?.matters ?? []).slice(0, 4).map((m) => (
+              <li key={m.id}>
+                <Link
+                  to={`/casos/${m.id}`}
+                  className="flex items-center gap-4 px-5 py-2.5 transition-colors hover:bg-iusia-ice"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-medium text-iusia-navy">
+                      {m.title}
+                    </span>
+                    <span className="block truncate text-[11.5px] text-iusia-mist-text">
+                      {m.reference} · {m.clientName}
+                    </span>
+                  </span>
+                  <StatusChip
+                    label={matterStatusTerm(m.status).label}
+                    tone={matterStatusTerm(m.status).tone}
+                    title={matterStatusTerm(m.status).hint}
+                  />
+                  <span className="hidden w-24 shrink-0 text-right text-[11.5px] tnum text-iusia-mist-text sm:block">
+                    {new Date(m.updatedAt).toLocaleDateString("es-CO")}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Module>
 
       {/* Drill-downs: el indicador abre exactamente los registros que lo componen. */}
       <Drawer open={drill === "matters"} onClose={() => setDrill(null)} title="Expedientes activos">
@@ -293,6 +346,149 @@ export function CommandCenter({ me }: { me: MeResponse }) {
 }
 
 
+/**
+ * Pieza protagonista del centro de mando.
+ *
+ * Integra los indicadores accionables Y lo que exige decisión en un solo módulo: eran
+ * dos bloques separados, y separarlos obligaba a leer un número arriba y su
+ * consecuencia abajo. Sin nada pendiente no se muestra una caja vacía de 250px: se
+ * muestra el estado de control, que también es información.
+ */
+function DecisionModule({
+  loading,
+  recommendations,
+  onDrill,
+  metrics,
+}: {
+  loading: boolean;
+  recommendations: ReturnType<typeof buildRecommendations>;
+  onDrill: (d: Drill) => void;
+  metrics: { total: number; risk: number; overdue: number; upcoming: number };
+}) {
+  return (
+    <Module
+      eyebrow="Atención de dirección"
+      title={recommendations.length > 0 ? "Requiere tu decisión" : "Cartera bajo control"}
+      action={
+        recommendations.length > 0 ? (
+          <StatusChip
+            label={`${recommendations.length} ${recommendations.length === 1 ? "asunto" : "asuntos"}`}
+            tone={metrics.overdue > 0 || metrics.risk > 0 ? "critical" : "warning"}
+          />
+        ) : (
+          <StatusChip label="Sin intervención inmediata" tone="success" dot />
+        )
+      }
+      padded={false}
+    >
+      <div className="px-5 pb-5">
+        {loading ? (
+          <Skeleton className="h-24" />
+        ) : recommendations.length === 0 ? (
+          <p className="text-[13.5px] leading-relaxed text-iusia-mist-text">
+            Ningún término vencido, ningún riesgo abierto y ningún expediente detenido.
+            Los indicadores de abajo siguen siendo accionables.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {recommendations.map((r) => (
+              <li key={r.key}>
+                <button
+                  type="button"
+                  onClick={() => onDrill(r.drill)}
+                  className="flex w-full items-start justify-between gap-4 rounded-[10px] px-2.5 py-2.5 text-left transition-colors hover:bg-iusia-ice"
+                >
+                  <span className="flex min-w-0 items-start gap-3">
+                    <r.icon size={16} className={r.iconClass} aria-hidden />
+                    <span className="min-w-0">
+                      <span className="block text-[14px] font-medium text-iusia-navy">
+                        {r.title}
+                      </span>
+                      <span className="block text-[12.5px] text-iusia-mist-text">{r.detail}</span>
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[12.5px] font-medium text-iusia-action">
+                    Revisar →
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Los indicadores viven DENTRO del módulo protagonista: son las puertas a lo
+          que acaba de leerse, no una fila de tarjetas independiente. */}
+      <div className="grid grid-cols-2 gap-px bg-iusia-line sm:grid-cols-4">
+        <IndicatorCell label="Activos" value={metrics.total} onClick={() => onDrill("matters")} />
+        <IndicatorCell
+          label="Riesgo alto"
+          value={metrics.risk}
+          tone="critical"
+          onClick={() => onDrill("risk")}
+        />
+        <IndicatorCell
+          label="Vencidos"
+          value={metrics.overdue}
+          tone="critical"
+          onClick={() => onDrill("overdue")}
+        />
+        <IndicatorCell
+          label="Vencen pronto"
+          value={metrics.upcoming}
+          tone="warning"
+          hint="15 d"
+          onClick={() => onDrill("upcoming")}
+        />
+      </div>
+    </Module>
+  );
+}
+
+function IndicatorCell({
+  label,
+  value,
+  tone = "navy",
+  hint,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  tone?: "navy" | "critical" | "warning";
+  hint?: string;
+  onClick: () => void;
+}) {
+  const empty = value === 0;
+  const color =
+    empty || tone === "navy"
+      ? "text-iusia-navy"
+      : tone === "critical"
+        ? "text-iusia-critical"
+        : "text-iusia-warning-text";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="bg-iusia-paper px-4 py-3 text-left transition-colors hover:bg-iusia-ice"
+    >
+      <span className="block text-[10.5px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+        {label}
+      </span>
+      <span className="mt-1 flex items-baseline gap-1.5">
+        <span
+          className={
+            "text-[22px] font-semibold leading-none tracking-[-0.02em] tnum " +
+            (empty ? "text-iusia-mist-text" : color)
+          }
+        >
+          {value}
+        </span>
+        {hint ? <span className="text-[11px] text-iusia-mist-text">{hint}</span> : null}
+      </span>
+    </button>
+  );
+}
+
 function MatterList({
   rows,
 }: {
@@ -320,14 +516,6 @@ function MatterList({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <dt className="text-iusia-mist-text">{label}</dt>
-      <dd className="font-medium text-iusia-carbon tnum">{value}</dd>
-    </div>
-  );
-}
 
 interface Recommendation {
   key: string;

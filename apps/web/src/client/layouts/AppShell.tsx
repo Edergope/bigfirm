@@ -1,43 +1,46 @@
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Home,
+  BrainCircuit,
   Briefcase,
   CalendarClock,
   Files,
+  Home,
   LayoutTemplate,
-  BrainCircuit,
-  Search,
   LogOut,
-  Users,
   SlidersHorizontal,
+  Users,
+  type LucideIcon,
 } from "lucide-react";
-import { CreditBadge } from "@iusia/ui";
 import clsx from "clsx";
+import { CreditBadge, firmRoleLabel } from "@iusia/ui";
 import { api } from "../api.js";
-import { signOut } from "../auth-client.js";
+import { authClient } from "../auth-client.js";
 import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
 import { AnalysisToasts } from "../components/AnalysisToasts.js";
-import { firmRoleLabel } from "@iusia/ui";
 
 /**
- * Shell de IUSIA.
+ * Marco de la aplicación.
  *
- * La navegación se organiza por INTENCIÓN, no por módulo técnico, y se adapta al
- * alcance real del usuario: el trabajo jurídico, la administración de la firma y el
- * control del sistema son planos distintos y no se mezclan en una lista plana.
+ * IUSIA es UNA pieza, no un muro de navegación con contenido pegado al lado. Todo
+ * —navegación, cabecera y trabajo— vive dentro de un mismo contenedor redondeado
+ * que flota sobre un fondo ambiental. La navegación es clara y tonal, del mismo
+ * material que el contenido: un panel navy de borde a borde partía el producto en
+ * dos objetos y era lo que lo hacía leer como panel de administración.
  *
- * Lo que la UI decide mostrar nunca autoriza nada: cada ruta revalida en el servidor.
+ * El navy no desaparece, se redistribuye: marca, tipografía de títulos, el estado
+ * activo de la navegación y los módulos donde IUSIA habla en primera persona.
  */
+
+const { signOut } = authClient;
 
 interface NavItem {
   to: string;
   label: string;
-  icon: typeof Home;
+  icon: LucideIcon;
   end?: boolean;
 }
 
-/** Trabajo jurídico: lo que usa cualquier miembro de la firma. */
 const WORK_NAV: NavItem[] = [
   { to: "/", label: "Inicio", icon: Home, end: true },
   { to: "/casos", label: "Casos", icon: Briefcase },
@@ -65,96 +68,88 @@ export function AppShell() {
   const controlsSystem = me.data?.is_system_superadmin === true;
 
   return (
-    <div className="min-h-screen">
-      <aside className="on-navy fixed inset-y-0 left-0 z-40 flex w-[60px] flex-col bg-iusia-navy text-white/85 lg:w-[212px]">
-        <div className="px-4 pb-5 pt-5 lg:px-5">
-          <p className="text-[16px] font-semibold tracking-[0.2em] text-white">
-            <span className="lg:hidden">IA</span>
-            <span className="hidden lg:inline">IUSIA</span>
-          </p>
-          <p className="mt-1 hidden whitespace-nowrap text-[8.5px] font-medium tracking-[0.09em] text-white/40 lg:block">
-            INTELLIGENCE · LAW · ADVANTAGE
-          </p>
-        </div>
+    <div className="h-screen p-0 lg:p-4">
+      {/* El contenedor de la aplicación. Una sola superficie, un solo objeto. */}
+      <div className="flex h-full overflow-hidden bg-iusia-paper shadow-[var(--shadow-floating)] lg:rounded-[var(--radius-xl)]">
+        <aside className="flex h-full w-[68px] shrink-0 flex-col bg-iusia-ice/70 lg:w-[218px]">
+          <div className="px-4 pb-6 pt-6 lg:px-6">
+            <p className="text-[17px] font-semibold tracking-[0.16em] text-iusia-navy">
+              <span className="lg:hidden">IA</span>
+              <span className="hidden lg:inline">IUSIA</span>
+            </p>
+            <p className="mt-1 hidden text-[9px] font-semibold tracking-[0.14em] text-iusia-mist-text lg:block">
+              LEGAL INTELLIGENCE
+            </p>
+          </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 py-2 lg:px-3">
-          <NavGroup items={WORK_NAV} />
-          {administersFirm ? <NavGroup label="Administración" items={FIRM_NAV} /> : null}
-          {controlsSystem ? <NavGroup label="Sistema" items={SYSTEM_NAV} /> : null}
-        </nav>
+          <nav className="flex-1 overflow-y-auto px-2.5 pb-2 lg:px-3.5">
+            <NavGroup items={WORK_NAV} />
+            {administersFirm ? <NavGroup label="Firma" items={FIRM_NAV} /> : null}
+            {controlsSystem ? <NavGroup label="Sistema" items={SYSTEM_NAV} /> : null}
+          </nav>
 
-        <div className="on-navy border-t border-white/[0.08] px-3 py-3.5 lg:px-4">
-          <p className="hidden truncate text-[13.5px] font-medium text-white/90 lg:block">
-            {me.data?.user.name ?? "…"}
-          </p>
-          <p className="mt-0.5 hidden text-[11.5px] text-white/45 lg:block">
-            {firmRoleLabel(role ?? "")}
-            {controlsSystem ? " · Sistema" : ""}
-          </p>
-          <button
-            type="button"
-            onClick={() => void signOut().then(() => window.location.assign("/entrar"))}
-            title="Cerrar sesión"
-            className="mt-3 flex items-center gap-2 text-[13px] text-white/55 transition-colors hover:text-white"
-          >
-            <LogOut size={14} aria-hidden />
-            <span className="sr-only lg:not-sr-only">Cerrar sesión</span>
-          </button>
-        </div>
-      </aside>
-
-      <div className="flex min-h-screen flex-col pl-[60px] lg:pl-[212px]">
-        <header className="sticky top-0 z-30 flex h-[58px] items-center gap-4 border-b border-iusia-line bg-iusia-canvas/85 px-4 backdrop-blur-md lg:px-7">
-          {/* Búsqueda global prevista por el Design System pero aún no implementada:
-              se muestra como control honesto y deshabilitado, no como affordance falso. */}
-          <button
-            type="button"
-            disabled
-            aria-label="Búsqueda global (próximamente)"
-            title="Búsqueda global — próximamente"
-            className="hidden h-9 max-w-md flex-1 cursor-not-allowed items-center gap-2 rounded-[10px] border border-iusia-mist/40 bg-iusia-surface px-3 text-left text-iusia-mist-text md:flex"
-          >
-            <Search size={16} aria-hidden />
-            <span className="text-[14px]">Buscar expedientes, documentos…</span>
-            <span className="ml-auto rounded-full bg-iusia-mist/15 px-2 py-0.5 text-[13px] font-medium">
-              Pronto
-            </span>
-          </button>
-
-          <div className="ml-auto flex items-center gap-4">
-            {activeCount > 0 ? (
+          <div className="px-2.5 pb-4 lg:px-3.5">
+            <div className="rounded-[var(--radius-md)] bg-iusia-paper/80 px-3 py-3 shadow-[var(--shadow-surface)]">
+              <p className="hidden truncate text-[13px] font-semibold text-iusia-navy lg:block">
+                {me.data?.user.name ?? "…"}
+              </p>
+              <p className="mt-0.5 hidden truncate text-[11.5px] text-iusia-mist-text lg:block">
+                {firmRoleLabel(role ?? "")}
+                {controlsSystem ? " · Sistema" : ""}
+              </p>
               <button
                 type="button"
-                onClick={() =>
-                  navigate(
-                    activeCount === 1 && analyses[0]
-                      ? `/casos/${analyses[0].matter_id}?analisis=${analyses[0].root_execution_id}`
-                      : "/iusia",
-                  )
-                }
-                aria-label={`IUSIA: ${activeCount} análisis en curso. Abrir.`}
-                className="flex items-center gap-2 rounded-full border border-iusia-intel/40 bg-iusia-intel/10 px-3 py-1.5 text-[13px] font-medium text-iusia-intel-text transition-colors hover:bg-iusia-intel/20"
+                onClick={() => void signOut().then(() => window.location.assign("/entrar"))}
+                title="Cerrar sesión"
+                className="mt-2.5 flex items-center gap-2 text-[12.5px] text-iusia-mist-text transition-colors hover:text-iusia-critical"
               >
-                {/* El punto no es decorativo: sólo late mientras hay trabajo real. */}
-                <span className="relative flex h-2 w-2" aria-hidden>
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iusia-intel opacity-60 motion-reduce:animate-none" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-iusia-intel" />
-                </span>
-                <span className="hidden sm:inline">
-                  IUSIA · {activeCount} en curso
-                </span>
-                <span className="sr-only sm:hidden">
-                  IUSIA: {activeCount} análisis en curso
-                </span>
+                <LogOut size={14} aria-hidden />
+                <span className="sr-only lg:not-sr-only">Cerrar sesión</span>
               </button>
-            ) : null}
-            {me.data ? <CreditBadge balance={me.data.credits} /> : null}
+            </div>
           </div>
-        </header>
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-5 lg:px-7 lg:py-6">
-          <Outlet />
-          <AnalysisToasts />
-        </main>
+        </aside>
+
+        {/* Zona de trabajo. Un lavado frío la separa de la navegación sin una línea. */}
+        <div className="flex h-full min-w-0 flex-1 flex-col bg-[radial-gradient(90%_60%_at_0%_0%,#F7FAFD_0%,transparent_55%),radial-gradient(70%_50%_at_100%_100%,#EDF5F6_0%,transparent_60%)]">
+          <header className="flex h-[58px] shrink-0 items-center gap-3 px-4 lg:px-7">
+            <p className="hidden text-[12.5px] text-iusia-mist-text sm:block">
+              {me.data ? `${me.data.user.name} · ${firmRoleLabel(role ?? "")}` : ""}
+            </p>
+            <div className="ml-auto flex items-center gap-3">
+              {activeCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(
+                      activeCount === 1 && analyses[0]
+                        ? `/casos/${analyses[0].matter_id}?analisis=${analyses[0].root_execution_id}`
+                        : "/iusia",
+                    )
+                  }
+                  aria-label={`IUSIA: ${activeCount} análisis en curso. Abrir.`}
+                  className="flex items-center gap-2 rounded-full bg-iusia-intel/12 px-3 py-1.5 text-[12.5px] font-medium text-iusia-intel-text shadow-[var(--shadow-surface)] transition-colors hover:bg-iusia-intel/20"
+                >
+                  {/* El punto no es decorativo: sólo late mientras hay trabajo real. */}
+                  <span className="relative flex h-2 w-2" aria-hidden>
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iusia-intel opacity-60 motion-reduce:animate-none" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-iusia-intel" />
+                  </span>
+                  <span className="hidden sm:inline">IUSIA · {activeCount} en curso</span>
+                  <span className="sr-only sm:hidden">
+                    IUSIA: {activeCount} análisis en curso
+                  </span>
+                </button>
+              ) : null}
+              {me.data ? <CreditBadge balance={me.data.credits} /> : null}
+            </div>
+          </header>
+
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-6 lg:px-7 lg:pb-7">
+            <Outlet />
+            <AnalysisToasts />
+          </main>
+        </div>
       </div>
     </div>
   );
@@ -163,16 +158,11 @@ export function AppShell() {
 /** Grupo de navegación con etiqueta opcional: separa planos de autoridad. */
 function NavGroup({ label, items }: { label?: string; items: NavItem[] }) {
   return (
-    <div className={label ? "mt-5" : ""}>
+    <div className={label ? "mt-6" : ""}>
       {label ? (
-        <>
-          <p className="mb-1.5 hidden px-3 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-white/40 lg:block">
-            {label}
-          </p>
-          {/* En el riel la separación entre planos de autoridad la lleva una regla,
-              no un rótulo que no cabría. */}
-          <hr className="mx-2 mb-2 border-white/10 lg:hidden" />
-        </>
+        <p className="mb-2 hidden px-3 text-[10px] font-semibold uppercase tracking-[0.11em] text-iusia-mist-text/80 lg:block">
+          {label}
+        </p>
       ) : null}
       {items.map(({ to, label: itemLabel, icon: Icon, end }) => (
         <NavLink
@@ -182,26 +172,21 @@ function NavGroup({ label, items }: { label?: string; items: NavItem[] }) {
           title={itemLabel}
           className={({ isActive }) =>
             clsx(
-              "relative mb-px flex items-center gap-3 rounded-[8px] px-3 py-[7px] text-[13.5px] transition-colors max-lg:justify-center max-lg:px-2",
+              "mb-1 flex items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] transition-all duration-200 max-lg:justify-center max-lg:px-2",
               isActive
-                ? "bg-white/[0.07] font-medium text-white"
-                : "text-white/60 hover:bg-white/[0.04] hover:text-white/90",
+                ? // Píldora navy elevada: el activo se distingue por material, no por
+                  // un rectángulo de contraste bruto.
+                  "bg-iusia-navy font-medium text-white shadow-[0_2px_6px_-2px_rgba(11,29,58,0.45)]"
+                : "text-iusia-carbon/70 hover:bg-iusia-paper/70 hover:text-iusia-navy",
             )
           }
         >
           {({ isActive }) => (
             <>
-              {/* Línea de acento en el borde: señala sin encender el bloque entero. */}
-              {isActive ? (
-                <span
-                  aria-hidden
-                  className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-iusia-intel"
-                />
-              ) : null}
               <Icon
                 size={16}
-                strokeWidth={isActive ? 2 : 1.6}
-                className={clsx("shrink-0", isActive ? "text-iusia-intel" : "text-white/45")}
+                strokeWidth={isActive ? 2.1 : 1.7}
+                className={clsx("shrink-0", isActive ? "text-iusia-intel" : "text-iusia-mist-text")}
                 aria-hidden
               />
               <span className="sr-only lg:not-sr-only">{itemLabel}</span>
@@ -212,4 +197,3 @@ function NavGroup({ label, items }: { label?: string; items: NavItem[] }) {
     </div>
   );
 }
-

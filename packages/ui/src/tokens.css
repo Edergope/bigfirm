@@ -26,8 +26,19 @@
      por debajo del workspace; `line` es el trazo estructural, más suave que `mist`,
      que estaba haciendo de borde decorativo y de estructura a la vez. */
   --color-iusia-canvas: #eef1f6;
-  --color-iusia-line: #e3e7ee;
-  --color-iusia-line-strong: #d3d9e3;
+  --color-iusia-line: #e6eaf1;
+  --color-iusia-line-strong: #d8dee8;
+  /* Ambiente: el lienzo sobre el que FLOTA la aplicación. Un gris plano hacía que
+     el producto pareciera contenido derramado sobre una página; este tono frío con
+     luz sutil le da al contenedor algo sobre lo que apoyarse. */
+  --color-iusia-ambient: #e7ecf4;
+  --color-iusia-ambient-warm: #f2f5fa;
+  /* Tintes fríos para superficies internas: ice y aqua, sobrios, nunca saturados. */
+  --color-iusia-ice: #f4f7fc;
+  --color-iusia-aqua: #eaf3f6;
+  /* Navy en dos profundidades, para que la navegación tenga materia sin ser un muro. */
+  --color-iusia-navy-deep: #071429;
+  --color-iusia-navy-soft: #12294b;
   /* Compañeros "-text" de intel/gold: mismo tono, oscurecido a ≥4.5:1 sobre
      paper/surface y su propio tinte /15. Formaliza como token único un patrón que
      ya existía hardcoded ad-hoc (StatusChip, Strategy Room, CreditBadge), pero sin
@@ -54,22 +65,27 @@
   --spacing-5: 32px;
   --spacing-6: 48px;
 
-  /* Radios */
+  /* Sistema de radios. Cuatro pasos, nunca un valor suelto. */
   --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-card: 14px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --radius-card: 18px;
 
   /* Sombras mínimas */
-  --shadow-hairline: 0 1px 2px rgba(11, 29, 58, 0.06);
-  --shadow-raised: 0 4px 16px -6px rgba(11, 29, 58, 0.16);
+  /* Sistema de profundidad. Tres niveles, todos con desplazamiento real y difuminado
+     suave: la jerarquía la lleva la elevación, no un borde gris alrededor de cada
+     bloque. Nunca sombras negras duras ni halos de color a offset cero. */
+  --shadow-surface: 0 1px 2px rgba(11, 29, 58, 0.04), 0 2px 8px -4px rgba(11, 29, 58, 0.08);
+  --shadow-panel: 0 2px 4px rgba(11, 29, 58, 0.04), 0 12px 32px -16px rgba(11, 29, 58, 0.2);
+  --shadow-floating: 0 8px 16px -8px rgba(11, 29, 58, 0.14), 0 32px 64px -24px rgba(11, 29, 58, 0.28);
+  --shadow-hairline: var(--shadow-surface);
+  --shadow-raised: var(--shadow-panel);
   --shadow-overlay: 0 24px 60px -20px rgba(11, 29, 58, 0.35);
-  /* Profundidad del workspace: desplazamiento real y difuminado suave, nunca un
-     halo de color a offset cero. */
-  --shadow-panel: 0 1px 2px rgba(11, 29, 58, 0.05), 0 8px 24px -14px rgba(11, 29, 58, 0.22);
 
   /* Estructura del shell */
-  --iusia-sidebar-width: 236px;
-  --iusia-topbar-height: 64px;
+  --iusia-sidebar-width: 212px;
+  --iusia-topbar-height: 60px;
 }
 
 :root {
@@ -77,7 +93,15 @@
 }
 
 body {
-  background: var(--color-iusia-canvas);
+  /* Luz ambiental: dos focos muy tenues, uno frío arriba a la izquierda y otro
+     cálido abajo a la derecha. Se percibe como profundidad, no como decoración, y
+     sostiene la pantalla incluso sin contenido. */
+  background:
+    radial-gradient(90% 60% at 8% 0%, #f1f6fb 0%, transparent 60%),
+    radial-gradient(80% 55% at 100% 100%, #e2eef1 0%, transparent 62%),
+    radial-gradient(70% 50% at 55% 40%, #eef3f9 0%, transparent 70%),
+    var(--color-iusia-ambient);
+  background-attachment: fixed;
   color: var(--color-iusia-carbon);
   font-family: var(--font-sans);
   font-size: 15px;

@@ -6,14 +6,13 @@ import {
   Drawer,
   Field,
   Input,
-  MetricRail,
-  PageHeader,
+  Module,
+  ScreenTitle,
   Select,
   Skeleton,
   StateBlock,
   StatusChip,
   Textarea,
-  Workspace,
   materialityTerm,
   matterStatusTerm,
   practiceAreaLabel,
@@ -76,40 +75,41 @@ export function Matters() {
     () => [
       {
         id: "activos",
-        label: "Activos",
+        label: "Expedientes activos",
         value: String(all.filter((m) => ACTIVE_STATUSES.has(m.status)).length),
-        tone: "navy" as const,
+        color: "text-iusia-navy",
       },
       {
         id: "criticos",
-        label: "Riesgo alto",
+        label: "Riesgo alto o crítico",
         value: String(all.filter((m) => m.riskLevel === "HIGH" || m.riskLevel === "CRITICAL").length),
-        tone: "critical" as const,
+        color: "text-iusia-critical",
       },
       {
         id: "criticidad",
         label: "Alta criticidad",
         value: String(all.filter((m) => m.materiality === "HIGH_STAKES").length),
-        tone: "gold" as const,
+        color: "text-iusia-gold-text",
       },
       {
         id: "detenidos",
         label: "Sin actividad",
+        hint: `${INACTIVE_DAYS} d+`,
         value: String(
           all.filter((m) => ACTIVE_STATUSES.has(m.status) && daysSince(m.updatedAt) >= INACTIVE_DAYS)
             .length,
         ),
-        hint: `${INACTIVE_DAYS} días o más`,
-        tone: "warning" as const,
+        color: "text-iusia-warning-text",
       },
     ],
     [all],
   );
 
   return (
-    <div className="flex min-h-[calc(100vh-118px)] flex-col gap-4">
-      <PageHeader
-        title="Cartera de casos"
+    <div className="pb-2">
+      <ScreenTitle
+        eyebrow="Cartera"
+        title="Casos"
         description={
           matters.data?.scope === "FIRM"
             ? "Todos los expedientes de la firma. Tu acceso de dirección queda auditado."
@@ -118,60 +118,109 @@ export function Matters() {
         actions={<Button onClick={() => setOpen(true)}>Nuevo expediente</Button>}
       />
 
-      {all.length > 0 ? <MetricRail items={summary} /> : null}
-
-      <Workspace
-        className="flex min-h-0 flex-1 flex-col"
-        toolbar={
-          <>
-            <Input
-              placeholder="Buscar por asunto, cliente o referencia…"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              aria-label="Buscar expedientes"
-              className="h-8 w-full max-w-xs text-[13.5px]"
+      {/*
+        El resumen NO es otra fila de métricas: vive como una columna lateral que
+        acompaña a la cartera. Un expediente se lee en la lista; la salud de la
+        cartera se lee al lado, sin robarle la primera pantalla.
+      */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-4">
+        <Module
+          className="lg:col-span-3"
+          padded={false}
+          action={
+            <div className="flex w-full items-center gap-3">
+              <Input
+                placeholder="Buscar por asunto, cliente o referencia…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                aria-label="Buscar expedientes"
+                className="h-8 w-full max-w-xs rounded-[10px] text-[13px]"
+              />
+              <span className="ml-auto shrink-0 text-[12px] tnum text-iusia-mist-text">
+                {rows.length} de {all.length}
+              </span>
+            </div>
+          }
+        >
+          {matters.isLoading ? (
+            <div className="space-y-2 px-5 pb-5">
+              <Skeleton className="h-14" />
+              <Skeleton className="h-14" />
+              <Skeleton className="h-14" />
+            </div>
+          ) : rows.length === 0 ? (
+            <StateBlock
+              kind="empty"
+              title={filter ? "Sin coincidencias" : "No hay expedientes en tu alcance"}
+              hint={filter ? "Ajusta la búsqueda." : "Crea uno o pide que te asignen a un caso."}
             />
-            <span className="ml-auto text-[12.5px] text-iusia-mist-text tnum">
-              {rows.length} de {all.length}
-            </span>
-          </>
-        }
-      >
+          ) : (
+            <ul className="divide-y divide-iusia-line/70">
+              {rows.map((m) => (
+                <MatterRow key={m.id} matter={m} />
+              ))}
+            </ul>
+          )}
+        </Module>
 
-        {matters.isLoading ? (
-          <div className="space-y-2 p-5">
-            <Skeleton className="h-12" />
-            <Skeleton className="h-12" />
-            <Skeleton className="h-12" />
-          </div>
-        ) : rows.length === 0 ? (
-          <StateBlock
-            kind="empty"
-            title={filter ? "Sin coincidencias" : "No hay expedientes en tu alcance"}
-            hint={filter ? "Ajusta el filtro." : "Crea uno o pide que te asignen a un caso."}
-          />
-        ) : (
-          <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full min-w-[880px] text-left">
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b border-iusia-line-strong bg-iusia-paper text-[11.5px] font-semibold uppercase tracking-[0.06em] text-iusia-mist-text">
-                  <th className="py-2 pl-5 pr-3 font-semibold">Asunto</th>
-                  <th className="px-3 py-2 font-semibold">Cliente</th>
-                  <th className="px-3 py-2 font-semibold">Estado</th>
-                  <th className="px-3 py-2 font-semibold">Criticidad</th>
-                  <th className="px-3 py-2 font-semibold">Riesgo</th>
-                  <th className="py-2 pl-3 pr-5 text-right font-semibold">Actividad</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-iusia-line">
-                {rows.map((m) => (
-                  <MatterRow key={m.id} matter={m} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Workspace>
+        <div className="flex flex-col gap-4">
+          <Module title="Salud de la cartera" eyebrow="Resumen">
+            <ul className="flex flex-col gap-3">
+              {summary.map((x) => (
+                <li key={x.id} className="flex items-baseline justify-between gap-3">
+                  <span className="text-[13px] text-iusia-carbon">{x.label}</span>
+                  <span className="flex items-baseline gap-2">
+                    {x.hint ? (
+                      <span className="text-[10.5px] uppercase tracking-[0.06em] text-iusia-mist-text">
+                        {x.hint}
+                      </span>
+                    ) : null}
+                    <span
+                      className={
+                        "text-[19px] font-semibold leading-none tnum " +
+                        (x.value === "0" ? "text-iusia-mist-text" : x.color)
+                      }
+                    >
+                      {x.value}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Module>
+
+          <Module tone="ice" title="Criticidad" eyebrow="Distribución">
+            {all.length === 0 ? (
+              <p className="text-[13px] text-iusia-mist-text">Sin expedientes todavía.</p>
+            ) : (
+              <ul className="flex flex-col gap-2.5">
+                {(["HIGH_STAKES", "MATERIAL", "SIMPLE"] as const).map((level) => {
+                  const n = all.filter((m) => m.materiality === level).length;
+                  const pct = all.length ? Math.round((n / all.length) * 100) : 0;
+                  const t = materialityTerm(level);
+                  return (
+                    <li key={level}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-[12.5px] text-iusia-carbon">{t.label}</span>
+                        <span className="shrink-0 text-[12px] tnum text-iusia-mist-text">{n}</span>
+                      </div>
+                      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-iusia-paper">
+                        <span
+                          className={
+                            "block h-full rounded-full " +
+                            (level === "HIGH_STAKES" ? "bg-iusia-gold" : "bg-iusia-navy/45")
+                          }
+                          style={{ width: `${pct}%` }}
+                        />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Module>
+        </div>
+      </div>
 
       <Drawer open={open} onClose={() => setOpen(false)} title="Nuevo expediente" width={520}>
         <NewMatterForm
@@ -186,64 +235,76 @@ export function Matters() {
 }
 
 /**
- * Fila de cartera. La referencia acompaña al asunto en vez de ocupar su propia
- * columna: nadie busca un expediente por su código, pero sí lo necesita a la vista
- * para citarlo. Eso libera ancho para lo que sí se compara entre casos —estado,
- * criticidad, riesgo y cuándo se movió por última vez.
+ * Un expediente como objeto jurídico, no como fila de hoja de cálculo.
+ *
+ * Dos niveles tipográficos: arriba lo que identifica el caso ante un cliente
+ * —asunto y cliente—, abajo lo que lo sitúa —referencia, área, última actividad—.
+ * El estado y la criticidad viven a la derecha porque son lo que se compara entre
+ * expedientes al repasar la cartera; la referencia baja a metadato porque nadie
+ * busca un caso por su código, pero necesita verlo para citarlo.
  */
 function MatterRow({ matter: m }: { matter: MatterSummary }) {
   const status = matterStatusTerm(m.status);
   const materiality = materialityTerm(m.materiality);
   const risk = riskTerm(m.riskLevel);
   const stale = ACTIVE_STATUSES.has(m.status) && daysSince(m.updatedAt) >= INACTIVE_DAYS;
+  const showRisk = m.riskLevel !== "UNASSESSED" && !!m.riskRationale;
 
   return (
-    <tr className="group transition-colors hover:bg-iusia-surface/70">
-      <td className="py-2.5 pl-5 pr-3">
-        <Link to={`/casos/${m.id}`} className="block">
-          <span className="block truncate text-[14px] font-medium text-iusia-navy group-hover:text-iusia-action">
+    <li>
+      <Link
+        to={`/casos/${m.id}`}
+        className="group flex h-[62px] items-center gap-4 px-5 transition-colors hover:bg-iusia-ice"
+      >
+        {/* Marca de prioridad: sólo aparece cuando el expediente la merece. */}
+        <span
+          aria-hidden
+          className={
+            "h-9 w-[3px] shrink-0 rounded-full " +
+            (m.materiality === "HIGH_STAKES"
+              ? "bg-iusia-gold"
+              : showRisk && (m.riskLevel === "HIGH" || m.riskLevel === "CRITICAL")
+                ? "bg-iusia-critical"
+                : "bg-transparent")
+          }
+        />
+
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14.5px] font-medium tracking-[-0.01em] text-iusia-navy group-hover:text-iusia-action">
             {m.title}
           </span>
-          <span className="mt-0.5 flex items-center gap-2 text-[12px] text-iusia-mist-text">
+          <span className="mt-0.5 block truncate text-[12px] text-iusia-mist-text">
+            {m.clientName}
+            <span aria-hidden className="px-1.5 text-iusia-mist">·</span>
             <span className="tnum">{m.reference}</span>
             {m.practiceAreas[0] ? (
               <>
-                <span aria-hidden>·</span>
-                <span className="truncate">{practiceAreaLabel(m.practiceAreas[0])}</span>
+                <span aria-hidden className="px-1.5 text-iusia-mist">·</span>
+                {practiceAreaLabel(m.practiceAreas[0])}
               </>
             ) : null}
           </span>
-        </Link>
-      </td>
-      <td className="px-3 py-2.5 text-[13.5px] text-iusia-carbon">
-        <span className="block max-w-[240px] truncate">{m.clientName}</span>
-      </td>
-      <td className="px-3 py-2.5">
-        <StatusChip label={status.label} tone={status.tone} title={status.hint} />
-      </td>
-      <td className="px-3 py-2.5">
-        <StatusChip label={materiality.label} tone={materiality.tone} title={materiality.hint} />
-      </td>
-      <td className="px-3 py-2.5">
-        {/* El riesgo sin metodología registrada se muestra como ausencia, no como
-            un indicador que el abogado no puede auditar. */}
-        {m.riskLevel === "UNASSESSED" || !m.riskRationale ? (
-          <span className="text-[12.5px] text-iusia-mist-text">—</span>
-        ) : (
-          <StatusChip label={risk.label} tone={risk.tone} title={m.riskRationale} dot />
-        )}
-      </td>
-      <td className="py-2.5 pl-3 pr-5 text-right">
+        </span>
+
+        <span className="hidden shrink-0 items-center gap-2 md:flex">
+          <StatusChip label={status.label} tone={status.tone} title={status.hint} />
+          <StatusChip label={materiality.label} tone={materiality.tone} title={materiality.hint} />
+          {showRisk ? (
+            <StatusChip label={risk.label} tone={risk.tone} title={m.riskRationale ?? undefined} dot />
+          ) : null}
+        </span>
+
         <span
           className={
-            "text-[12.5px] tnum " + (stale ? "font-medium text-iusia-warning-text" : "text-iusia-mist-text")
+            "hidden w-20 shrink-0 text-right text-[12px] tnum sm:block " +
+            (stale ? "font-medium text-iusia-warning-text" : "text-iusia-mist-text")
           }
           title={new Date(m.updatedAt).toLocaleString("es-CO")}
         >
           {relativeDays(m.updatedAt)}
         </span>
-      </td>
-    </tr>
+      </Link>
+    </li>
   );
 }
 
