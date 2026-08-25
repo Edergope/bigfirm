@@ -39,11 +39,15 @@ describe("Agent Registry", () => {
     expect(listAgentDefinitions()).toHaveLength(30);
   });
 
-  it("habilita exactamente el piloto 00/01/03 para ejecución real", () => {
+  it("habilita el set MVP multiagente (00/01/03/04/05/06/CTR) para ejecución real", () => {
     expect(listEnabledAgentDefinitions().map((d) => d.node_code).sort()).toEqual([
       "00",
       "01",
       "03",
+      "04",
+      "05",
+      "06",
+      "CTR",
     ]);
   });
 

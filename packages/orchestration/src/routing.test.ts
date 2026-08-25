@@ -45,10 +45,12 @@ describe("motor de routing jurídico", () => {
       { materiality: "MATERIAL", practice_areas: ["TRIBUTARIO"] },
       AGENTS,
     );
-    // Sólo 00/01/03 son ejecutables hoy; el resto queda planificado pero deshabilitado.
+    // Set MVP ejecutable (00/01/03/06 aplican a este plan); el especialista tributario
+    // sigue deshabilitado (fuera del set MVP), por lo que queda planned_disabled.
     expect(plan.agents.filter((a) => a.executable_now).map((a) => a.agent_id).sort()).toEqual([
       "01-intake-y-clasificador",
       "03-investigador-normativo-jurisprudencial",
+      "06-estratega-juridico-convencional",
       "pisoso-orquestador-juridico",
     ]);
     expect(plan.planned_disabled).toContain("especialista-tributario-y-aduanero");

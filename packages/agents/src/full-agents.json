@@ -133,7 +133,7 @@
     "prompt_ref": "prompts/04-analista-probatorio-y-pericial/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "77bfd8038bb0880ae07884b1e748b6f2908d63236a96316c9c65b6cd5dac21b4",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-general",
       "preferred": {
@@ -175,7 +175,7 @@
     "prompt_ref": "prompts/05-analista-procesal-y-procedibilidad/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "6f821bcbc03b8a821d7f4a0ddf7862fb0c49a17d8b0398f97fdc7af7614e8e38",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-general",
       "preferred": {
@@ -217,7 +217,7 @@
     "prompt_ref": "prompts/06-estratega-juridico-convencional/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "4074ac5a91d404a347da68828dac340c9a62c4485bbd743779028d4fe2a85532",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-general",
       "preferred": {
@@ -697,7 +697,7 @@
     "prompt_ref": "prompts/especialista-contractual-y-negocios/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "587b98cac1accfb159f5619cdeb49c472613d56a3e727e4f3c119fa3196fcd90",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
