@@ -22,6 +22,28 @@ import { firmAccessControl, firmRoles } from "./roles.js";
  */
 const DEFAULT_SENDER = "IUSIA <notificaciones@iusia.legal>";
 
+/**
+ * Deja rastro cuando un correo de autenticación NO llega a entregarse.
+ *
+ * Un fallo de entrega silencioso es indistinguible de un correo que el usuario no
+ * abrió: sin esto, una invitación que Resend rechaza parece haberse enviado. Se
+ * registran únicamente el flujo y la clasificación del fallo — nunca la API key, el
+ * destinatario, el enlace ni el contenido del mensaje.
+ */
+function logDeliveryOutcome(
+  flow: string,
+  result: { status: string; failure_kind?: string | null; error?: string | null },
+): void {
+  if (result.status === "SENT") return;
+  console.warn("auth_email_not_delivered", {
+    flow,
+    status: result.status,
+    failure_kind: result.failure_kind ?? null,
+    // `error` del proveedor: código HTTP o motivo normalizado, sin datos personales.
+    detail: result.error ?? null,
+  });
+}
+
 /** Scope de SÓLO LECTURA de Drive. Mínimo privilegio: nunca se pide escritura. */
 export const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
@@ -132,7 +154,7 @@ export function createAuth(env: Env) {
           apiKey: env.RESEND_API_KEY ?? null,
           from: env.RESEND_FROM ?? DEFAULT_SENDER,
         });
-        await provider.send({
+        const result = await provider.send({
           to: user.email,
           subject: "Restablecer tu contraseña de IUSIA",
           text:
@@ -141,6 +163,7 @@ export function createAuth(env: Env) {
             "Si no lo solicitaste, ignora este mensaje: tu contraseña no cambia.",
           tags: { flow: "password_reset" },
         });
+        logDeliveryOutcome("password_reset", result);
       },
     },
 
@@ -166,7 +189,7 @@ export function createAuth(env: Env) {
             from: env.RESEND_FROM ?? DEFAULT_SENDER,
           });
           const link = `${env.APP_URL}/invitacion?invitationId=${encodeURIComponent(data.id)}`;
-          await provider.send({
+          const result = await provider.send({
             to: data.email,
             subject: `${data.organization.name} te invitó a IUSIA`,
             text:
@@ -175,6 +198,7 @@ export function createAuth(env: Env) {
               "El enlace caduca y sólo puede usarse una vez. Si no esperabas esta invitación, ignora este mensaje.",
             tags: { flow: "organization_invitation" },
           });
+          logDeliveryOutcome("organization_invitation", result);
         },
         // Roles de firma de IUSIA. Gobiernan la administración de la organización,
         // NO el acceso a cada Matter: eso lo decide AuthorizationService.
