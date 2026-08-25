@@ -32,11 +32,15 @@ if (emailArg.includes("'")) {
 }
 
 function d1(sql) {
-  const out = execFileSync(
-    "pnpm",
-    ["--filter", "@iusia/web", "exec", "wrangler", "d1", "execute", "iusia-db", envArg, "--json", "--command", sql],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  );
+  // `--env staging` selecciona la configuración con el D1 real de staging; la config
+  // base sólo apunta a la base local de desarrollo (fail-closed por diseño).
+  const args = ["wrangler", "d1", "execute", "iusia-db", envArg, "--json", "--command", sql];
+  if (envArg === "--remote") args.push("--env", "staging");
+  const out = execFileSync("npx", args, {
+    cwd: "apps/web",
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const json = JSON.parse(out.slice(out.indexOf("[")));
   return json[0]?.results ?? [];
 }
