@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ToastStack, type ToastItem } from "@iusia/ui";
 import { diffFinishedAnalyses, type ActiveAnalysisRef } from "@iusia/domain";
@@ -15,6 +15,10 @@ export function AnalysisToasts() {
   const [items, setItems] = useState<ToastItem[]>([]);
   const prev = useRef<ActiveAnalysisRef[]>([]);
 
+  const dismiss = useCallback((id: string) => {
+    setItems((c) => c.filter((t) => t.id !== id));
+  }, []);
+
   useEffect(() => {
     const finished = diffFinishedAnalyses(prev.current, analyses);
     prev.current = analyses;
@@ -29,13 +33,13 @@ export function AnalysisToasts() {
         action: {
           label: "Ver resultado",
           onClick: () => {
-            setItems((c) => c.filter((t) => t.id !== f.root_execution_id));
+            dismiss(f.root_execution_id);
             navigate(`/casos/${f.matter_id}?analisis=${f.root_execution_id}`);
           },
         },
       })),
     ]);
-  }, [analyses, navigate]);
+  }, [analyses, navigate, dismiss]);
 
-  return <ToastStack items={items} onDismiss={(id) => setItems((c) => c.filter((t) => t.id !== id))} />;
+  return <ToastStack items={items} onDismiss={dismiss} />;
 }

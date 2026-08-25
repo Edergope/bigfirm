@@ -334,6 +334,81 @@ export function stripInternalProvenance(text: string): string {
   return rest.length > 0 ? rest : text;
 }
 
+/**
+ * Retira del cuerpo del dictamen las referencias técnicas internas que algunos
+ * agentes intercalan al integrar hallazgos.
+ *
+ * `stripInternalProvenance` sólo recorta el encabezado; esto limpia lo que aparece
+ * DENTRO del texto: rutas de artefactos, identificadores de ejecución y de flujo,
+ * claves de prompt. Un dictamen que dice
+ * `(ref=executions/.../exe_kppb6bjskbgy9k2g.json)` obliga al abogado a leer
+ * fontanería en medio de un razonamiento jurídico, y ese identificador no significa
+ * nada para él ni para su cliente.
+ *
+ * Los identificadores de agente se sustituyen por el nombre del especialista cuando
+ * se conoce: la autoría del hallazgo SÍ es información jurídica y se conserva; lo
+ * que se retira es su forma de código.
+ *
+ * Nada de esto toca el ledger: la trazabilidad íntegra sigue en la salida
+ * estructurada y en la actividad técnica.
+ */
+/** Marcadores que convierten una referencia en fontanería interna. */
+const INTERNAL_REF = /executions\/|artifacts\/|prompts\/|exe_[a-z0-9]{8,}|wf_[a-z0-9]{8,}|\.json/i;
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function sanitizeLegalOutput(
+  text: string,
+  agentNames: ReadonlyMap<string, string> = new Map(),
+  documentNames: ReadonlyMap<string, string> = new Map(),
+): string {
+  let out = text;
+
+  // Nombre humano del especialista en lugar de su identificador de catálogo.
+  for (const [agentId, name] of agentNames) {
+    if (!agentId || !name) continue;
+    out = out.split(agentId).join(name);
+  }
+
+  // Los documentos se citan por su nombre y su fragmento, no por su id interno:
+  // `doc_pp3mtb…#1` no le dice nada al abogado sobre qué está leyendo.
+  for (const [docId, name] of documentNames) {
+    if (!docId || !name) continue;
+    out = out.replace(
+      new RegExp(escapeForRegExp(docId) + "#(\\d+)", "g"),
+      (_m, chunk: string) => `${name} (fragmento ${chunk})`,
+    );
+    out = out.split(docId).join(name);
+  }
+
+  // Referencias internas: `(ref=executions/…/exe_….json)` y sus variantes sueltas.
+  //
+  // Se acota la longitud y se decide en JavaScript en vez de encadenar cuantificadores
+  // dentro del patrón: `[^)]*…[^)]*` provoca retroceso catastrófico y llegó a colgar
+  // la petición del resultado con salidas largas sin paréntesis de cierre.
+  out = out.replace(/\s*\((?:ref|source|src)\s*=\s*[^)\n]{0,300}\)/gi, (match) =>
+    INTERNAL_REF.test(match) ? "" : match,
+  );
+  out = out.replace(/\s*\b(?:ref|source|src)\s*=\s*[^\s)\n]{0,300}/gi, (match) =>
+    INTERNAL_REF.test(match) ? "" : match,
+  );
+  // Rutas de artefactos y de prompts, e identificadores de ejecución o flujo sueltos.
+  out = out.replace(/\b(?:executions|artifacts|prompts)\/[^\s)"',\n]{0,300}/gi, "");
+  out = out.replace(/\b(?:exe|wf|run)_[a-z0-9]{8,}\b/gi, "");
+
+  // La limpieza deja restos de puntuación: se normalizan sin tocar el contenido.
+  out = out
+    .split("\n")
+    .map((line) => line.replace(/[ \t]{2,}/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/\(\s*\)/g, "").trimEnd())
+    .join("\n");
+
+  const cleaned = out.trim();
+  // Si la limpieza se comiera el dictamen, se prefiere el texto íntegro.
+  return cleaned.length > 0 ? cleaned : text;
+}
+
 /** ¿Debe seguir el polling? Sólo mientras la raíz no esté en estado terminal. */
 export function shouldKeepPolling(rootStatus: string | undefined): boolean {
   if (!rootStatus) return true;
@@ -382,6 +457,14 @@ export function shouldRefreshHistory(
 const HUMAN_CONCLUSION_FIELDS = [
   "conclusion_brief",
   "conclusion",
+  // El schema de salida de los agentes no es estable: el mismo integrador ha
+  // devuelto `conclusion_brief`, `two_line_summary` y `executive_summary` en
+  // corridas distintas. Reconocerlos aquí es más barato —y menos invasivo— que
+  // tocar los prompts canónicos, y el coste de no reconocerlos es que el abogado
+  // recibe un volcado de JSON donde esperaba un dictamen.
+  "two_line_summary",
+  "executive_summary",
+  "brief",
   "analysis_summary",
   "summary",
   "resumen",

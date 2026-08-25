@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
@@ -366,6 +366,11 @@ export function Drawer({
  * Avisos no bloqueantes. Un análisis que termina mientras el abogado trabaja en otra
  * cosa merece enterarse sin que le roben el foco ni le interrumpan la escritura: por
  * eso nunca es un diálogo modal, se apila abajo a la derecha y se puede descartar.
+ *
+ * Sin animación de `layout`: medirla en cada render dentro de un contenedor fijo
+ * bloqueaba el renderizador mientras el aviso estuviera en pantalla, y un aviso que
+ * congela la aplicación es peor que no avisar. La entrada y salida siguen animadas,
+ * que es lo que aporta legibilidad al apilarse.
  */
 export interface ToastItem {
   id: string;
@@ -384,10 +389,30 @@ const TOAST_BAR: Record<NonNullable<ToastItem["tone"]>, string> = {
 export function ToastStack({
   items,
   onDismiss,
+  autoDismissMs = 14000,
 }: {
   items: readonly ToastItem[];
   onDismiss: (id: string) => void;
+  /** 0 desactiva el descarte automático. */
+  autoDismissMs?: number;
 }) {
+  // Un aviso que no se va nunca deja de ser un aviso y pasa a ser ruido fijo en la
+  // esquina. Se retira solo; el análisis terminado sigue en el expediente.
+  //
+  // El temporizador depende de QUÉ avisos hay, no de la identidad del array ni del
+  // callback: quien usa este componente los recrea en cada render, y reprogramar el
+  // temporizador en cada render equivale a no programarlo nunca.
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+  const ids = items.map((t) => t.id).join("|");
+  useEffect(() => {
+    if (autoDismissMs <= 0 || ids.length === 0) return;
+    const timers = ids
+      .split("|")
+      .map((id) => setTimeout(() => dismissRef.current(id), autoDismissMs));
+    return () => timers.forEach(clearTimeout);
+  }, [ids, autoDismissMs]);
+
   return (
     <div
       className="pointer-events-none fixed bottom-5 right-5 z-[60] flex w-[340px] max-w-[calc(100vw-2.5rem)] flex-col gap-2.5"
@@ -398,7 +423,6 @@ export function ToastStack({
         {items.map((t) => (
           <motion.div
             key={t.id}
-            layout
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}

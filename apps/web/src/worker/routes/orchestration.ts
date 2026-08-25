@@ -6,6 +6,7 @@ import {
   deriveConclusionText,
   deriveOutcome,
   stripInternalProvenance,
+  sanitizeLegalOutput,
   projectStrategyGraph,
   resolveEvidenceDocuments,
 } from "@iusia/domain";
@@ -205,6 +206,17 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
   const agentNodes = nodes.filter(
     (n) => n.id !== rootExecutionId && n.status === "COMPLETED" && n.outputRef,
   );
+  // Los especialistas citados en el dictamen son los que participaron: basta su
+  // nombre humano para devolverle autoría legible a cada hallazgo.
+  const agentDisplayNames = new Map<string, string>();
+  for (const n of agentNodes) {
+    try {
+      agentDisplayNames.set(n.agentId, getAgentDefinition(n.agentId).name);
+    } catch {
+      // Agente no registrado: se deja su id, nunca un nombre inventado.
+    }
+  }
+
   const outputs = (
     await Promise.all(
       agentNodes.map(async (n) => {
@@ -232,10 +244,15 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
           agent_id: n.agentId,
           node_code: nodeCode,
           agent_name: name,
-          // Titular humano ya parseado (p.ej. conclusion_brief), sin el encabezado de
-          // procedencia interna: esa trazabilidad vive en el ledger, no en la lectura
-          // jurídica. El texto íntegro sigue disponible en `text`.
-          summary: stripInternalProvenance(deriveConclusionText(text)),
+          // Titular humano ya parseado (p.ej. conclusion_brief), saneado de fontanería:
+          // sin el encabezado de procedencia ni las referencias internas que algunos
+          // agentes intercalan al integrar. Esa trazabilidad vive en el ledger y en
+          // `text`, que se entrega íntegro para la vista de salida estructurada.
+          summary: sanitizeLegalOutput(
+            stripInternalProvenance(deriveConclusionText(text)),
+            agentDisplayNames,
+            documentNames,
+          ),
           text,
           provider: stored.provenance?.provider ?? n.provider ?? null,
           model: stored.provenance?.model ?? n.model ?? null,

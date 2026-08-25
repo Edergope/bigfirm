@@ -77,6 +77,10 @@ export function AnalysisModal({
       const root = rows.find((e) => e.id === rootExecutionId);
       return shouldKeepPolling(root?.status) ? 2500 : false;
     },
+    // Igual que el indicador global: si el abogado se va a otra pestaña, al volver
+    // debe encontrar el análisis donde está de verdad, no una foto congelada que
+    // luego salta. Sólo sondea mientras la ejecución sigue viva.
+    refetchIntervalInBackground: true,
   });
   const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents });
 
@@ -183,7 +187,9 @@ export function AnalysisModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Análisis de IUSIA en curso"
+        aria-label={
+          finished ? "Análisis de IUSIA completado" : "Análisis de IUSIA en curso"
+        }
         tabIndex={-1}
         className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[14px] bg-iusia-paper shadow-[0_24px_64px_-12px_rgba(11,29,58,0.45)] focus:outline-none"
       >

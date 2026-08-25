@@ -12,6 +12,7 @@ import {
   groupExecutionsByAgent,
   shouldRefreshHistory,
   stripInternalProvenance,
+  sanitizeLegalOutput,
   type EventView,
   type ExecutionView,
   type GraphEventView,
@@ -414,5 +415,105 @@ describe("BACKGROUND_ANALYSIS_INDICATOR", () => {
       "exe_a",
       "exe_b",
     ]);
+  });
+});
+
+describe("INTERNAL_PROVENANCE_HIDDEN — referencias intercaladas", () => {
+  const names = new Map([["04-analista-probatorio-y-pericial", "Análisis Probatorio y Pericial"]]);
+
+  it("[SAN-1] retira la referencia a la ruta de ejecución que el integrador intercala", () => {
+    const text =
+      '- 04-analista-probatorio-y-pericial (EVIDENTIARY): "No consta en el expediente." (ref=executions/org/exe_kppb6bjskbgy9k2g.json)';
+    const out = sanitizeLegalOutput(text, names);
+    expect(out).not.toMatch(/exe_[a-z0-9]{8,}/);
+    expect(out).not.toContain("executions/");
+    expect(out).not.toContain(".json");
+    // La autoría del hallazgo es información jurídica: se conserva, con nombre humano.
+    expect(out).toContain("Análisis Probatorio y Pericial");
+    expect(out).toContain("No consta en el expediente.");
+  });
+
+  it("[SAN-2] elimina identificadores de ejecución y de flujo sueltos", () => {
+    const out = sanitizeLegalOutput("Ver exe_abcd1234efgh y wf_zzzz9999yyyy para el detalle.");
+    expect(out).not.toMatch(/exe_|wf_/);
+  });
+
+  it("[SAN-3] no toca un dictamen limpio", () => {
+    const clean =
+      "Plazo de preaviso: 90 días.\nCita: “la terminación debía notificarse con noventa días”.";
+    expect(sanitizeLegalOutput(clean, names)).toBe(clean);
+  });
+
+  it("[SAN-4] si la limpieza vaciara el texto, devuelve el original", () => {
+    const onlyRefs = "executions/org/exe_aaaabbbbcccc.json";
+    expect(sanitizeLegalOutput(onlyRefs)).toBe(onlyRefs);
+  });
+
+  it("[SAN-5] conserva las citas del expediente, que sí son evidencia", () => {
+    const t = "Fuente: Atlas Cartagena - carta terminacion, chunk 1.";
+    expect(sanitizeLegalOutput(t)).toContain("Atlas Cartagena - carta terminacion");
+  });
+});
+
+describe("deriveConclusionText — schema inestable de los agentes", () => {
+  it("[CT-1] reconoce two_line_summary anidado bajo output", () => {
+    const raw = JSON.stringify({
+      schema: "iusia.orchestration.v1",
+      matter_id: "mtr_x",
+      output: { two_line_summary: "El preaviso sostenido es de 90 días." },
+      citations: [{ ref_id: "doc_a#1" }],
+    });
+    expect(deriveConclusionText(raw)).toBe("El preaviso sostenido es de 90 días.");
+  });
+
+  it("[CT-2] reconoce executive_summary", () => {
+    const raw = JSON.stringify({ output: { executive_summary: "Procede la acción." } });
+    expect(deriveConclusionText(raw)).toBe("Procede la acción.");
+  });
+
+  it("[CT-3] conclusion_brief sigue teniendo prioridad sobre los demás", () => {
+    const raw = JSON.stringify({
+      output: { two_line_summary: "resumen corto", conclusion_brief: "dictamen" },
+    });
+    expect(deriveConclusionText(raw)).toBe("dictamen");
+  });
+
+  it("[CT-4] sin campo humano reconocible devuelve el crudo, nunca [object Object]", () => {
+    const raw = JSON.stringify({ output: { rows: [1, 2, 3] } });
+    const out = deriveConclusionText(raw);
+    expect(out).not.toContain("[object Object]");
+    expect(out).toBe(raw);
+  });
+});
+
+describe("sanitizeLegalOutput — documentos por su nombre", () => {
+  const docs = new Map([["doc_pp3mtb3a8q4z74cj", "Carta de terminación"]]);
+
+  it("[SAN-6] sustituye el id del documento y conserva el fragmento citado", () => {
+    const out = sanitizeLegalOutput("Consta en (doc_pp3mtb3a8q4z74cj#1).", new Map(), docs);
+    expect(out).toContain("Carta de terminación (fragmento 1)");
+    expect(out).not.toContain("doc_pp3mtb");
+  });
+
+  it("[SAN-7] un documento sin nombre conocido se deja intacto, no se inventa", () => {
+    const out = sanitizeLegalOutput("Ver doc_desconocido#2.", new Map(), docs);
+    expect(out).toContain("doc_desconocido#2");
+  });
+});
+
+describe("sanitizeLegalOutput — coste acotado", () => {
+  it("[SAN-8] no se degrada con un texto largo y un paréntesis sin cerrar", () => {
+    // El patrón anterior encadenaba cuantificadores y colgaba la petición del
+    // resultado con entradas de esta forma. Debe resolverse de inmediato.
+    const hostile = "(ref=" + "a".repeat(20000);
+    const started = Date.now();
+    const out = sanitizeLegalOutput(hostile);
+    expect(Date.now() - started).toBeLessThan(300);
+    expect(out.length).toBeGreaterThan(0);
+  });
+
+  it("[SAN-9] respeta un paréntesis que no es una referencia interna", () => {
+    const t = "El plazo (ref=norma 1234 del estatuto) es de 90 días.";
+    expect(sanitizeLegalOutput(t)).toContain("ref=norma 1234 del estatuto");
   });
 });
