@@ -262,6 +262,26 @@ function RunView({
 
   const gatePassed = (eventsQuery.data?.events ?? []).some((e) => e.type === "gate.passed");
 
+  // Circuit breaker: IUSIA detuvo la ejecución por una condición anómala.
+  const cbEvent = (eventsQuery.data?.events ?? []).find((e) => e.detail?.circuit_breaker_reason);
+  const circuitBreakerReason = cbEvent ? String(cbEvent.detail.circuit_breaker_reason) : null;
+
+  // Justificación por agente (why_selected) desde el evento agent.dispatched.
+  const whyByAgent = new Map<string, string>();
+  for (const e of eventsQuery.data?.events ?? []) {
+    if (e.type === "agent.dispatched" && e.to_agent_id && typeof e.detail?.why_selected === "string") {
+      whyByAgent.set(e.to_agent_id, e.detail.why_selected as string);
+    }
+  }
+
+  const cancel = useMutation({
+    mutationFn: () => api.cancelExecution(rootExecutionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["execution-events", rootExecutionId] });
+      void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
+    },
+  });
+
   if (eventsQuery.isLoading) {
     return (
       <Card>
@@ -278,33 +298,61 @@ function RunView({
         <CardHeader
           title="Progreso del análisis"
           subtitle="IUSIA trabaja sobre el expediente en fases"
-          action={<OutcomeChip status={rootStatus} />}
+          action={
+            <span className="flex items-center gap-3">
+              <OutcomeChip status={rootStatus} />
+              {!isTerminal ? (
+                <button
+                  type="button"
+                  onClick={() => cancel.mutate()}
+                  disabled={cancel.isPending}
+                  className="text-[13px] font-medium text-iusia-critical hover:underline disabled:opacity-50"
+                >
+                  {cancel.isPending ? "Deteniendo…" : "Detener análisis"}
+                </button>
+              ) : null}
+            </span>
+          }
         />
         <div className="px-6 py-5">
+          {circuitBreakerReason ? (
+            <div className="mb-4 rounded-[10px] border border-iusia-warning/40 bg-iusia-warning/10 px-4 py-3">
+              <p className="text-[13.5px] font-medium text-iusia-warning-text">
+                IUSIA detuvo automáticamente el análisis para evitar una ejecución anómala.
+              </p>
+              <p className="mt-1 text-[12px] text-iusia-mist-text">Motivo técnico: {circuitBreakerReason}</p>
+            </div>
+          ) : null}
           <ol className="flex flex-col gap-3">
-            {stages.map((s) => (
-              <li key={s.key} className="flex items-center gap-3">
-                <span
-                  className={
-                    "h-2.5 w-2.5 shrink-0 rounded-full " +
-                    DOT[s.state] +
-                    (s.state === "active" ? " animate-pulse" : "")
-                  }
-                />
-                <span
-                  className={
-                    "text-[14px] " +
-                    (s.state === "pending" ? "text-iusia-mist-text" : "text-iusia-carbon") +
-                    (s.state === "done" ? " font-medium" : "")
-                  }
-                >
-                  {stageLabel(s, agentNames)}
-                </span>
-                {s.state === "failed" ? <StatusChip label="Falló" tone="critical" /> : null}
-              </li>
-            ))}
+            {stages.map((s) => {
+              const why = s.agentId ? whyByAgent.get(s.agentId) : undefined;
+              return (
+                <li key={s.key} className="flex items-start gap-3">
+                  <span
+                    className={
+                      "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full " +
+                      DOT[s.state] +
+                      (s.state === "active" ? " animate-pulse" : "")
+                    }
+                  />
+                  <span className="min-w-0">
+                    <span
+                      className={
+                        "block text-[14px] " +
+                        (s.state === "pending" ? "text-iusia-mist-text" : "text-iusia-carbon") +
+                        (s.state === "done" ? " font-medium" : "")
+                      }
+                    >
+                      {stageLabel(s, agentNames)}
+                    </span>
+                    {why ? <span className="block text-[12px] text-iusia-mist-text">{why}</span> : null}
+                  </span>
+                  {s.state === "failed" ? <StatusChip label="Falló" tone="critical" /> : null}
+                </li>
+              );
+            })}
           </ol>
-          {gatePassed ? (
+          {gatePassed && !circuitBreakerReason ? (
             <p className="mt-4 text-[13px] text-iusia-success-text">
               ✓ Validación completada — IUSIA verificó que el análisis puede avanzar.
             </p>

@@ -33,6 +33,10 @@ jobs:
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
+      # Protege la IP canónica jurídica (repo/agents) contra cambios no autorizados.
+      - name: Canonical agent tree guard
+        run: node scripts/check-agent-tree.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 
