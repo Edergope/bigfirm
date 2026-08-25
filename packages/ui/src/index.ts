@@ -7,3 +7,4 @@ export * from "./legal.js";
 // Sacarla al barril la devolvería al bundle principal de la aplicación.
 export * from "./legal-terminology.js";
 export * from "./motion.js";
+export * from "./specialist-network.js";

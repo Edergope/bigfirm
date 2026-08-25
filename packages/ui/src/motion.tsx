@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import clsx from "clsx";
 
@@ -15,6 +15,31 @@ import clsx from "clsx";
  * percibe sin pensarlo y no compite con el dato. Springs amortiguados sin rebote,
  * porque esto es un producto jurídico.
  */
+
+/**
+ * ¿Puede animarse ahora mismo?
+ *
+ * Falso con `prefers-reduced-motion` y también con la pestaña oculta, porque el
+ * navegador congela `requestAnimationFrame` ahí: una animación que arranca en
+ * `opacity: 0` no avanzaría nunca y el elemento quedaría invisible. Se detectó con
+ * la red de especialistas de la portada: abierta en una pestaña de fondo, el hero
+ * aparecía sin nodos ni conexiones.
+ *
+ * La regla que impone: el estado FINAL es el estado por defecto; la animación sólo
+ * lo modula. Nada de lo que se ve puede depender de que un frame llegue a tiempo.
+ */
+export function useCanAnimate(): boolean {
+  const reduce = useReducedMotion();
+  const visible = useSyncExternalStore(
+    (cb) => {
+      document.addEventListener("visibilitychange", cb);
+      return () => document.removeEventListener("visibilitychange", cb);
+    },
+    () => !document.hidden,
+    () => true,
+  );
+  return reduce !== true && visible;
+}
 
 /** Muelle institucional: llega, se asienta y no rebota. */
 export const SPRING = { type: "spring" as const, stiffness: 420, damping: 38, mass: 0.9 };
@@ -42,7 +67,8 @@ export function DataBar({
   delay?: number;
   label?: string;
 }) {
-  const reduce = useReducedMotion();
+  const canAnimate = useCanAnimate();
+  const reduce = !canAnimate;
   const pct = Math.max(0, Math.min(100, value));
   return (
     <span
@@ -70,7 +96,7 @@ export function DataBar({
  * no desde cero, porque volver a cero contaría una caída que no ocurrió.
  */
 export function CountUp({ value, className }: { value: number; className?: string }) {
-  const reduce = useReducedMotion();
+  const reduce = !useCanAnimate();
   const [shown, setShown] = useState(reduce ? value : 0);
   const from = useRef(reduce ? value : 0);
 
@@ -115,7 +141,7 @@ export function Rise({
   delay?: number;
   className?: string;
 }) {
-  const reduce = useReducedMotion();
+  const reduce = !useCanAnimate();
   return (
     <motion.div
       className={className}

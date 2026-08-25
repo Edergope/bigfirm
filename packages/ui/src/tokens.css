@@ -135,7 +135,10 @@ body {
 }
 
 /* Foco de teclado siempre visible (WCAG AA). */
-:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+/* `[tabindex="-1"]` queda fuera: son contenedores que reciben el foco al abrirse
+   —diálogos, paneles— y dibujarles un anillo rodea la ventana entera con un borde
+   azul que no señala ningún control. */
+:where(a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
   outline: 2px solid var(--color-iusia-action);
   outline-offset: 2px;
   border-radius: 4px;
@@ -192,7 +195,10 @@ body {
 }
 
 /* Un único anillo de foco en todo el producto, visible sobre claro y sobre navy. */
-:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+/* `[tabindex="-1"]` queda fuera: son contenedores que reciben el foco al abrirse
+   —diálogos, paneles— y dibujarles un anillo rodea la ventana entera con un borde
+   azul que no señala ningún control. */
+:where(a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
   outline: 2px solid var(--color-iusia-action);
   outline-offset: 2px;
   border-radius: 6px;

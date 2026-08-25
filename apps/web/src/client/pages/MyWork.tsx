@@ -1,7 +1,10 @@
 import { Link } from "react-router";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardHeader, PageHeader, Skeleton, StateBlock, StatusChip } from "@iusia/ui";
+import { Card, CardHeader, ScreenTitle, Skeleton, StateBlock, StatusChip } from "@iusia/ui";
 import { api, type MeResponse } from "../api.js";
+import { IusiaHero } from "../components/IusiaHero.js";
+import { ConvocationModal } from "../components/ConvocationModal.js";
 import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
 
 /**
@@ -22,16 +25,23 @@ export function MyWork({ me }: { me: MeResponse }) {
   const upcomingDeadlines = upcoming.data?.deadlines ?? [];
   const myMatters = matters.data?.matters ?? [];
 
+  const [convoking, setConvoking] = useState(false);
+
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="pb-2">
+      <ScreenTitle
+        eyebrow="Tu espacio"
         title={`Buen día, ${me.user.name.split(" ")[0] ?? me.user.name}`}
         description="Tu trabajo de hoy: vencimientos, expedientes asignados y análisis en curso."
-        actions={<StatusChip label="Alcance: mis casos" tone="neutral" dot />}
       />
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <div className="flex flex-col gap-5 lg:col-span-2">
+      {/* La misma puerta de entrada que ve la dirección: convocar a IUSIA no es una
+          capacidad de dirección, es la capacidad del producto. */}
+      <IusiaHero onConvoke={() => setConvoking(true)} />
+      <ConvocationModal open={convoking} onClose={() => setConvoking(false)} />
+
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+        <div className="flex flex-col gap-4 lg:col-span-2">
           {/* Lo que vence primero: es lo único que no admite postergación. */}
           <Card>
             <CardHeader

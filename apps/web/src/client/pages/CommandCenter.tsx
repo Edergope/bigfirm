@@ -16,6 +16,8 @@ import {
 import { motion } from "motion/react";
 import { AlertTriangle, CalendarClock, ChevronRight, Clock, Scale } from "lucide-react";
 import { api, type MeResponse } from "../api.js";
+import { IusiaHero } from "../components/IusiaHero.js";
+import { ConvocationModal } from "../components/ConvocationModal.js";
 import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
 
 /**
@@ -40,6 +42,7 @@ type Drill = null | "matters" | "risk" | "overdue" | "upcoming" | "inactive";
 
 export function CommandCenter({ me }: { me: MeResponse }) {
   const [drill, setDrill] = useState<Drill>(null);
+  const [convoking, setConvoking] = useState(false);
   const firm = true;
 
   const health = useQuery({ queryKey: ["intel", "health", firm], queryFn: () => api.intelligence.caseHealth(firm) });
@@ -71,6 +74,11 @@ export function CommandCenter({ me }: { me: MeResponse }) {
         title={`Buen día, ${me.user.name.split(" ")[0] ?? me.user.name}`}
         description="Visión transversal de la cartera, el riesgo y el trabajo de IUSIA."
       />
+
+      {/* La portada abre con lo que IUSIA ES y con la acción de convocarla. El
+          estado de la cartera viene después: primero el producto, luego el parte. */}
+      <IusiaHero onConvoke={() => setConvoking(true)} />
+      <ConvocationModal open={convoking} onClose={() => setConvoking(false)} />
 
       {/*
         Composición asimétrica. La decisión pendiente ocupa el doble de ancho y todo
