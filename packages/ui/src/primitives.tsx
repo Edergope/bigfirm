@@ -25,7 +25,7 @@ export function Card({
       className={clsx(
         "rounded-[var(--radius-lg)] bg-iusia-paper shadow-[var(--shadow-surface)]",
         interactive &&
-          "transition-shadow duration-200 hover:shadow-[var(--shadow-panel)]",
+          "transition-[box-shadow,translate] duration-[var(--motion-normal)] ease-[var(--ease-standard)] hover:-translate-y-[2px] hover:shadow-[var(--shadow-panel)] motion-reduce:translate-none",
         className,
       )}
     >
@@ -85,6 +85,19 @@ export function PageHeader({
 
 // ─────────────────────────────── Controles ───────────────────────────────
 
+/**
+ * Botón.
+ *
+ * El hover y la presión los gobierna Motion, no clases de Tailwind. Diagnóstico
+ * que llevó aquí: Tailwind v4 escribe el desplazamiento en la propiedad `translate`
+ * y la sombra a través de variables encadenadas; ni el movimiento se transicionaba
+ * ni las sombras interpolaban, así que el botón saltaba 2 px de golpe y el ojo no
+ * lo registraba como respuesta. Con Motion el valor se anima de verdad y el
+ * comportamiento no depende de cómo se compilen las clases.
+ *
+ * Sobrio a propósito: eleva 2 px, la sombra gana profundidad y al pulsar se hunde.
+ * Sin rebote —el muelle va amortiguado— porque esto es un producto jurídico.
+ */
 export function Button({
   children,
   variant = "primary",
@@ -102,31 +115,53 @@ export function Button({
   onClick?: () => void;
   className?: string;
 }) {
+  const reduce = useReducedMotion();
+  const still = reduce === true || disabled === true;
+
+  const SHADOW: Record<string, { rest: string; hover: string; press: string }> = {
+    primary: {
+      rest: "0 2px 8px -3px rgba(11,29,58,0.45)",
+      hover: "0 12px 24px -8px rgba(11,29,58,0.55)",
+      press: "0 1px 3px -1px rgba(11,29,58,0.5)",
+    },
+    secondary: {
+      rest: "0 1px 2px rgba(11,29,58,0.06)",
+      hover: "0 8px 18px -8px rgba(11,29,58,0.28)",
+      press: "0 1px 2px rgba(11,29,58,0.1)",
+    },
+    ghost: { rest: "none", hover: "none", press: "none" },
+    destructive: {
+      rest: "0 2px 8px -3px rgba(220,38,38,0.4)",
+      hover: "0 12px 24px -8px rgba(220,38,38,0.5)",
+      press: "0 1px 3px -1px rgba(220,38,38,0.45)",
+    },
+  };
+  const sh = SHADOW[variant] ?? SHADOW.primary!;
+
   return (
-    <button
+    <motion.button
       type={type}
       disabled={disabled}
       onClick={onClick}
+      initial={false}
+      animate={{ y: 0, scale: 1, boxShadow: sh.rest }}
+      whileHover={still ? undefined : { y: -2, boxShadow: sh.hover }}
+      whileTap={still ? undefined : { y: 0, scale: 0.985, boxShadow: sh.press }}
+      transition={{ type: "spring", stiffness: 480, damping: 34, mass: 0.7 }}
       className={clsx(
-        // Hover eleva 1px y profundiza la sombra; el clic hunde. Feedback físico
-        // sobrio: ni escalados del 10 % ni rebotes, que leerían a aplicación de consumo.
-        "inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] font-medium tracking-[-0.005em]",
-        "transition-[color,background-color,box-shadow,transform] duration-[var(--motion-fast)] ease-[var(--ease-standard)]",
-        "hover:-translate-y-px active:translate-y-0 active:scale-[var(--press-scale)]",
-        "motion-reduce:transform-none motion-reduce:transition-none",
-        "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:active:scale-100",
+        "inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-md)] font-medium tracking-[-0.005em]",
+        "transition-colors duration-[var(--motion-fast)] ease-[var(--ease-standard)]",
+        "disabled:cursor-not-allowed disabled:opacity-45",
         size === "md" ? "h-9.5 px-4 text-[13.5px]" : "h-8 px-3 text-[12.5px]",
-        variant === "primary" &&
-          "bg-iusia-navy text-white shadow-[0_2px_8px_-2px_rgba(11,29,58,0.4)] hover:bg-iusia-navy-soft hover:shadow-[0_4px_14px_-4px_rgba(11,29,58,0.5)]",
-        variant === "secondary" &&
-          "bg-iusia-ice text-iusia-navy shadow-[var(--shadow-surface)] hover:bg-iusia-aqua",
+        variant === "primary" && "bg-iusia-navy text-white hover:bg-iusia-navy-soft",
+        variant === "secondary" && "bg-iusia-ice text-iusia-navy hover:bg-iusia-aqua",
         variant === "ghost" && "text-iusia-carbon hover:bg-iusia-mist/15",
         variant === "destructive" && "bg-iusia-critical text-white hover:bg-[#b91c1c]",
         className,
       )}
     >
       {children}
-    </button>
+    </motion.button>
   );
 }
 

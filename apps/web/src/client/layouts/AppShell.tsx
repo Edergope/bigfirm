@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import { CreditBadge, firmRoleLabel } from "@iusia/ui";
+import { CreditBadge, SelectionPill, firmRoleLabel } from "@iusia/ui";
 import { api } from "../api.js";
 import { authClient } from "../auth-client.js";
 import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
@@ -172,21 +172,30 @@ function NavGroup({ label, items }: { label?: string; items: NavItem[] }) {
           title={itemLabel}
           className={({ isActive }) =>
             clsx(
-              "mb-1 flex items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] transition-all duration-200 max-lg:justify-center max-lg:px-2",
+              "group relative isolate mb-1 flex items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] max-lg:justify-center max-lg:px-2",
+              "transition-colors duration-[var(--motion-fast)]",
               isActive
-                ? // Píldora navy elevada: el activo se distingue por material, no por
-                  // un rectángulo de contraste bruto.
-                  "bg-iusia-navy font-medium text-white shadow-[0_2px_6px_-2px_rgba(11,29,58,0.45)]"
-                : "text-iusia-carbon/70 hover:bg-iusia-paper/70 hover:text-iusia-navy",
+                ? "font-medium text-white"
+                : "text-iusia-carbon/70 hover:bg-iusia-paper/80 hover:text-iusia-navy",
             )
           }
         >
           {({ isActive }) => (
             <>
+              {isActive ? (
+                <SelectionPill
+                  layoutId="nav-active"
+                  className="bg-iusia-navy shadow-[0_3px_10px_-3px_rgba(11,29,58,0.5)]"
+                />
+              ) : null}
               <Icon
                 size={16}
                 strokeWidth={isActive ? 2.1 : 1.7}
-                className={clsx("shrink-0", isActive ? "text-iusia-intel" : "text-iusia-mist-text")}
+                className={clsx(
+                  "shrink-0 transition-transform duration-[var(--motion-fast)] ease-[var(--ease-standard)]",
+                  "group-hover:scale-110 motion-reduce:translate-none",
+                  isActive ? "text-iusia-intel" : "text-iusia-mist-text",
+                )}
                 aria-hidden
               />
               <span className="sr-only lg:not-sr-only">{itemLabel}</span>

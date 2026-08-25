@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardHeader, Skeleton, StateBlock } from "@iusia/ui";
+import { ChevronRight } from "lucide-react";
+import { Card, CardHeader, Skeleton, StateBlock, StatusChip, analysisTerm } from "@iusia/ui";
 import { api } from "../api.js";
 import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
 
@@ -36,6 +37,16 @@ const AGENT_DOMAIN_AREAS: Record<string, string> = {
   REAL_ESTATE: "Inmobiliario",
   QUALITY: "Control de calidad",
 };
+
+/** Tiempo transcurrido en lenguaje corriente. Nunca una duración en milisegundos. */
+function elapsed(startedAt: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000));
+  if (mins < 1) return "menos de un minuto";
+  if (mins === 1) return "un minuto";
+  if (mins < 60) return `${mins} minutos`;
+  const hours = Math.floor(mins / 60);
+  return hours === 1 ? "una hora" : `${hours} horas`;
+}
 
 export function Iusia() {
   const { analyses, count, isLoading } = useActiveAnalyses();
@@ -108,32 +119,42 @@ export function Iusia() {
         {isLoading ? (
           <div className="p-5"><Skeleton className="h-20" /></div>
         ) : count === 0 ? (
-          <StateBlock
-            kind="empty"
-            title="Ningún análisis en curso"
-            hint="Los análisis se inician desde el expediente, en la pestaña Análisis IUSIA."
-          />
+          <p className="px-6 pb-5 text-[13.5px] text-iusia-mist-text">
+            Ningún análisis en curso. Los análisis se inician desde el expediente, en la
+            pestaña Análisis IUSIA.
+          </p>
         ) : (
           <ul className="divide-y divide-iusia-line">
             {analyses.map((a) => (
               <li key={a.root_execution_id}>
                 <Link
                   to={`/casos/${a.matter_id}?analisis=${a.root_execution_id}`}
-                  className="flex items-center justify-between gap-3 px-6 py-3.5 transition-colors hover:bg-iusia-surface"
+                  className="group flex items-center gap-4 px-6 py-3.5 transition-colors duration-[var(--motion-fast)] hover:bg-iusia-ice/70"
                 >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iusia-intel opacity-60 motion-reduce:animate-none" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-iusia-intel" />
+                  <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iusia-intel opacity-60 motion-reduce:animate-none" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-iusia-intel" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-medium text-iusia-navy">
+                      {a.matter_title}
                     </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[14.5px] text-iusia-carbon">{a.matter_title}</span>
-                      <span className="block text-[12.5px] text-iusia-mist-text">
-                        Iniciado {new Date(a.started_at).toLocaleString("es-CO")}
-                      </span>
+                    {/* Tiempo transcurrido: se deriva de `started_at`, que ya viene en
+                        la respuesta. La fase y los especialistas viven en el detalle de
+                        la ejecución y no se piden aquí sólo para decorar la fila. */}
+                    <span className="block text-[12px] text-iusia-mist-text">
+                      Trabajando desde hace {elapsed(a.started_at)}
                     </span>
                   </span>
-                  <span className="shrink-0 text-[13px] font-medium text-iusia-action">Abrir</span>
+                  <StatusChip label={analysisTerm(a.status).label} tone={analysisTerm(a.status).tone} />
+                  <span className="flex shrink-0 items-center gap-1 text-[12.5px] font-medium text-iusia-action">
+                    Reabrir
+                    <ChevronRight
+                      size={13}
+                      aria-hidden
+                      className="transition-transform duration-[var(--motion-fast)] group-hover:translate-x-1 motion-reduce:transition-none"
+                    />
+                  </span>
                 </Link>
               </li>
             ))}

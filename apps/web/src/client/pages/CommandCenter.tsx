@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
+  CountUp,
+  DataBar,
   Drawer,
   Module,
   ScreenTitle,
@@ -11,7 +13,8 @@ import {
   matterStatusTerm,
   riskTerm,
 } from "@iusia/ui";
-import { AlertTriangle, CalendarClock, Clock, Scale } from "lucide-react";
+import { motion } from "motion/react";
+import { AlertTriangle, CalendarClock, ChevronRight, Clock, Scale } from "lucide-react";
 import { api, type MeResponse } from "../api.js";
 import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
 
@@ -105,7 +108,7 @@ export function CommandCenter({ me }: { me: MeResponse }) {
                 En curso
               </p>
               <p className="mt-1 flex items-center gap-2 text-[28px] font-semibold leading-none tracking-[-0.02em] tnum text-white">
-                {activeCount}
+                <CountUp value={activeCount} />
                 {activeCount > 0 ? (
                   <span className="relative flex h-2 w-2" aria-hidden>
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iusia-intel opacity-70 motion-reduce:animate-none" />
@@ -119,7 +122,7 @@ export function CommandCenter({ me }: { me: MeResponse }) {
                 Créditos
               </p>
               <p className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] tnum text-white">
-                {me.credits.toLocaleString("es-CO")}
+                <CountUp value={me.credits} />
               </p>
             </div>
           </div>
@@ -159,11 +162,14 @@ export function CommandCenter({ me }: { me: MeResponse }) {
                   dejan verla. */}
               <div className="flex h-2.5 overflow-hidden rounded-full bg-iusia-ice">
                 {Object.entries(health.data?.by_status ?? {}).map(([status, n], i) => (
-                  <span
+                  <motion.span
                     key={status}
-                    className={STATUS_BAND[i % STATUS_BAND.length]}
+                    className={"origin-left " + STATUS_BAND[i % STATUS_BAND.length]}
                     style={{ width: `${(n / (health.data?.total || 1)) * 100}%` }}
                     title={`${matterStatusTerm(status).label}: ${n}`}
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ duration: 0.62, ease: [0.22, 0.61, 0.36, 1], delay: i * 0.07 }}
                   />
                 ))}
               </div>
@@ -257,12 +263,12 @@ export function CommandCenter({ me }: { me: MeResponse }) {
                     </div>
                     {/* La carga se compara entre personas, así que la barra se mide
                         contra quien más tiene, no contra un total inventado. */}
-                    <span className="mt-1 block h-1 overflow-hidden rounded-full bg-iusia-paper">
-                      <span
-                        className="block h-full rounded-full bg-iusia-navy/45"
-                        style={{ width: `${(w.openTasks / max) * 100}%` }}
-                      />
-                    </span>
+                    <DataBar
+                      value={(w.openTasks / max) * 100}
+                      className="bg-iusia-navy/45"
+                      trackClassName="mt-1 h-1 bg-iusia-paper"
+                      delay={0.05}
+                    />
                   </li>
                 ));
               })()}
@@ -496,10 +502,19 @@ function IndicatorCell({
     <button
       type="button"
       onClick={onClick}
-      className="bg-iusia-paper px-4 py-3 text-left transition-colors hover:bg-iusia-ice"
+      className="group relative bg-iusia-paper px-4 py-3 text-left transition-[background-color,box-shadow] duration-[var(--motion-normal)] ease-[var(--ease-standard)] hover:z-10 hover:bg-iusia-ice hover:shadow-[var(--shadow-panel)]"
     >
-      <span className="block text-[10.5px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
-        {label}
+      <span className="flex items-center gap-1.5">
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+          {label}
+        </span>
+        {/* La flecha aparece al pasar por encima: dice "esto se abre" sin ocupar
+            sitio permanente en una rejilla densa. */}
+        <ChevronRight
+          size={12}
+          aria-hidden
+          className="-translate-x-1 text-iusia-action opacity-0 transition-all duration-[var(--motion-fast)] ease-[var(--ease-standard)] group-hover:translate-x-0 group-hover:opacity-100 motion-reduce:transition-none"
+        />
       </span>
       <span className="mt-1 flex items-baseline gap-1.5">
         <span
@@ -508,7 +523,7 @@ function IndicatorCell({
             (empty ? "text-iusia-mist-text" : color)
           }
         >
-          {value}
+          <CountUp value={value} />
         </span>
         {hint ? <span className="text-[11px] text-iusia-mist-text">{hint}</span> : null}
       </span>

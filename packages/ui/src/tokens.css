@@ -79,6 +79,13 @@
   --shadow-surface: 0 1px 2px rgba(11, 29, 58, 0.04), 0 2px 8px -4px rgba(11, 29, 58, 0.08);
   --shadow-panel: 0 2px 4px rgba(11, 29, 58, 0.04), 0 12px 32px -16px rgba(11, 29, 58, 0.2);
   --shadow-floating: 0 8px 16px -8px rgba(11, 29, 58, 0.14), 0 32px 64px -24px rgba(11, 29, 58, 0.28);
+  /* Sombras de acción como variables y no como valores arbitrarios en la clase:
+     un `shadow-[0_2px_8px_-3px_rgba(11,29,58,.45)]` lleva comas dentro de rgba() y
+     la interpolación entre dos de esos valores no ocurre, así que el hover no se
+     veía cambiar. Con variables el navegador transiciona el box-shadow completo. */
+  --shadow-cta: 0 2px 8px -3px rgba(11, 29, 58, 0.45);
+  --shadow-cta-hover: 0 10px 22px -8px rgba(11, 29, 58, 0.55);
+  --shadow-cta-press: 0 1px 3px -1px rgba(11, 29, 58, 0.5);
   --shadow-hairline: var(--shadow-surface);
   --shadow-raised: var(--shadow-panel);
   --shadow-overlay: 0 24px 60px -20px rgba(11, 29, 58, 0.35);

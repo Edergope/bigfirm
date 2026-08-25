@@ -6,7 +6,9 @@ import {
   Drawer,
   Field,
   Input,
+  CountUp,
   Module,
+  Rise,
   ScreenTitle,
   Select,
   Skeleton,
@@ -134,8 +136,8 @@ export function Matters() {
       <Module className="flex min-h-0 flex-1 flex-col" padded={false}>
         {all.length > 0 ? (
           <div className="flex flex-wrap items-center gap-x-12 gap-y-3 bg-iusia-ice/70 px-5 py-4">
-            {summary.map((x) => (
-              <div key={x.id}>
+            {summary.map((x, i) => (
+              <Rise key={x.id} delay={i * 0.05}>
                 <p className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-iusia-mist-text">
                   {x.label}
                 </p>
@@ -146,13 +148,13 @@ export function Matters() {
                       (x.value === "0" ? "text-iusia-mist-text" : x.color)
                     }
                   >
-                    {x.value}
+                    <CountUp value={Number(x.value)} />
                   </span>
                   {x.hint ? (
                     <span className="text-[11px] text-iusia-mist-text">{x.hint}</span>
                   ) : null}
                 </p>
-              </div>
+              </Rise>
             ))}
 
           </div>
@@ -263,24 +265,30 @@ function MatterRow({ matter: m }: { matter: MatterSummary }) {
     <li>
       <Link
         to={`/casos/${m.id}`}
-        className={ROW_GRID + " group px-5 py-3 transition-colors hover:bg-iusia-ice/70"}
+        className={
+          ROW_GRID +
+          " group px-5 py-3 transition-[background-color] duration-[var(--motion-fast)] ease-[var(--ease-standard)] hover:bg-iusia-ice/80"
+        }
       >
         {/* Señal de exploración. Nunca es el único portador del significado: la
             criticidad y el riesgo van además como texto en sus propios ejes. */}
+        {/* La señal se alarga al pasar por encima: informa de que la fila responde
+            sin desplazar el texto ni cambiar la altura de la fila. */}
         <span
           aria-hidden
           className={
-            "h-10 w-[3px] rounded-full " +
+            "w-[3px] rounded-full transition-[height] duration-[var(--motion-normal)] ease-[var(--ease-standard)] motion-reduce:transition-none " +
+            "h-9 group-hover:h-12 " +
             (critical
               ? "bg-iusia-critical"
               : m.materiality === "HIGH_STAKES"
                 ? "bg-iusia-gold"
-                : "bg-transparent")
+                : "bg-iusia-line group-hover:bg-iusia-action/40")
           }
         />
 
         <span className="min-w-0">
-          <span className="block truncate text-[15px] font-semibold leading-snug tracking-[-0.012em] text-iusia-navy group-hover:text-iusia-action">
+          <span className="block truncate text-[15px] font-semibold leading-snug tracking-[-0.012em] text-iusia-navy transition-colors duration-[var(--motion-fast)] group-hover:text-iusia-action">
             {m.title}
           </span>
           <span className="mt-0.5 block truncate text-[13px] leading-snug">

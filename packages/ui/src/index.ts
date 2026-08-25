@@ -6,3 +6,4 @@ export * from "./legal.js";
 // "@iusia/ui/analysis-constellation" para que pueda cargarse de forma diferida.
 // Sacarla al barril la devolvería al bundle principal de la aplicación.
 export * from "./legal-terminology.js";
+export * from "./motion.js";

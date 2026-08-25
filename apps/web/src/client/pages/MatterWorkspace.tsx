@@ -4,8 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Card,
-  CardHeader,
-  Field,
+  Select,
   Input,
   MatterStatusChip,
   RiskIndicator,
@@ -23,8 +22,10 @@ import {
   materialityTerm,
   riskTerm,
 } from "@iusia/ui";
+import { motion } from "motion/react";
 import {
   Brain,
+  Check,
   File,
   FileImage,
   FileSpreadsheet,
@@ -35,7 +36,13 @@ import {
   Users,
 } from "lucide-react";
 import type { RiskLevel } from "@iusia/domain";
-import { api, ApiError, type CaseBriefData, type MatterDetail } from "../api.js";
+import {
+  api,
+  ApiError,
+  type CaseBriefData,
+  type MatterDetail,
+  type TaskRow as TaskRow_,
+} from "../api.js";
 import { authClient } from "../auth-client.js";
 import { MatterOrchestration } from "./MatterOrchestration.js";
 
@@ -240,11 +247,20 @@ export function MatterWorkspace() {
                 setTab(TABS[next]!.id);
               }}
               className={
-                selected
-                  ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[13.5px] font-medium text-iusia-navy"
-                  : "px-3.5 py-2.5 text-[13.5px] text-iusia-mist-text transition-colors hover:text-iusia-carbon"
+                "relative px-3.5 py-2.5 text-[13.5px] transition-colors duration-[var(--motion-fast)] " +
+                (selected
+                  ? "font-medium text-iusia-navy"
+                  : "text-iusia-mist-text hover:text-iusia-carbon")
               }
             >
+              {selected ? (
+                <motion.span
+                  layoutId="matter-tab"
+                  aria-hidden
+                  className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-iusia-action"
+                  transition={{ type: "spring", stiffness: 420, damping: 38 }}
+                />
+              ) : null}
               <span className="flex items-center gap-1.5">
                 {t.label}
                 {count !== null && count > 0 ? (
@@ -611,14 +627,29 @@ function Hechos({ data }: { data: MatterDetail }) {
   );
 }
 
+/**
+ * Tareas y términos del expediente.
+ *
+ * Era un formulario con un input, un botón "Añadir" y un vacío. El backend ya
+ * distingue tarea de término procesal y calcula el vencimiento con su regla, pero
+ * la vista no lo mostraba: presentaba lo mismo que un gestor de listas genérico.
+ *
+ * Aquí lo abierto y lo cerrado se separan —una tarea cerrada ya no compite por la
+ * atención pero sigue siendo trazable—, y lo pendiente se ordena por urgencia. El
+ * compositor es una sola línea integrada: crear una tarea es un gesto frecuente y
+ * no merece un formulario que ocupe media pantalla.
+ *
+ * No se inventa ningún campo: sólo se muestran los que el servidor ya devuelve.
+ */
 function Tareas({ matterId }: { matterId: string }) {
   const queryClient = useQueryClient();
   const tasks = useQuery({ queryKey: ["tasks", matterId], queryFn: () => api.listTasks(matterId) });
   const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<"TASK" | "PROCEDURAL_DEADLINE">("TASK");
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["tasks", matterId] });
   const create = useMutation({
-    mutationFn: () => api.createTask(matterId, { title }),
+    mutationFn: () => api.createTask(matterId, { title, kind }),
     onSuccess: () => {
       setTitle("");
       void invalidate();
@@ -630,72 +661,175 @@ function Tareas({ matterId }: { matterId: string }) {
     onSuccess: () => void invalidate(),
   });
 
+  const all = tasks.data?.tasks ?? [];
+  const open = all
+    .filter((t) => t.status !== "COMPLETADA" && t.status !== "CANCELADA")
+    .sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999"));
+  const done = all.filter((t) => t.status === "COMPLETADA");
+
   return (
-    <Card>
-      <CardHeader title="Tareas y términos" subtitle="El cálculo jurídico de términos es propio de IUSIA" />
-      <form
-        onSubmit={(e: FormEvent) => {
-          e.preventDefault();
-          if (title.trim()) create.mutate();
-        }}
-        className="flex items-end gap-3 border-b border-iusia-mist/20 px-6 py-4"
+    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+      <Module
+        className="lg:col-span-2"
+        eyebrow={open.length === 0 ? "Nada pendiente" : `${open.length} pendientes`}
+        title="Tareas y términos"
+        padded={false}
       >
-        <Field label="Nueva tarea" className="flex-1">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Describe la tarea…" />
-        </Field>
-        <Button type="submit" disabled={create.isPending || !title.trim()}>
-          Añadir
-        </Button>
-      </form>
-      {tasks.isLoading ? (
-        <div className="p-5"><Skeleton className="h-10" /></div>
-      ) : (tasks.data?.tasks.length ?? 0) === 0 ? (
-        <StateBlock kind="empty" title="Sin tareas" hint="Añade una tarea o registra un término procesal." />
-      ) : (
-        <ul className="divide-y divide-iusia-mist/20">
-          {tasks.data?.tasks.map((t) => (
-            <li key={t.id} className="flex items-center justify-between px-6 py-3">
-              <span className="min-w-0">
-                <span className="block truncate text-[14.5px]">{t.title}</span>
-                {t.deadlineRule ? (
-                  <span className="block text-[12px] text-iusia-mist-text">
-                    {t.deadlineRule} · {t.deadlineSource}
-                  </span>
-                ) : null}
-              </span>
-              <span className="flex items-center gap-3">
-                {t.dueAt ? (
-                  <time className="text-[12.5px] text-iusia-mist-text tnum">
-                    {new Date(t.dueAt).toLocaleDateString("es-CO")}
-                  </time>
-                ) : null}
-                {t.status === "COMPLETADA" ? (
-                  <StatusChip label="Completada" tone="success" />
-                ) : (
-                  <StatusChip
-                    label={t.kind === "PROCEDURAL_DEADLINE" ? "Término" : "Tarea"}
-                    tone={t.kind === "PROCEDURAL_DEADLINE" ? "warning" : "neutral"}
-                  />
-                )}
+        {/* Compositor de una línea: crear es frecuente, no ceremonial. */}
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            if (title.trim()) create.mutate();
+          }}
+          className="flex flex-wrap items-center gap-2 px-5 pb-3"
+        >
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Describe la tarea o el término…"
+            aria-label="Nueva tarea o término"
+            className="h-9 min-w-0 flex-1 rounded-[10px] text-[13.5px]"
+          />
+          <Select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as typeof kind)}
+            aria-label="Tipo"
+            className="h-9 rounded-[10px] text-[13px]"
+          >
+            <option value="TASK">Tarea</option>
+            <option value="PROCEDURAL_DEADLINE">Término procesal</option>
+          </Select>
+          <Button type="submit" size="sm" disabled={create.isPending || !title.trim()}>
+            {create.isPending ? "Añadiendo…" : "Añadir"}
+          </Button>
+        </form>
+
+        {tasks.isLoading ? (
+          <div className="px-5 pb-5">
+            <Skeleton className="h-12" />
+          </div>
+        ) : open.length === 0 ? (
+          <p className="px-5 pb-5 text-[13px] text-iusia-mist-text">
+            No hay nada pendiente en este expediente.
+          </p>
+        ) : (
+          <ul className="divide-y divide-iusia-line/70">
+            {open.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                onToggle={() => setStatus.mutate({ id: t.id, status: "COMPLETADA" })}
+                pending={setStatus.isPending}
+              />
+            ))}
+          </ul>
+        )}
+      </Module>
+
+      <Module
+        tone="ice"
+        eyebrow={`${done.length} ${done.length === 1 ? "cerrada" : "cerradas"}`}
+        title="Completadas"
+        padded={false}
+      >
+        {done.length === 0 ? (
+          <p className="px-5 pb-5 text-[13px] text-iusia-mist-text">
+            Lo que cierres queda aquí, con su registro.
+          </p>
+        ) : (
+          <ul className="divide-y divide-iusia-line/60">
+            {done.slice(0, 8).map((t) => (
+              <li key={t.id} className="flex items-center justify-between gap-3 px-5 py-2.5">
+                <span className="min-w-0 truncate text-[13px] text-iusia-mist-text line-through decoration-iusia-mist/60">
+                  {t.title}
+                </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    setStatus.mutate({
-                      id: t.id,
-                      status: t.status === "COMPLETADA" ? "PENDIENTE" : "COMPLETADA",
-                    })
-                  }
+                  onClick={() => setStatus.mutate({ id: t.id, status: "PENDIENTE" })}
                   disabled={setStatus.isPending}
-                  className="text-[13px] text-iusia-action hover:underline disabled:opacity-50"
+                  className="shrink-0 text-[12px] font-medium text-iusia-action transition-colors hover:underline disabled:opacity-50"
                 >
-                  {t.status === "COMPLETADA" ? "Reabrir" : "Completar"}
+                  Reabrir
                 </button>
-              </span>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Module>
+    </div>
+  );
+}
+
+/**
+ * Una obligación abierta. El término procesal se distingue de la tarea porque su
+ * incumplimiento tiene consecuencia jurídica, y por eso lleva su regla de cómputo a
+ * la vista: una fecha sin regla no es un término, es un recordatorio.
+ */
+function TaskRow({
+  task: t,
+  onToggle,
+  pending,
+}: {
+  task: TaskRow_;
+  onToggle: () => void;
+  pending: boolean;
+}) {
+  const due = t.dueAt ? new Date(t.dueAt) : null;
+  const days = due ? Math.ceil((due.getTime() - Date.now()) / 86_400_000) : null;
+  const overdue = days !== null && days < 0;
+  const isDeadline = t.kind === "PROCEDURAL_DEADLINE";
+
+  return (
+    <li className="group flex items-center gap-3.5 px-5 py-3 transition-colors duration-[var(--motion-fast)] hover:bg-iusia-ice/70">
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={pending}
+        aria-label={`Marcar "${t.title}" como completada`}
+        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-iusia-mist-strong transition-all duration-[var(--motion-fast)] hover:border-iusia-success hover:bg-iusia-success/10 disabled:opacity-50"
+      >
+        <Check
+          size={11}
+          strokeWidth={3}
+          aria-hidden
+          className="text-iusia-success opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-60"
+        />
+      </button>
+
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14px] text-iusia-carbon">{t.title}</span>
+        {isDeadline && t.deadlineRule ? (
+          <span className="block truncate text-[12px] text-iusia-mist-text">
+            {t.deadlineRule}
+            {t.deadlineSource ? ` · ${t.deadlineSource}` : ""}
+          </span>
+        ) : null}
+      </span>
+
+      {isDeadline ? <StatusChip label="Término" tone="warning" /> : null}
+
+      {due ? (
+        <span className="shrink-0 text-right">
+          <span
+            className={
+              "block text-[12.5px] tnum " +
+              (overdue ? "font-medium text-iusia-critical" : "text-iusia-carbon")
+            }
+          >
+            {due.toLocaleDateString("es-CO")}
+          </span>
+          <span className="block text-[11px] text-iusia-mist-text">
+            {days !== null && days < 0
+              ? `${Math.abs(days)} d de retraso`
+              : days === 0
+                ? "vence hoy"
+                : `en ${days} d`}
+          </span>
+        </span>
+      ) : (
+        <span className="shrink-0 text-[12px] text-iusia-mist-text">Sin fecha</span>
       )}
-    </Card>
+    </li>
   );
 }
 

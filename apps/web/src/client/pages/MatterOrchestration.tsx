@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Clock, FileText, Users } from "lucide-react";
 import {
   Button,
   Card,
   CardHeader,
+  Module,
   StateBlock,
   StatusChip,
   Skeleton,
@@ -121,6 +123,7 @@ export function MatterOrchestration({
         pending={start.isPending}
         error={start.error}
         hasRuns={roots.length > 0}
+        documentCount={data.documents.length}
       />
 
       {selectedRoot ? (
@@ -182,6 +185,20 @@ export function MatterOrchestration({
   );
 }
 
+/**
+ * Analysis Brief — el encargo que se le hace a IUSIA.
+ *
+ * Era un textarea con un botón: el mismo control que se usaría para dejar una nota.
+ * Pedirle un análisis a un equipo de especialistas no es escribir una nota, y la
+ * pantalla no decía nada de lo que iba a ocurrir después —sobre qué trabaja, quién
+ * interviene, si hay que esperar—. Eso lo descubría el abogado ejecutando.
+ *
+ * Sigue siendo un textarea porque ésa es la capacidad real; lo que cambia es que
+ * ahora está enmarcado en lo que IUSIA hará con él. Las tres condiciones que se
+ * enuncian son deterministas y verificables en esta misma pantalla: los documentos
+ * del expediente, la selección automática de especialistas y la continuación en
+ * segundo plano. No hay sugerencias generadas ni prompts automáticos.
+ */
 function StartCard({
   objective,
   setObjective,
@@ -189,6 +206,7 @@ function StartCard({
   pending,
   error,
   hasRuns,
+  documentCount,
 }: {
   objective: string;
   setObjective: (v: string) => void;
@@ -196,38 +214,72 @@ function StartCard({
   pending: boolean;
   error: unknown;
   hasRuns: boolean;
+  documentCount: number;
 }) {
   const insufficient = error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS";
+  const tooShort = objective.trim().length < 10;
+
   return (
-    <Card>
-      <CardHeader
-        title="Iniciar análisis con IUSIA"
-        subtitle="Describe qué necesitas; IUSIA activa al equipo adecuado y trabaja sobre el expediente."
-      />
-      <div className="px-6 py-5">
+    <Module eyebrow="Encargo a IUSIA" title="Qué necesitas que analice" padded={false}>
+      <div className="px-5 pb-5">
         <Textarea
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
           rows={3}
           aria-label="Objetivo del encargo"
-          placeholder="Ej.: Analiza el documento del expediente y determina qué plazo de preaviso sostiene la contraparte, citando la evidencia."
+          className="rounded-[var(--radius-md)] text-[14.5px] leading-relaxed"
+          placeholder="Ej.: Determina qué plazo de preaviso sostiene la contraparte y cita la evidencia del expediente."
         />
+
+        {/* Lo que va a ocurrir, dicho antes de ejecutar. Todo verificable aquí. */}
+        <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+          <BriefFact icon={<FileText size={13} />}>
+            {documentCount === 0
+              ? "Sin documentos incorporados todavía"
+              : `Trabajará sobre ${documentCount} ${documentCount === 1 ? "documento" : "documentos"} del expediente`}
+          </BriefFact>
+          <BriefFact icon={<Users size={13} />}>
+            Elegirá por sí misma qué especialistas intervienen
+          </BriefFact>
+          <BriefFact icon={<Clock size={13} />}>
+            Puedes cerrar la ventana: sigue trabajando
+          </BriefFact>
+        </ul>
+
         {insufficient ? (
-          <div className="mt-2 rounded-[10px] border border-iusia-gold/40 bg-iusia-gold/10 px-4 py-2.5 text-[13.5px] text-iusia-gold-text">
-            No hay créditos suficientes para iniciar el análisis. Contacta con la administración del despacho.
+          <div className="mt-3 rounded-[var(--radius-md)] bg-iusia-gold/12 px-4 py-2.5 text-[13px] text-iusia-gold-text">
+            No hay créditos suficientes para iniciar el análisis. Contacta con la
+            administración del despacho.
           </div>
         ) : error ? (
-          <p role="alert" className="mt-2 text-[13.5px] text-iusia-critical">
+          <p role="alert" className="mt-3 text-[13px] text-iusia-critical">
             {error instanceof ApiError ? error.message : "No fue posible iniciar el análisis."}
           </p>
         ) : null}
-        <div className="mt-3">
-          <Button onClick={onStart} disabled={pending || objective.trim().length < 10}>
-            {pending ? "Iniciando…" : hasRuns ? "Iniciar nuevo análisis" : "Iniciar análisis con IUSIA"}
+
+        <div className="mt-4 flex items-center gap-3">
+          <Button onClick={onStart} disabled={pending || tooShort}>
+            {pending ? "Iniciando…" : hasRuns ? "Iniciar nuevo análisis" : "Iniciar análisis"}
           </Button>
+          {tooShort && objective.length > 0 ? (
+            <span className="text-[12.5px] text-iusia-mist-text">
+              Describe el encargo con algo más de detalle.
+            </span>
+          ) : null}
         </div>
       </div>
-    </Card>
+    </Module>
+  );
+}
+
+function BriefFact({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <li className="flex items-center gap-1.5 text-[12.5px] text-iusia-mist-text">
+      <span className="text-iusia-intel-text" aria-hidden>
+        {icon}
+      </span>
+      {children}
+    </li>
   );
 }
 
