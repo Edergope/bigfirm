@@ -189,8 +189,8 @@ export function createAuth(env: Env) {
           // un correo no abierto. Se registra el desenlace, nunca el enlace ni la clave.
           const audit = new AuditRepository(db);
           const organizationId = data.organization?.id ?? "";
-          let outcome = "SENT";
-          let detail: string | null = null;
+          let outcome: string;
+          let detail: string | null;
           try {
             const provider = new ResendNotificationProvider({
               apiKey: env.RESEND_API_KEY ?? null,
