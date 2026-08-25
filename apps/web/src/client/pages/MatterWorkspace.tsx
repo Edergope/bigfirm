@@ -52,6 +52,19 @@ function tabCount(id: TabId, data: MatterDetail): number | null {
 
 const TERMINAL_EXECUTION = new Set(["COMPLETED", "FAILED", "CANCELLED", "BLOCKED"]);
 
+/** El papel de cada persona EN ESTE expediente, en el idioma del despacho. */
+const MATTER_ROLE_LABELS: Record<string, string> = {
+  OWNER: "Responsable",
+  COLLABORATOR: "Colabora",
+  REVIEWER: "Revisa",
+  ASSISTANT: "Apoya",
+  EXTERNAL: "Externo",
+  READ_ONLY: "Sólo lectura",
+};
+function matterRoleLabel(role: string): string {
+  return MATTER_ROLE_LABELS[role] ?? role;
+}
+
 export function MatterWorkspace() {
   const { matterId = "" } = useParams();
   // Llegar con `?analisis=` significa "llévame a esa experiencia": abrir el
@@ -230,11 +243,16 @@ function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
           ) : (
             <ul className="divide-y divide-iusia-mist/20">
               {data.members.map((member) => (
-                <li key={member.userId} className="flex items-center justify-between px-6 py-3 text-[14px]">
-                  <span className="font-mono text-[12.5px] text-iusia-mist-text">{member.userId}</span>
-                  <span className="flex items-center gap-2">
+                <li key={member.userId} className="flex items-center justify-between gap-3 px-6 py-3 text-[14px]">
+                  <span className="min-w-0">
+                    <span className="block truncate text-iusia-carbon">{member.name}</span>
+                    <span className="block truncate text-[12.5px] text-iusia-mist-text">
+                      {member.email}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
                     {member.delegatedByUserId ? <StatusChip label="Delegado" tone="info" /> : null}
-                    <StatusChip label={member.role} />
+                    <StatusChip label={matterRoleLabel(member.role)} />
                   </span>
                 </li>
               ))}

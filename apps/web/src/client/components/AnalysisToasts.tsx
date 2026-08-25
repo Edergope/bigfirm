@@ -27,11 +27,13 @@ export function AnalysisToasts() {
       ...current,
       ...finished.map((f) => ({
         id: f.root_execution_id,
-        title: "Análisis completado",
+        // Deliberadamente neutro: aquí sólo consta que salió de los activos, no si
+        // concluyó, se detuvo o falló. El detalle exacto lo da el expediente.
+        title: "El análisis de IUSIA terminó",
         body: f.matter_title,
         tone: "success" as const,
         action: {
-          label: "Ver resultado",
+          label: "Ver en el expediente",
           onClick: () => {
             dismiss(f.root_execution_id);
             navigate(`/casos/${f.matter_id}?analisis=${f.root_execution_id}`);

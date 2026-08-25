@@ -182,10 +182,27 @@ export class MatterRepository {
     return (row?.role as MatterRole | undefined) ?? null;
   }
 
+  /**
+   * Miembros activos del expediente, con el nombre de la persona.
+   *
+   * El id de usuario no le dice a nadie quién lleva el caso: la vista mostraba
+   * cadenas como `Me9nmiaFFMnJ…` donde debía haber un nombre. El id se conserva
+   * porque las acciones de gestión lo necesitan, pero deja de ser lo que se lee.
+   */
   async listMembers(matterId: string) {
     return this.db
-      .select()
+      .select({
+        matterId: matterMembers.matterId,
+        userId: matterMembers.userId,
+        role: matterMembers.role,
+        delegatedByUserId: matterMembers.delegatedByUserId,
+        grantedAt: matterMembers.grantedAt,
+        revokedAt: matterMembers.revokedAt,
+        name: user.name,
+        email: user.email,
+      })
       .from(matterMembers)
+      .innerJoin(user, eq(matterMembers.userId, user.id))
       .where(and(eq(matterMembers.matterId, matterId), isNull(matterMembers.revokedAt)));
   }
 

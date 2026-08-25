@@ -87,6 +87,9 @@ export function AnalysisModal({
   const rootStatus =
     events.data?.executions.find((e) => e.id === rootExecutionId)?.status ?? "RUNNING";
   const finished = !shouldKeepPolling(rootStatus);
+  // Terminar no es lo mismo que concluir. Un análisis detenido a mano o caído no
+  // puede anunciarse como completado: el abogado creería que tiene un dictamen.
+  const ending = terminalCopy(rootStatus);
 
   const agentNames = useMemo(
     () => new Map((agents.data?.agents ?? []).map((a) => [a.agent_id, a.name])),
@@ -187,21 +190,17 @@ export function AnalysisModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={
-          finished ? "Análisis de IUSIA completado" : "Análisis de IUSIA en curso"
-        }
+        aria-label={finished ? ending.title : "Análisis de IUSIA en curso"}
         tabIndex={-1}
         className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[14px] bg-iusia-paper shadow-[0_24px_64px_-12px_rgba(11,29,58,0.45)] focus:outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-iusia-mist/25 px-6 py-4">
           <div>
             <p className="text-[15.5px] font-semibold text-iusia-navy">
-              {finished ? "Análisis completado" : "IUSIA está analizando el expediente"}
+              {finished ? ending.title : "IUSIA está analizando el expediente"}
             </p>
             <p className="mt-0.5 text-[13px] text-iusia-mist-text">
-              {finished
-                ? "El resultado ya está disponible en el expediente."
-                : "Puedes cerrar esta ventana: el análisis continúa."}
+              {finished ? ending.hint : "Puedes cerrar esta ventana: el análisis continúa."}
             </p>
           </div>
           <button
@@ -227,7 +226,7 @@ export function AnalysisModal({
             </Suspense>
           </div>
 
-          <ol className="flex flex-col gap-2.5 px-6 py-5">
+          <ol className="flex min-h-[168px] flex-col gap-2.5 px-6 py-5">
             {events.isLoading && stages.length === 0 ? (
               <Skeleton className="h-24" />
             ) : (
@@ -277,17 +276,46 @@ export function AnalysisModal({
               {cancel.isPending ? "Deteniendo…" : "Detener análisis"}
             </button>
           ) : (
-            <span className="text-[13px] text-iusia-mist-text">
-              El expediente conserva el resultado y su trazabilidad.
-            </span>
+            <span className="text-[13px] text-iusia-mist-text">{ending.footer}</span>
           )}
           <Button type="button" onClick={onClose}>
-            {finished ? "Ver resultado" : "Seguir trabajando"}
+            {finished ? ending.action : "Seguir trabajando"}
           </Button>
         </footer>
       </div>
     </div>
   );
+}
+
+/** Copy de cierre según CÓMO terminó, no sólo si terminó. */
+function terminalCopy(status: string): {
+  title: string;
+  hint: string;
+  footer: string;
+  action: string;
+} {
+  if (status === "CANCELLED") {
+    return {
+      title: "Análisis detenido",
+      hint: "Lo detuviste antes de que IUSIA concluyera. No hay dictamen para este intento.",
+      footer: "El expediente conserva el registro de lo que alcanzó a ejecutarse.",
+      action: "Volver al expediente",
+    };
+  }
+  if (status === "FAILED" || status === "BLOCKED") {
+    return {
+      title: "El análisis no pudo completarse",
+      hint: "IUSIA se detuvo antes de emitir una conclusión. Puedes intentarlo de nuevo.",
+      footer: "El expediente conserva la trazabilidad de lo ocurrido.",
+      action: "Ver detalle",
+    };
+  }
+  return {
+    title: "Análisis completado",
+    hint: "El resultado ya está disponible en el expediente.",
+    footer: "El expediente conserva el resultado y su trazabilidad.",
+    action: "Ver resultado",
+  };
 }
 
 function stageLabel(stage: ProgressStage, agentNames: Map<string, string>): string {

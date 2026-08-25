@@ -91,7 +91,13 @@ export interface ExecutionEventRow {
 
 export interface MatterDetail {
   matter: MatterSummary;
-  members: Array<{ userId: string; role: string; delegatedByUserId: string | null }>;
+  members: Array<{
+    userId: string;
+    role: string;
+    delegatedByUserId: string | null;
+    name: string;
+    email: string;
+  }>;
   documents: Array<{
     id: string;
     name: string;
