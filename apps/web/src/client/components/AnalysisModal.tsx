@@ -25,8 +25,12 @@ import { api } from "../api.js";
  * entender el progreso, que se lee igual en la lista de fases.
  */
 
+// Se importa por su subruta y no por el barril de @iusia/ui: el barril ya viaja
+// en el bundle principal, así que importarlo aquí no separaría nada.
 const Constellation = lazy(() =>
-  import("@iusia/ui").then((m) => ({ default: m.AnalysisConstellation })),
+  import("@iusia/ui/analysis-constellation").then((m) => ({
+    default: m.AnalysisConstellation,
+  })),
 );
 
 const STAGE_LABEL: Record<string, string> = {

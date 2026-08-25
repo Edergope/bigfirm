@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./analysis-constellation": "./src/analysis-constellation.tsx",
     "./tokens.css": "./src/tokens.css"
   },
   "dependencies": {
