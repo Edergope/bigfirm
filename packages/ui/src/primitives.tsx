@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 
 /**
  * Primitivas del Design System de IUSIA. Sobrias, densas, legibles.
@@ -298,6 +298,16 @@ export function DevDataNotice({ children }: { children: ReactNode }) {
 /**
  * Drawer lateral accesible. Motion se reserva para cambios espaciales como éste.
  * Cierra con Escape y clic en el fondo; respeta prefers-reduced-motion.
+ *
+ * La PRESENCIA no depende de la animación. `AnimatePresence` retiene el nodo hasta
+ * que termina la salida, y esa salida se mueve con requestAnimationFrame: con la
+ * pestaña en segundo plano la animación queda a medias y el panel se quedaba
+ * abierto e insensible a Escape y al fondo. Cerrar es una decisión del usuario, no
+ * un efecto visual, así que al cerrar se desmonta y punto; la entrada sigue animada
+ * porque ahí el movimiento sí explica de dónde viene el panel.
+ *
+ * El foco queda atrapado dentro mientras está abierto y vuelve a su origen al
+ * cerrarse: si no, el teclado se pierde en la página que hay detrás del velo.
  */
 export function Drawer({
   open,
@@ -313,52 +323,80 @@ export function Drawer({
   width?: number;
 }) {
   const reduce = useReducedMotion();
+  const panelRef = useRef<HTMLElement>(null);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const opener = document.activeElement as HTMLElement | null;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    panelRef.current?.focus();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
   }, [open, onClose]);
 
+  if (!open) return null;
+
   return (
-    <AnimatePresence>
-      {open ? (
-        <>
-          <motion.div
-            className="fixed inset-0 z-40 bg-iusia-navy/25"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16 }}
+    <>
+      <motion.div
+        className="fixed inset-0 z-40 bg-iusia-navy/25"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.16 }}
+        onClick={onClose}
+      />
+      <motion.aside
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="fixed inset-y-0 right-0 z-50 flex max-w-full flex-col bg-iusia-paper shadow-[0_24px_60px_-20px_rgba(11,29,58,0.35)] focus:outline-none"
+        style={{ width }}
+        initial={reduce ? { opacity: 0 } : { x: width }}
+        animate={reduce ? { opacity: 1 } : { x: 0 }}
+        transition={{ duration: reduce ? 0 : 0.22, ease: [0.22, 0.61, 0.36, 1] }}
+      >
+        <header className="flex items-center justify-between border-b border-iusia-mist/25 px-5 py-4">
+          <h2 className="text-[16px] font-semibold text-iusia-navy">{title}</h2>
+          <button
+            type="button"
             onClick={onClose}
-          />
-          <motion.aside
-            role="dialog"
-            aria-modal="true"
-            aria-label={title}
-            className="fixed inset-y-0 right-0 z-50 flex flex-col bg-iusia-paper shadow-[0_24px_60px_-20px_rgba(11,29,58,0.35)]"
-            style={{ width }}
-            initial={reduce ? { opacity: 0 } : { x: width }}
-            animate={reduce ? { opacity: 1 } : { x: 0 }}
-            exit={reduce ? { opacity: 0 } : { x: width }}
-            transition={{ type: "spring", stiffness: 420, damping: 36 }}
+            aria-label="Cerrar"
+            className="rounded-md px-2 py-1 text-iusia-mist-text hover:bg-iusia-surface hover:text-iusia-carbon"
           >
-            <header className="flex items-center justify-between border-b border-iusia-mist/25 px-5 py-4">
-              <h2 className="text-[16px] font-semibold text-iusia-navy">{title}</h2>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Cerrar"
-                className="rounded-md px-2 py-1 text-iusia-mist-text hover:bg-iusia-surface hover:text-iusia-carbon"
-              >
-                ✕
-              </button>
-            </header>
-            <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
-          </motion.aside>
-        </>
-      ) : null}
-    </AnimatePresence>
+            ✕
+          </button>
+        </header>
+        <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
+      </motion.aside>
+    </>
   );
 }
 
@@ -419,13 +457,14 @@ export function ToastStack({
       role="region"
       aria-label="Avisos de IUSIA"
     >
-      <AnimatePresence initial={false}>
-        {items.map((t) => (
+      {/* Sin animación de salida, por la misma razón que el Drawer: descartar es una
+          decisión, no un efecto, y un aviso retenido por una salida que nunca termina
+          se queda pegado en la esquina. */}
+      {items.map((t) => (
           <motion.div
             key={t.id}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
             transition={{ duration: 0.18 }}
             role="status"
             aria-live="polite"
@@ -456,7 +495,6 @@ export function ToastStack({
             </div>
           </motion.div>
         ))}
-      </AnimatePresence>
     </div>
   );
 }
