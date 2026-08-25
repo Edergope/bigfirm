@@ -15,6 +15,13 @@ import { firmAccessControl, firmRoles } from "./roles.js";
  * Lo que Better Auth NO decide: qué puede hacer una persona dentro de un Matter.
  * Eso lo resuelve `AuthorizationService`.
  */
+/**
+ * Remitente por defecto. Coincide con el que ya usaba `NotificationService`: el
+ * repo tiene UNA convención de remitente, no dos. En un despliegue real debe
+ * suministrarse `RESEND_FROM` con una dirección de dominio VERIFICADO en Resend.
+ */
+const DEFAULT_SENDER = "IUSIA <notificaciones@iusia.legal>";
+
 /** Scope de SÓLO LECTURA de Drive. Mínimo privilegio: nunca se pide escritura. */
 export const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
@@ -123,7 +130,7 @@ export function createAuth(env: Env) {
       sendResetPassword: async ({ user, url }) => {
         const provider = new ResendNotificationProvider({
           apiKey: env.RESEND_API_KEY ?? null,
-          from: env.RESEND_FROM ?? "no-reply@iusia.co",
+          from: env.RESEND_FROM ?? DEFAULT_SENDER,
         });
         await provider.send({
           to: user.email,
@@ -156,7 +163,7 @@ export function createAuth(env: Env) {
         sendInvitationEmail: async (data) => {
           const provider = new ResendNotificationProvider({
             apiKey: env.RESEND_API_KEY ?? null,
-            from: env.RESEND_FROM ?? "no-reply@iusia.co",
+            from: env.RESEND_FROM ?? DEFAULT_SENDER,
           });
           const link = `${env.APP_URL}/invitacion?invitationId=${encodeURIComponent(data.id)}`;
           await provider.send({
