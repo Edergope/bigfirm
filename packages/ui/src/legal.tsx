@@ -91,3 +91,25 @@ export function CreditBadge({ balance }: { balance: number }) {
     </span>
   );
 }
+
+/**
+ * Roles de firma en el idioma del despacho.
+ *
+ * El enum es el contrato con el servidor y no se toca; lo que no puede ser es que
+ * una directora lea "EXTERNAL_LAWYER" en un desplegable para decidir el acceso de
+ * una persona. La descripción acompaña porque el rol determina qué verá esa
+ * persona, y eso no se adivina por el nombre.
+ */
+export const FIRM_ROLE_PRESENTATION: Record<string, { label: string; hint: string }> = {
+  FIRM_DIRECTOR: { label: "Dirección", hint: "Administra la firma y supervisa toda la cartera." },
+  PARTNER: { label: "Socio", hint: "Administra la firma y supervisa toda la cartera." },
+  LAWYER: { label: "Abogado", hint: "Trabaja en los expedientes que se le asignen." },
+  EXTERNAL_LAWYER: { label: "Abogado externo", hint: "Colabora sólo en expedientes concretos." },
+  ASSISTANT: { label: "Asistente", hint: "Apoya la gestión de los expedientes asignados." },
+  PARALEGAL: { label: "Paralegal", hint: "Apoyo jurídico en los expedientes asignados." },
+  READ_ONLY: { label: "Sólo lectura", hint: "Consulta sin capacidad de modificar." },
+};
+
+export function firmRoleLabel(role: string): string {
+  return FIRM_ROLE_PRESENTATION[role]?.label ?? role;
+}

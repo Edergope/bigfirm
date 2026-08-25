@@ -120,15 +120,43 @@ export function AnalysisModal({
     prevStatus.current = rootStatus;
   }, [rootStatus, matterId, rootExecutionId, queryClient]);
 
-  // Cerrar con Escape es cerrar la vista, nunca cancelar el trabajo.
+  // Escape cierra la vista, nunca cancela el trabajo. El foco queda atrapado en el
+  // diálogo mientras está abierto y vuelve a donde estaba al cerrarlo: si no, el
+  // teclado se pierde en la página de detrás, que está oculta tras el velo.
   useEffect(() => {
     if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === dialog)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
+
     document.addEventListener("keydown", onKey);
     dialogRef.current?.focus();
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
   }, [open, onClose]);
 
   const cancel = useMutation({

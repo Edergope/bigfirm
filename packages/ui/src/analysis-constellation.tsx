@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useReducedMotion } from "motion/react";
 import { colors } from "./tokens/index.js";
 
 /**
@@ -11,7 +12,10 @@ import { colors } from "./tokens/index.js";
  * Es deliberadamente abstracta —un núcleo y sus especialistas, no un cerebro
  * anatómico— porque representa inteligencia jurídica colectiva ante socios y
  * clientes institucionales. El movimiento sólo señala trabajo en curso y se
- * desactiva por completo con `prefers-reduced-motion`.
+ * desactiva por completo con `prefers-reduced-motion`: las animaciones son SMIL,
+ * que no obedece a `motion-reduce` de CSS, así que se omiten en el propio JSX.
+ * Sin movimiento la constelación sigue siendo legible —el estado va en el color y
+ * el relleno del nodo, nunca sólo en la animación.
  */
 
 export type ConstellationNodeState = "waiting" | "active" | "done" | "failed";
@@ -73,6 +77,7 @@ export function AnalysisConstellation({
 
   const byId = useMemo(() => new Map(placed.map((p) => [p.id, p])), [placed]);
   const anyActive = nodes.some((n) => n.state === "active");
+  const still = useReducedMotion() === true;
 
   if (nodes.length === 0) {
     // Todavía no sabemos el equipo: se muestra el núcleo pensando, sin inventar nodos.
@@ -83,7 +88,7 @@ export function AnalysisConstellation({
         role="img"
         aria-label="IUSIA está analizando el encargo"
       >
-        <Core cx={cx} cy={cy} label={coreLabel} pulsing />
+        <Core cx={cx} cy={cy} label={coreLabel} pulsing={!still} />
       </svg>
     );
   }
@@ -108,7 +113,7 @@ export function AnalysisConstellation({
           strokeOpacity={p.state === "waiting" ? 0.35 : 0.55}
           strokeDasharray={p.state === "active" ? "4 4" : undefined}
         >
-          {p.state === "active" ? (
+          {p.state === "active" && !still ? (
             <animate
               attributeName="stroke-dashoffset"
               from="16"
@@ -134,7 +139,7 @@ export function AnalysisConstellation({
               strokeWidth={1.25}
               strokeOpacity={l.transferred ? 0.5 : 0.18}
             />
-            {l.transferred ? (
+            {l.transferred && !still ? (
               // El pulso representa una transferencia que ocurrió de verdad.
               <circle r={3} fill={colors.intel} opacity={0.9}>
                 <animateMotion
@@ -149,7 +154,7 @@ export function AnalysisConstellation({
       })}
 
       {/* Convergencia final: el integrador consolida los aportes. */}
-      {integrating
+      {integrating && !still
         ? placed.map((p) => (
             <circle key={`conv-${p.id}`} r={3.5} fill={colors.gold} opacity={0.95}>
               <animateMotion
@@ -161,11 +166,17 @@ export function AnalysisConstellation({
           ))
         : null}
 
-      <Core cx={cx} cy={cy} label={coreLabel} pulsing={anyActive || integrating} integrating={integrating} />
+      <Core
+        cx={cx}
+        cy={cy}
+        label={coreLabel}
+        pulsing={!still && (anyActive || integrating)}
+        integrating={integrating}
+      />
 
       {placed.map((p) => (
         <g key={`node-${p.id}`}>
-          {p.state === "active" ? (
+          {p.state === "active" && !still ? (
             <circle cx={p.x} cy={p.y} r={13} fill={STATE_COLOR[p.state]} opacity={0.18}>
               <animate attributeName="r" values="13;19;13" dur="2s" repeatCount="indefinite" />
               <animate attributeName="opacity" values="0.22;0.05;0.22" dur="2s" repeatCount="indefinite" />
@@ -177,7 +188,7 @@ export function AnalysisConstellation({
             r={7}
             fill={p.state === "done" ? STATE_COLOR[p.state] : "#FFFFFF"}
             stroke={STATE_COLOR[p.state]}
-            strokeWidth={1.8}
+            strokeWidth={p.state === "active" ? 3 : 1.8}
           />
           <text
             x={p.x}

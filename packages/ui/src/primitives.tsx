@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
@@ -434,5 +434,74 @@ export function ToastStack({
         ))}
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * Acción destructiva con confirmación en el sitio.
+ *
+ * Retirar a alguien de la firma o cancelar una invitación no se deshace con
+ * Ctrl+Z, y un clic accidental en una lista densa es fácil. Confirmar en línea
+ * —sin diálogo modal— mantiene visible la fila sobre la que se decide.
+ */
+export function ConfirmAction({
+  label,
+  confirmLabel,
+  onConfirm,
+  pending = false,
+  disabled = false,
+  describedBy,
+}: {
+  label: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  pending?: boolean;
+  disabled?: boolean;
+  describedBy?: string;
+}) {
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 5000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  if (!armed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setArmed(true)}
+        disabled={disabled || pending}
+        aria-describedby={describedBy}
+        className="text-[13px] font-medium text-iusia-critical hover:underline disabled:opacity-40"
+      >
+        {label}
+      </button>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      <button
+        type="button"
+        autoFocus
+        onClick={() => {
+          setArmed(false);
+          onConfirm();
+        }}
+        disabled={pending}
+        className="rounded-[7px] bg-iusia-critical px-2.5 py-1 text-[12.5px] font-semibold text-white disabled:opacity-50"
+      >
+        {pending ? "…" : confirmLabel}
+      </button>
+      <button
+        type="button"
+        onClick={() => setArmed(false)}
+        className="text-[12.5px] text-iusia-mist-text hover:text-iusia-carbon"
+      >
+        No
+      </button>
+    </span>
   );
 }
