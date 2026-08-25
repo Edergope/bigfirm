@@ -37,6 +37,8 @@ const STAGE_LABEL: Record<string, string> = {
   received: "Entendiendo el encargo",
   evidence: "Analizando documentos y evidencia",
   done: "Análisis completado",
+  stopped: "Análisis detenido",
+  failed: "El análisis no pudo completarse",
 };
 const AGENT_STAGE_LABEL: Record<string, string> = {
   "pisoso-orquestador-juridico": "Identificando los especialistas adecuados",
@@ -278,7 +280,7 @@ export function AnalysisModal({
           ) : (
             <span className="text-[13px] text-iusia-mist-text">{ending.footer}</span>
           )}
-          <Button type="button" onClick={onClose}>
+          <Button type="button" onClick={onClose} className="shrink-0 whitespace-nowrap">
             {finished ? ending.action : "Seguir trabajando"}
           </Button>
         </footer>

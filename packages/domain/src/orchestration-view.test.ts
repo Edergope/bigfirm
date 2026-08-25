@@ -517,3 +517,35 @@ describe("sanitizeLegalOutput — coste acotado", () => {
     expect(sanitizeLegalOutput(t)).toContain("ref=norma 1234 del estatuto");
   });
 });
+
+describe("deriveProgressStages — cierre según el desenlace", () => {
+  const base = { events: [{ type: "execution.created" }], executions: [], rootExecutionId: ROOT };
+
+  it("[PS-1] una orquestación detenida no se cierra como completada", () => {
+    const stages = deriveProgressStages({ ...base, rootStatus: "CANCELLED" });
+    expect(stages.at(-1)!.key).toBe("stopped");
+  });
+
+  it("[PS-2] una orquestación fallida se cierra como fallida", () => {
+    expect(deriveProgressStages({ ...base, rootStatus: "FAILED" }).at(-1)!.key).toBe("failed");
+    expect(deriveProgressStages({ ...base, rootStatus: "BLOCKED" }).at(-1)!.key).toBe("failed");
+  });
+
+  it("[PS-3] con la raíz terminada ninguna etapa queda 'en curso'", () => {
+    const stages = deriveProgressStages({
+      rootStatus: "CANCELLED",
+      events: [{ type: "execution.created" }],
+      executions: [
+        row({ id: ROOT, agentId: ORCHESTRATOR_AGENT_ID, status: "CANCELLED" }),
+        row({ id: "exe_01", agentId: "01-intake-y-clasificador", status: "RUNNING" }),
+      ],
+      rootExecutionId: ROOT,
+    });
+    expect(stages.some((s) => s.state === "active")).toBe(false);
+  });
+
+  it("[PS-4] mientras corre, el cierre sigue pendiente y se llama 'done'", () => {
+    const stages = deriveProgressStages({ ...base, rootStatus: "RUNNING" });
+    expect(stages.at(-1)).toMatchObject({ key: "done", state: "pending" });
+  });
+});

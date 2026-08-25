@@ -37,6 +37,8 @@ const STAGE_LABEL: Record<string, string> = {
   received: "Encargo recibido",
   evidence: "Evidencia del expediente recuperada",
   done: "Análisis completado",
+  stopped: "Análisis detenido",
+  failed: "El análisis no pudo completarse",
 };
 const AGENT_STAGE_LABEL: Record<string, string> = {
   "pisoso-orquestador-juridico": "Encuadre y conclusión",

@@ -156,11 +156,21 @@ export function deriveProgressStages(args: {
     stages.push({ key: `agent:${row.agentId}`, agentId: row.agentId, state: stateFromStatus(row.status) });
   }
 
-  // 4. Cierre.
+  // 4. Cierre. La clave dice CÓMO terminó, no sólo que terminó: anunciar "análisis
+  // completado" en una orquestación detenida a mano le haría creer al abogado que
+  // tiene un dictamen. Cada vista traduce la clave a su copy.
+  const closingKey =
+    rootStatus === "CANCELLED" ? "stopped" : rootStatus === "FAILED" || rootStatus === "BLOCKED" ? "failed" : "done";
   stages.push({
-    key: "done",
-    state: rootStatus === "FAILED" ? "failed" : rootTerminal ? "done" : "pending",
+    key: closingKey,
+    state: rootStatus === "FAILED" || rootStatus === "BLOCKED" ? "failed" : rootTerminal ? "done" : "pending",
   });
+
+  // Con la raíz ya terminada nada sigue "en curso": una fila latiendo bajo un
+  // análisis detenido sugiere trabajo que no está ocurriendo.
+  if (rootTerminal) {
+    return stages.map((s) => (s.state === "active" ? { ...s, state: "pending" as StageState } : s));
+  }
 
   return stages;
 }
