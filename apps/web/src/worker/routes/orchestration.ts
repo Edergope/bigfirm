@@ -182,6 +182,9 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
           // Agente no registrado: se muestra el id crudo, sin inventar metadata.
         }
         const text = stored.text ?? "";
+        // La ejecución PLAN (00) persiste el TeamPlan (sin `text`), no un dictamen:
+        // se excluye del resultado para no competir con el INTEGRATE como titular.
+        if (text.trim().length === 0) return null;
         return {
           execution_id: n.id,
           agent_id: n.agentId,
