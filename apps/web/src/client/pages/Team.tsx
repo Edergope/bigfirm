@@ -6,7 +6,7 @@ import {
   CardHeader,
   Field,
   Input,
-  PageHeader,
+  ScreenTitle,
   Select,
   Skeleton,
   StateBlock,
@@ -142,7 +142,8 @@ export function Team() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader
+      <ScreenTitle
+        eyebrow="Administración"
         title="Equipo"
         description="Quién pertenece a la firma, qué puede hacer y a qué expedientes accede."
       />
@@ -243,7 +244,7 @@ export function Team() {
             {memberNotice}
           </p>
         ) : null}
-        <ul className="divide-y divide-iusia-mist/20">
+        <ul className="divide-y divide-iusia-line/70">
           {(members.data?.members ?? []).map((m) => {
             const isMe = m.userId === me.data?.user.id;
             return (

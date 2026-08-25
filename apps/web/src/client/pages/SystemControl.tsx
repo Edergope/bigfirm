@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardHeader, KpiTile, PageHeader, Skeleton, StateBlock, StatusChip } from "@iusia/ui";
+import { Card, CardHeader, KpiTile, ScreenTitle, Skeleton, StateBlock, StatusChip } from "@iusia/ui";
 import { api, ApiError } from "../api.js";
 
 /**
@@ -42,7 +42,8 @@ export function SystemControl() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader
+      <ScreenTitle
+        eyebrow="Sistema"
         title="Control IUSIA"
         description="Estado del sistema, equipo de agentes, ejecuciones e integraciones."
         actions={<StatusChip label="Autoridad de sistema" tone="intel" dot />}

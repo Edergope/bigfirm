@@ -285,57 +285,95 @@ function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
   const b: CaseBriefData | undefined = brief.data?.brief;
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-      <div className="flex flex-col gap-5 lg:col-span-2">
-        <Card>
-          <CardHeader title="Qué pasa" subtitle="Objetivo del encargo" />
-          <div className="px-6 py-5">
-            <p className="text-[15px] leading-relaxed text-iusia-carbon">
-              {data.matter.objective ?? "Sin objetivo registrado para este expediente."}
-            </p>
-            {b && b.parties.length > 0 ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {b.parties.map((p, i) => (
-                  <StatusChip key={i} label={`${p.kind}: ${p.name}`} tone="neutral" />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </Card>
+    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+      <div className="flex flex-col gap-4 lg:col-span-2">
+        {/* El encargo es la pieza narrativa del expediente: lo primero que alguien
+            necesita leer para entender de qué va este caso. */}
+        <Module eyebrow="El encargo" title="Qué se nos pide">
+          <p className="max-w-prose text-[15px] leading-relaxed text-iusia-carbon">
+            {data.matter.objective ?? "Todavía no se ha registrado el objetivo de este encargo."}
+          </p>
+          {b && b.parties.length > 0 ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {b.parties.map((p, i) => (
+                <StatusChip key={i} label={`${p.kind}: ${p.name}`} tone="neutral" />
+              ))}
+            </div>
+          ) : null}
+        </Module>
 
-        <Card>
-          <CardHeader
-            title="Qué recomienda IUSIA"
-            subtitle="Preguntas abiertas derivadas del expediente"
-          />
+        <Module
+          eyebrow="Preguntas abiertas"
+          title="Qué queda por verificar"
+          padded={false}
+          action={
+            (b?.open_questions.length ?? 0) > 0 ? (
+              <StatusChip label={String(b?.open_questions.length)} tone="warning" />
+            ) : null
+          }
+        >
           {brief.isLoading ? (
-            <div className="p-5">
-              <Skeleton className="h-16" />
+            <div className="px-5 pb-5">
+              <Skeleton className="h-12" />
             </div>
           ) : (b?.open_questions.length ?? 0) === 0 ? (
-            <StateBlock kind="empty" title="Sin preguntas abiertas" hint="No hay hechos por verificar." />
+            <p className="px-5 pb-5 text-[13.5px] text-iusia-mist-text">
+              No hay hechos pendientes de verificar en este expediente.
+            </p>
           ) : (
-            <ul className="divide-y divide-iusia-mist/20">
+            <ul className="divide-y divide-iusia-line/70">
               {b?.open_questions.slice(0, 6).map((q, i) => (
-                <li key={i} className="px-6 py-3 text-[14px] text-iusia-carbon">
+                <li key={i} className="px-5 py-2.5 text-[13.5px] leading-snug text-iusia-carbon">
                   {q}
                 </li>
               ))}
             </ul>
           )}
-        </Card>
+        </Module>
+      </div>
 
-        <Card>
-          <CardHeader title="Equipo del caso" />
+      <div className="flex flex-col gap-4">
+        <Module eyebrow="Exposición" title="Riesgo">
+          <RiskIndicator
+            level={data.matter.riskLevel as RiskLevel}
+            rationale={data.matter.riskRationale}
+          />
+        </Module>
+
+        <Module eyebrow="Situación" title="El expediente hoy" tone="ice">
+          <dl className="space-y-2 text-[13px]">
+            <Row label="Documentos" value={String(b?.document_count ?? data.documents.length)} />
+            <Row label="Hechos establecidos" value={String(b?.facts.length ?? data.facts.length)} />
+            <Row
+              label="Fuentes jurídicas"
+              value={String(b?.authorities.length ?? data.authorities.length)}
+            />
+            <Row label="Tareas abiertas" value={String(b?.open_task_count ?? "—")} />
+            {/* "Ejecuciones IA 25✓ · 3✗ / 32" contaba el motor. Al abogado le importa
+                cuántos análisis tiene disponibles, no la tasa de reintentos. */}
+            <Row
+              label="Análisis completados"
+              value={String(
+                b?.ai_executions.completed ?? data.executions.filter((e) => e.parentExecutionId).length,
+              )}
+            />
+          </dl>
+        </Module>
+
+        <Module eyebrow="Quién trabaja aquí" title="Equipo del caso" padded={false}>
           {data.members.length === 0 ? (
-            <StateBlock kind="empty" title="Sin miembros asignados" />
+            <p className="px-5 pb-5 text-[13px] text-iusia-mist-text">
+              Nadie tiene acceso todavía.
+            </p>
           ) : (
-            <ul className="divide-y divide-iusia-mist/20">
+            <ul className="divide-y divide-iusia-line/70">
               {data.members.map((member) => (
-                <li key={member.userId} className="flex items-center justify-between gap-3 px-6 py-3 text-[14px]">
+                <li key={member.userId} className="flex items-center justify-between gap-3 px-5 py-2.5">
                   <span className="min-w-0">
-                    <span className="block truncate text-iusia-carbon">{member.name}</span>
-                    <span className="block truncate text-[12.5px] text-iusia-mist-text">
+                    <span className="block truncate text-[13.5px] text-iusia-carbon">
+                      {member.name}
+                    </span>
+                    <span className="block truncate text-[12px] text-iusia-mist-text">
                       {member.email}
                     </span>
                   </span>
@@ -347,35 +385,7 @@ function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
               ))}
             </ul>
           )}
-        </Card>
-      </div>
-
-      <div className="flex flex-col gap-5">
-        <Card className="px-6 py-5">
-          <p className="mb-3 text-[14px] font-semibold text-iusia-navy">Riesgo</p>
-          <RiskIndicator
-            level={data.matter.riskLevel as RiskLevel}
-            rationale={data.matter.riskRationale}
-          />
-        </Card>
-
-        <Card className="px-6 py-5">
-          <p className="mb-3 text-[14px] font-semibold text-iusia-navy">Situación</p>
-          <dl className="space-y-2.5 text-[13.5px]">
-            <Row label="Documentos" value={String(b?.document_count ?? data.documents.length)} />
-            <Row label="Hechos" value={String(b?.facts.length ?? data.facts.length)} />
-            <Row label="Autoridades" value={String(b?.authorities.length ?? data.authorities.length)} />
-            <Row label="Tareas abiertas" value={String(b?.open_task_count ?? "—")} />
-            <Row
-              label="Ejecuciones IA"
-              value={
-                b
-                  ? `${b.ai_executions.completed}✓ · ${b.ai_executions.failed}✗ / ${b.ai_executions.total}`
-                  : String(data.executions.filter((e) => e.parentExecutionId).length)
-              }
-            />
-          </dl>
-        </Card>
+        </Module>
       </div>
     </div>
   );
