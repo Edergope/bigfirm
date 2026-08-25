@@ -44,9 +44,11 @@ export function buildFallbackTeamPlan(
     agents,
   );
 
-  // Sólo especialistas ejecutables, excluyendo al orquestador (PLAN/INTEGRATE).
+  // Sólo especialistas ejecutables Y seleccionables: el orquestador y los roles de
+  // documento/auditoría nunca entran a un equipo, aunque estén habilitados.
+  const selectable = new Set(agents.filter((a) => a.planner_eligible).map((a) => a.agent_id));
   const specialists = routing.agents
-    .filter((a) => a.executable_now && a.agent_id !== "pisoso-orquestador-juridico")
+    .filter((a) => a.executable_now && selectable.has(a.agent_id))
     .slice(0, ORCHESTRATION_LIMITS.HARD_MAX_SPECIALISTS);
 
   const mission = (agentId: string, reason: string): string =>

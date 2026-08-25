@@ -5,8 +5,8 @@ import { extractJsonObject, planTeam, type MatterBrief } from "../services/team-
 /** Planner del Managing Partner: parse + repair×1 + SAFE_FALLBACK (Bloque 7.7A-FIX). */
 
 const CATALOG = [
-  { agent_id: "01-intake-y-clasificador", node_code: "01", name: "Intake", role: "Intake", domain: "intake", output_type: "INTAKE" },
-  { agent_id: "especialista-contractual-y-negocios", node_code: "CTR", name: "Contractual", role: "Contractual", domain: "contractual", output_type: "ANALYSIS" },
+  { agent_id: "01-intake-y-clasificador", node_code: "01", name: "Intake", specialty: "Recepción de expedientes y base fáctica", runtime_role: "CASE_INTAKE", output_type: "INTAKE" },
+  { agent_id: "especialista-contractual-y-negocios", node_code: "CTR", name: "Contractual", specialty: "Diseño e interpretación contractual", runtime_role: "LEGAL_SPECIALIST", output_type: "SPECIALIST_DICTAMEN" },
 ];
 const ELIGIBLE = new Set(CATALOG.map((c) => c.agent_id));
 

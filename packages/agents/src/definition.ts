@@ -41,6 +41,40 @@ export const AgentDefinition = z.object({
   output_type: OutputType,
   output_schema_id: z.string().min(1),
 
+  /**
+   * Rol operacional del agente dentro del runtime. Se deriva de la taxonomía que ya
+   * existe en el registry (`domain` + `output_type`); no inventa una taxonomía nueva.
+   */
+  runtime_role: z
+    .enum([
+      "ORCHESTRATOR",
+      "CASE_INTAKE",
+      "LEGAL_RESEARCH",
+      "EVIDENCE_ANALYSIS",
+      "PROCESS_STRATEGY",
+      "LEGAL_STRATEGY",
+      "LEGAL_SPECIALIST",
+      "QUALITY_REVIEW",
+      "DOCUMENT_DRAFTER",
+      "DOCUMENT_COMPILER",
+    ])
+    .default("LEGAL_SPECIALIST"),
+
+  /**
+   * ¿Puede el Managing Partner (00 PLAN) seleccionarlo como ESPECIALISTA de un equipo?
+   * Ser operacional (`enabled`) no implica ser seleccionable: el orquestador ejecuta
+   * las fases PLAN/INTEGRATE y los roles de documento/auditoría pertenecen a etapas
+   * posteriores del pipeline, no al análisis jurídico del Matter.
+   */
+  planner_eligible: z.boolean().default(false),
+
+  /**
+   * Frase corta y discriminativa que ve el planner para saber CUÁNDO elegir a este
+   * agente. Procede de la metadata canónica (`description` del frontmatter del
+   * agent.md); nunca del cuerpo del prompt. No sustituye al agent.md ni lo modifica.
+   */
+  specialty: z.string().min(1).max(400).default(""),
+
   /** Ola del DAG canónico a la que pertenece (WAVE_1..WAVE_5). */
   wave: z
     .enum([

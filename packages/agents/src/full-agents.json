@@ -37,7 +37,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "ORCHESTRATOR",
+    "planner_eligible": false,
+    "specialty": "Orquestador principal del sistema juridico Pisoso."
   },
   {
     "agent_id": "01-intake-y-clasificador",
@@ -79,7 +82,10 @@
       "requires_human_gate": false,
       "may_write_facts": true,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "CASE_INTAKE",
+    "planner_eligible": true,
+    "specialty": "Recepción de expedientes, extracción estructurada de hechos, identificación de partes, pretensiones, términos y clasificación por materias y riesgos."
   },
   {
     "agent_id": "03-investigador-normativo-jurisprudencial",
@@ -121,7 +127,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": true
-    }
+    },
+    "runtime_role": "LEGAL_RESEARCH",
+    "planner_eligible": true,
+    "specialty": "Búsqueda en biblioteca local de la firma (biblioteca/), rastreo de leyes, líneas jurisprudenciales (C, SU, T) y doctrina oficial."
   },
   {
     "agent_id": "04-analista-probatorio-y-pericial",
@@ -163,7 +172,10 @@
       "requires_human_gate": false,
       "may_write_facts": true,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "EVIDENCE_ANALYSIS",
+    "planner_eligible": true,
+    "specialty": "Examen exhaustivo de pruebas documentales, testimoniales, periciales y digitales. Matriz de conducencia, pertinencia y utilidad probatoria."
   },
   {
     "agent_id": "05-analista-procesal-y-procedibilidad",
@@ -205,7 +217,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "PROCESS_STRATEGY",
+    "planner_eligible": true,
+    "specialty": "Cálculo matemático de términos judiciales (días hábiles vs. calendario, vacancia judicial), conciliación prejudicial (Ley 2220), competencia y vía procesal."
   },
   {
     "agent_id": "06-estratega-juridico-convencional",
@@ -245,7 +260,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_STRATEGY",
+    "planner_eligible": true,
+    "specialty": "Litigation strategy y dispute resolution: estrategia jurídica convencional, formulación de teoría del caso y ajedrez procesal."
   },
   {
     "agent_id": "08-redactor-senior-juridico",
@@ -285,7 +303,10 @@
       "requires_human_gate": true,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "DOCUMENT_DRAFTER",
+    "planner_eligible": false,
+    "specialty": "Redacción técnica y exhaustiva de demandas, tutelas, contratos, conceptos jurídicos, recursos y minutas, aplicando desarrollo en cascada y argumentación sólida."
   },
   {
     "agent_id": "02-compilador-y-entrega-final",
@@ -325,7 +346,10 @@
       "requires_human_gate": true,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "DOCUMENT_COMPILER",
+    "planner_eligible": false,
+    "specialty": "Compila análisis parciales en el documento definitivo, formatea tablas, elimina notas internas y ejecuta la conversión a Word .docx con tipografía >= 11 pt."
   },
   {
     "agent_id": "10-auditor-juridico-y-red-team",
@@ -365,7 +389,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "QUALITY_REVIEW",
+    "planner_eligible": false,
+    "specialty": "Auditoría adversarial final, control de calidad, coherencia argumentativa, verificación de peticiones y emisión de aprobación final o plan de correcciones."
   },
   {
     "agent_id": "11-auditor-de-citas-y-vigencia",
@@ -405,7 +432,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": true
-    }
+    },
+    "runtime_role": "QUALITY_REVIEW",
+    "planner_eligible": false,
+    "specialty": "Auditoría estricta de todas las citas normativas, doctrinales y jurisprudenciales de los borradores. Verificación de vigencia actual en Colombia."
   },
   {
     "agent_id": "14-magistrado-procesal-y-nulidades",
@@ -417,7 +447,7 @@
     "prompt_ref": "prompts/14-magistrado-procesal-y-nulidades/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "060d6b6806dc36e423c283c541bfb665bf85a2b4e7c553d5a9a702a09246df01",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-general",
       "preferred": {
@@ -445,7 +475,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_STRATEGY",
+    "planner_eligible": true,
+    "specialty": "Control judicial anticipado, simulación de la mente del juez/árbitro, formulación y contención de excepciones previas, excepciones de mérito y blindaje de nulidades procesales."
   },
   {
     "agent_id": "15-estratega-disruptivo-y-negociador",
@@ -457,7 +490,7 @@
     "prompt_ref": "prompts/15-estratega-disruptivo-y-negociador/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "790ea421a7eb27d98d63ce3a9e5466aaf2b93e27dbbe19e6638f4e2980ff517e",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-general",
       "preferred": {
@@ -485,7 +518,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_STRATEGY",
+    "planner_eligible": true,
+    "specialty": "Estrategias no evidentes, teoría de juegos, mecanismos alternativos de solución de conflictos (MASC), negociación basada en principios, litigio estratégico y presión institucional"
   },
   {
     "agent_id": "analista-debida-diligencia-y-listas",
@@ -497,7 +533,7 @@
     "prompt_ref": "prompts/analista-debida-diligencia-y-listas/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "912d4653efef0c5c31ea33228ceca3637894c63e15ba1877c42b62f855dcbe90",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -525,7 +561,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Cotejo de contrapartes, personas expuestas políticamente (PEPs), listas restrictivas vinculantes (ONU, OFAC, Interpol, Policía Nacional) y determinación del Registro Único de Benef"
   },
   {
     "agent_id": "arquitecto-metodologico-y-calidad",
@@ -565,7 +604,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "QUALITY_REVIEW",
+    "planner_eligible": false,
+    "specialty": "Gobernanza del flujo de 12 pasos Pisoso Legal AI, verificación de gates de calidad, cumplimiento de estándares tipográficos (>= 11 pt) y aislamiento de carpetas."
   },
   {
     "agent_id": "especialista-administrativo-y-regulatorio",
@@ -577,7 +619,7 @@
     "prompt_ref": "prompts/especialista-administrativo-y-regulatorio/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "041288da6d712634ee26bf7c7ecd86881a2dae0af98368d5aeec060301b3e5fa",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -605,7 +647,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Derecho administrativo (CPACA), contratación estatal (Estatuto General Ley 80/1150), servicios públicos domiciliarios (Ley 142), licencias, permisos y litigio contencioso administr"
   },
   {
     "agent_id": "especialista-civil-bienes-e-inmobiliario",
@@ -617,7 +662,7 @@
     "prompt_ref": "prompts/especialista-civil-bienes-e-inmobiliario/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "2a6f8cd6dbb13c8634931bda9c7734490bfd193d9e5c8ead11fc9aceb39e493e",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -645,7 +690,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Derecho civil general (Código Civil), régimen de bienes, posesión, usufructo, servidumbres, títulos y modos de adquirir el dominio, responsabilidad civil contractual y extracontrac"
   },
   {
     "agent_id": "especialista-constitucional-y-derechos-fundamentales",
@@ -657,7 +705,7 @@
     "prompt_ref": "prompts/especialista-constitucional-y-derechos-fundamentales/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "1c4ae3e965fd66ac74c84232d978606bec56c8938755c8913d835ccb53d5970c",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -685,7 +733,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Dogmática constitucional, excepción de inconstitucionalidad (art. 4 C.P.), tutelas contra providencias judiciales (C-590/05), test de proporcionalidad y bloque de constitucionalida"
   },
   {
     "agent_id": "especialista-contractual-y-negocios",
@@ -725,7 +776,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Arquitectura y diseño contractual civil y comercial, contratos típicos y atípicos, garantías mobiliarias, renegociación, novación, cláusulas de responsabilidad y franquicias."
   },
   {
     "agent_id": "especialista-familia-y-planeacion-patrimonial",
@@ -737,7 +791,7 @@
     "prompt_ref": "prompts/especialista-familia-y-planeacion-patrimonial/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "23c0260ef815d0c67930e99a28611c6795c76f233e4c43ae3b874a8b8519f49b",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -765,7 +819,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Derecho de familia colombiano, sucesiones ilíquidas, testamentos, liquidación de sociedad conyugal y patrimonial, capitulaciones, afectación a vivienda familiar, patrimonio de fami"
   },
   {
     "agent_id": "especialista-financiero-y-mercado-capitales",
@@ -777,7 +834,7 @@
     "prompt_ref": "prompts/especialista-financiero-y-mercado-capitales/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "0a2f11f2313e9a56b70209ddde8d575ef908faf46a314beea213ef97903f82f8",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -805,7 +862,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Regulación financiera (Estatuto Orgánico del Sistema Financiero), mercado de valores (Ley 964 de 2005), regulación cambiaria (Circular DCIN-83 Banco de la República), Fintech, crow"
   },
   {
     "agent_id": "especialista-insolvencia-y-reestructuracion",
@@ -817,7 +877,7 @@
     "prompt_ref": "prompts/especialista-insolvencia-y-reestructuracion/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "899bbf919d988775a7b6f69f91c1e05ef9c1d2e8e669436923271322362b8112",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -845,7 +905,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Procesos de reorganización empresarial (Ley 1116 de 2006, Decretos de Emergencia), liquidación judicial, negociación de deudas, insolvencia de persona natural no comerciante y salv"
   },
   {
     "agent_id": "especialista-laboral-y-seguridad-social",
@@ -857,7 +920,7 @@
     "prompt_ref": "prompts/especialista-laboral-y-seguridad-social/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "3a5bed81a4ac574434b5afde952df419132a904706c524968dcc625e129010b3",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -885,7 +948,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Derecho laboral individual (CST), contratos de trabajo, debido proceso disciplinario, despidos con y sin justa causa, fueros de estabilidad laboral reforzada, seguridad social inte"
   },
   {
     "agent_id": "especialista-migratorio-y-movilidad",
@@ -897,7 +963,7 @@
     "prompt_ref": "prompts/especialista-migratorio-y-movilidad/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "a2bed63595523cdb95b104e55f9c9b08130912b4ce9a79ebfe7e16af7e48bd49",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -925,7 +991,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Régimen de extranjería y visas en Colombia (Resolución 5477 de 2022 y conexas del Ministerio de Relaciones Exteriores), tipos de visa (Visitante V, Migrante M, Residente R), salvoc"
   },
   {
     "agent_id": "especialista-penal-corporativo-y-delitos-economicos",
@@ -937,7 +1006,7 @@
     "prompt_ref": "prompts/especialista-penal-corporativo-y-delitos-economicos/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "2c21d2ac76e63dee5f5061498ac28f819b0742783e7cd1395adfbe8a1f0cfbdb",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -965,7 +1034,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Derecho penal económico y corporativo (Código Penal Ley 599 de 2000), delitos societarios, estafa, administración desleal, corrupción privada, delitos contra el sistema financiero,"
   },
   {
     "agent_id": "especialista-penal-general-y-litigio",
@@ -977,7 +1049,7 @@
     "prompt_ref": "prompts/especialista-penal-general-y-litigio/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "99da4483726663ba56640241631455f4ac4bb445700e48690a12719c7ce0d91d",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -1005,7 +1077,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Sistema penal acusatorio colombiano (Ley 906 de 2004), defensa técnica integral y representación de víctimas, audiencias preliminares (legalización de captura, imputación, medida d"
   },
   {
     "agent_id": "especialista-propiedad-intelectual-y-datos",
@@ -1017,7 +1092,7 @@
     "prompt_ref": "prompts/especialista-propiedad-intelectual-y-datos/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "b22e9073ad99eab2a789dc0432af9f16ba6e8bb368c58787ba8e754c265f01f5",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -1045,7 +1120,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Signos distintivos (marcas, lemas, nombres comerciales), patentes, derechos de autor (software, obras), transferencia de tecnología, secretos empresariales y protección de datos pe"
   },
   {
     "agent_id": "especialista-sectorial-e-innovacion",
@@ -1057,7 +1135,7 @@
     "prompt_ref": "prompts/especialista-sectorial-e-innovacion/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "e10cccb58753c2223eeccc348a62367d3490cf0d2c1d8b72b4ca4f1b90459842",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -1085,7 +1163,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Regulación sectorial especializada: Minería y Energía, Hidrocarburos, Salud y Dispositivos Médicos (INVIMA), Infraestructura y Transporte, TIC, Inteligencia Artificial, Drones y Ae"
   },
   {
     "agent_id": "especialista-societario-y-mna",
@@ -1097,7 +1178,7 @@
     "prompt_ref": "prompts/especialista-societario-y-mna/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "d6972dace6873369f6c58a7cdc9e4d066b0ef2381f50ea4a00415a520808b74c",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -1125,7 +1206,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Derecho de sociedades (SAS, SA, LTDA), constitución, reformas estatutarias, asambleas, acuerdos de accionistas, conflictos societarios, deberes de administradores, fusiones, adquis"
   },
   {
     "agent_id": "especialista-tributario-y-aduanero",
@@ -1137,7 +1221,7 @@
     "prompt_ref": "prompts/especialista-tributario-y-aduanero/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "9e1c0accd180e7633a9ca06ef05e39661d2071fda07eed6cc8d0b5372550f13d",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -1165,7 +1249,10 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Estatuto Tributario Nacional, impuestos territoriales (ICA, Predial), planeación fiscal lícita, precios de transferencia, litigio tributario ante DIAN y Consejo de Estado, aduanas"
   },
   {
     "agent_id": "oficial-compliance-sagrilaft-ptee",
@@ -1177,7 +1264,7 @@
     "prompt_ref": "prompts/oficial-compliance-sagrilaft-ptee/v1/agent.md",
     "prompt_version": "v1",
     "prompt_sha256": "b75be2a4068ed1d332100be16906f04c8090f6a830e12e021eba54538408eefd",
-    "enabled": false,
+    "enabled": true,
     "model_policy": {
       "route": "iusia-research",
       "preferred": {
@@ -1205,6 +1292,9 @@
       "requires_human_gate": false,
       "may_write_facts": false,
       "may_write_authorities": false
-    }
+    },
+    "runtime_role": "LEGAL_SPECIALIST",
+    "planner_eligible": true,
+    "specialty": "Diseño, auditoría e implementación de sistemas SAGRILAFT (Autocontrol y Gestión del Riesgo Integral de LA/FT/FPADM) y Programas de Transparencia y Ética Empresarial (PTEE) bajo Cir"
   }
 ]

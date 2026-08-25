@@ -39,16 +39,25 @@ describe("Agent Registry", () => {
     expect(listAgentDefinitions()).toHaveLength(30);
   });
 
-  it("habilita el set MVP multiagente (00/01/03/04/05/06/CTR) para ejecución real", () => {
-    expect(listEnabledAgentDefinitions().map((d) => d.node_code).sort()).toEqual([
-      "00",
-      "01",
-      "03",
-      "04",
-      "05",
-      "06",
-      "CTR",
-    ]);
+  it("habilita exactamente el orquestador más los agentes seleccionables por el planner", () => {
+    // Invariante operacional (Bloque 7.7B): un agente está habilitado si dirige la
+    // orquestación o si el planner puede elegirlo. Los roles de documento y auditoría
+    // quedan feature-gated hasta el Document Pipeline.
+    const enabled = listEnabledAgentDefinitions();
+    for (const d of enabled) {
+      expect(d.runtime_role === "ORCHESTRATOR" || d.planner_eligible).toBe(true);
+    }
+    const expected = listAgentDefinitions().filter(
+      (d) => d.runtime_role === "ORCHESTRATOR" || d.planner_eligible,
+    );
+    expect(enabled.map((d) => d.agent_id).sort()).toEqual(expected.map((d) => d.agent_id).sort());
+    expect(enabled).toHaveLength(25);
+  });
+
+  it("mantiene deshabilitados los roles de documento y auditoría (pipeline 7.7B)", () => {
+    const disabled = listAgentDefinitions().filter((d) => !d.enabled);
+    expect(disabled.map((d) => d.node_code).sort()).toEqual(["02", "08", "10", "11", "QA"]);
+    for (const d of disabled) expect(d.planner_eligible).toBe(false);
   });
 
   it("rechaza agentes no registrados en vez de improvisar", () => {

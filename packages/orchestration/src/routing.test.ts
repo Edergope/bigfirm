@@ -45,15 +45,13 @@ describe("motor de routing jurídico", () => {
       { materiality: "MATERIAL", practice_areas: ["TRIBUTARIO"] },
       AGENTS,
     );
-    // Set MVP ejecutable (00/01/03/06 aplican a este plan); el especialista tributario
-    // sigue deshabilitado (fuera del set MVP), por lo que queda planned_disabled.
-    expect(plan.agents.filter((a) => a.executable_now).map((a) => a.agent_id).sort()).toEqual([
-      "01-intake-y-clasificador",
-      "03-investigador-normativo-jurisprudencial",
-      "06-estratega-juridico-convencional",
-      "pisoso-orquestador-juridico",
-    ]);
-    expect(plan.planned_disabled).toContain("especialista-tributario-y-aduanero");
+    // El especialista del área ya es operacional tras la activación del registry...
+    const executable = plan.agents.filter((a) => a.executable_now).map((a) => a.agent_id);
+    expect(executable).toContain("especialista-tributario-y-aduanero");
+    expect(executable).toContain("pisoso-orquestador-juridico");
+    // ...pero los roles de documento siguen feature-gated hasta el Document Pipeline.
+    expect(plan.planned_disabled).toContain("08-redactor-senior-juridico");
+    expect(plan.planned_disabled).toContain("02-compilador-y-entrega-final");
   });
 
   it("es determinista: mismos inputs producen la misma firma", () => {

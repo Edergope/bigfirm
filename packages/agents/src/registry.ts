@@ -55,29 +55,51 @@ export interface AgentCatalogEntry {
   agent_id: string;
   node_code: string;
   name: string;
-  role: string;
-  domain: string;
+  /** Frase discriminativa: CUÁNDO elegir a este agente. Nunca el prompt completo. */
+  specialty: string;
+  runtime_role: string;
   output_type: string;
 }
 
 /**
- * Catálogo de especialistas ELEGIBLES para el planner: sólo agentes `enabled`,
- * excluyendo al orquestador (que actúa como PLAN/INTEGRATE, no como especialista).
+ * Catálogo de especialistas ELEGIBLES para el planner.
+ *
+ * Un agente entra sólo si es operacional (`enabled`) Y su rol canónico es trabajo
+ * jurídico seleccionable dentro de un Matter (`planner_eligible`). El orquestador
+ * queda fuera por definición (ejecuta las fases PLAN/INTEGRATE), igual que los roles
+ * de documento y auditoría, que pertenecen a etapas posteriores del pipeline.
+ *
+ * Se expone metadata MÍNIMA y discriminativa: nunca el agent.md completo, ni hashes,
+ * ni model policy, ni tools, ni secretos. `role` se omite por ser idéntico a `name`.
  */
 export function buildAgentCatalog(): AgentCatalogEntry[] {
-  return DEFINITIONS.filter((d) => d.enabled && d.agent_id !== ORCHESTRATOR_AGENT_ID).map((d) => ({
+  return DEFINITIONS.filter((d) => d.enabled && d.planner_eligible).map((d) => ({
     agent_id: d.agent_id,
     node_code: d.node_code,
     name: d.name,
-    role: d.role,
-    domain: d.domain,
+    specialty: d.specialty,
+    runtime_role: d.runtime_role,
     output_type: d.output_type,
   }));
 }
 
-/** Conjunto de agent_ids ejecutables (enabled). El validador de planes lo usa. */
+/** Agentes operacionales que NO son seleccionables por el planner (pipeline/orquestación). */
+export function listPipelineOnlyAgents(): readonly AgentDefinition[] {
+  return DEFINITIONS.filter((d) => !d.planner_eligible);
+}
+
+/** Ids seleccionables por el planner, con independencia de si están habilitados hoy. */
+export function plannerEligibleAgentIds(): Set<string> {
+  return new Set(DEFINITIONS.filter((d) => d.planner_eligible).map((d) => d.agent_id));
+}
+
+/**
+ * Agent_ids que un TeamPlan puede contener: operacionales Y seleccionables. El
+ * validador lo usa para rechazar planes que nombren al orquestador, un rol de
+ * pipeline o un agente deshabilitado.
+ */
 export function eligibleAgentIds(): Set<string> {
-  return new Set(DEFINITIONS.filter((d) => d.enabled).map((d) => d.agent_id));
+  return new Set(DEFINITIONS.filter((d) => d.enabled && d.planner_eligible).map((d) => d.agent_id));
 }
 
 export function getAgentByNodeCode(nodeCode: string): AgentDefinition {

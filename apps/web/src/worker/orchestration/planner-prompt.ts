@@ -42,6 +42,8 @@ export const PLANNER_SYSTEM_PROMPT = [
   "",
   "REGLAS ESTRICTAS:",
   "- Selecciona SÓLO agent_id presentes en el catálogo. No inventes agentes.",
+  "- Usa el campo `specialty` de cada candidato para decidir a quién elegir: describe",
+  "  CUÁNDO ese abogado es el adecuado. No elijas por parecido de nombre.",
   "- Asigna a cada especialista una misión MATERIALMENTE DISTINTA (no 'analiza todo').",
   "- Selecciona el número MÍNIMO de especialistas que el caso realmente requiere",
   "  (por defecto máximo " + ORCHESTRATION_LIMITS.DEFAULT_MAX_SPECIALISTS + "; nunca más de " + ORCHESTRATION_LIMITS.HARD_MAX_SPECIALISTS + ").",
