@@ -5,6 +5,7 @@ import { FirmRole, IusiaError, MatterRole } from "@iusia/domain";
 import { schema } from "@iusia/db";
 import type { AppBindings } from "../context.js";
 import { GoogleDriveAdapter } from "../integrations/google-drive.js";
+import { ResendNotificationProvider } from "../integrations/notifications.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import { StripeBillingProvider } from "../integrations/stripe-billing.js";
 import { GoogleDocsTemplateAdapter, DocxtemplaterAdapter } from "../integrations/templates.js";
@@ -116,6 +117,51 @@ adminRoutes.post("/members/role", async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+/**
+ * Autodiagnóstico del canal de correo (mismo patrón que el self-test de Drive).
+ *
+ * Un fallo de entrega silencioso es indistinguible de un correo no abierto: esta
+ * ruta devuelve el resultado NORMALIZADO del proveedor para poder operar el sistema.
+ * Sólo administración de la firma. Nunca expone la API key ni el contenido; el
+ * destinatario es siempre el propio administrador que la invoca.
+ */
+adminRoutes.post("/integrations/email/self-test", async (c) => {
+  const { db } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await requireFirmAdmin(c.get("ctx"), organizationId, userId);
+
+  const [me] = await db
+    .select({ email: schema.user.email })
+    .from(schema.user)
+    .where(eq(schema.user.id, userId))
+    .limit(1);
+  if (!me) throw new IusiaError("NOT_FOUND", "Usuario no encontrado");
+
+  const provider = new ResendNotificationProvider({
+    apiKey: c.env.RESEND_API_KEY ?? null,
+    from: c.env.RESEND_FROM ?? "IUSIA <notificaciones@iusia.legal>",
+  });
+  const result = await provider.send({
+    to: me.email,
+    subject: "IUSIA — prueba de canal de correo",
+    text: "Prueba operativa del canal de correo de IUSIA. No requiere ninguna acción.",
+    tags: { flow: "email_self_test" },
+  });
+
+  return c.json({
+    provider: provider.id,
+    configured: provider.status(),
+    // Diagnóstico normalizado: estado, clasificación y motivo (código HTTP), sin
+    // credenciales. `from_configured` indica sólo si la variable está presente.
+    result: {
+      status: result.status,
+      failure_kind: "failure_kind" in result ? result.failure_kind : null,
+      detail: "error" in result ? result.error : null,
+    },
+    from_configured: Boolean(c.env.RESEND_FROM),
+  });
 });
 
 const RemoveMemberInput = z.object({ user_id: z.string().min(1) });
