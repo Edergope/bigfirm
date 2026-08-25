@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   IusiaError,
   assertDetailIsSafe,
@@ -70,6 +70,44 @@ export class ExecutionRepository {
       .from(executions)
       .where(
         and(eq(executions.organizationId, organizationId), eq(executions.matterId, matterId)),
+      )
+      .orderBy(desc(executions.createdAt))
+      .limit(limit);
+  }
+
+  /**
+   * Raíces de orquestación aún en curso en la organización.
+   *
+   * Alimenta el indicador global "IUSIA · N análisis": el usuario debe poder
+   * abandonar la vista sin perder de vista lo que la firma tiene trabajando.
+   * Devuelve sólo raíces (sin padre); el filtrado por acceso a expediente lo aplica
+   * la capa de rutas, que es donde vive la autorización.
+   */
+  async listActiveRoots(organizationId: string, limit = 20) {
+    return this.db
+      .select()
+      .from(executions)
+      .where(
+        and(
+          eq(executions.organizationId, organizationId),
+          isNull(executions.parentExecutionId),
+          inArray(executions.status, ["PENDING", "RUNNING", "WAITING", "BLOCKED"]),
+        ),
+      )
+      .orderBy(desc(executions.createdAt))
+      .limit(limit);
+  }
+
+  /** Raíces de orquestación recientes de la organización, en cualquier estado. */
+  async listRecentRoots(organizationId: string, limit = 25) {
+    return this.db
+      .select()
+      .from(executions)
+      .where(
+        and(
+          eq(executions.organizationId, organizationId),
+          isNull(executions.parentExecutionId),
+        ),
       )
       .orderBy(desc(executions.createdAt))
       .limit(limit);

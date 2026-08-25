@@ -9,7 +9,8 @@ import { Matters } from "./pages/Matters.js";
 import { MatterWorkspace } from "./pages/MatterWorkspace.js";
 import { Deadlines } from "./pages/Deadlines.js";
 import { Documents } from "./pages/Documents.js";
-import { Intelligence } from "./pages/Intelligence.js";
+import { Iusia } from "./pages/Iusia.js";
+import { SystemControl } from "./pages/SystemControl.js";
 import { Templates } from "./pages/Templates.js";
 
 export function App() {
@@ -44,7 +45,12 @@ export function App() {
         <Route path="tareas" element={<Deadlines />} />
         <Route path="documentos" element={<Documents />} />
         <Route path="plantillas" element={<Templates />} />
-        <Route path="inteligencia" element={<Intelligence />} />
+        <Route path="iusia" element={<Iusia />} />
+        {/* Control del sistema: la vista revalida la capacidad contra el servidor. */}
+        <Route path="control" element={<SystemControl />} />
+        {/* La antigua "Inteligencia" duplicaba el Centro de Mando: sus capacidades
+            únicas (riesgos y expedientes inactivos) viven ahora en Inicio. */}
+        <Route path="inteligencia" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

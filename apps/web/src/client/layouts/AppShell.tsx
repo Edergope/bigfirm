@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router";
+import { NavLink, Outlet, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home,
@@ -10,30 +10,57 @@ import {
   Search,
   LogOut,
   Users,
+  SlidersHorizontal,
 } from "lucide-react";
 import { CreditBadge } from "@iusia/ui";
 import clsx from "clsx";
 import { api } from "../api.js";
 import { signOut } from "../auth-client.js";
+import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
 
 /**
- * Shell de IUSIA. Institucional y estable: la expresividad se reserva para la
- * orquestación (Design System §01). Navegación MVP de seis vistas.
+ * Shell de IUSIA.
+ *
+ * La navegación se organiza por INTENCIÓN, no por módulo técnico, y se adapta al
+ * alcance real del usuario: el trabajo jurídico, la administración de la firma y el
+ * control del sistema son planos distintos y no se mezclan en una lista plana.
+ *
+ * Lo que la UI decide mostrar nunca autoriza nada: cada ruta revalida en el servidor.
  */
-const NAV = [
-  { to: "/", label: "Inicio", icon: Home },
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof Home;
+  end?: boolean;
+}
+
+/** Trabajo jurídico: lo que usa cualquier miembro de la firma. */
+const WORK_NAV: NavItem[] = [
+  { to: "/", label: "Inicio", icon: Home, end: true },
   { to: "/casos", label: "Casos", icon: Briefcase },
-  { to: "/tareas", label: "Tareas y términos", icon: CalendarClock },
+  { to: "/tareas", label: "Trabajo", icon: CalendarClock },
   { to: "/documentos", label: "Documentos", icon: Files },
+  { to: "/iusia", label: "IUSIA", icon: BrainCircuit },
   { to: "/plantillas", label: "Plantillas", icon: LayoutTemplate },
-  { to: "/inteligencia", label: "Inteligencia", icon: BrainCircuit },
 ];
 
-/** Sólo la administración de la firma ve la gestión del equipo. */
-const ADMIN_NAV = [{ to: "/equipo", label: "Equipo", icon: Users }];
+/** Administración de la firma: sólo dirección y socios. */
+const FIRM_NAV: NavItem[] = [{ to: "/equipo", label: "Equipo", icon: Users }];
+
+/** Control del sistema: exclusivo del superadministrador de IUSIA. */
+const SYSTEM_NAV: NavItem[] = [
+  { to: "/control", label: "Control IUSIA", icon: SlidersHorizontal },
+];
 
 export function AppShell() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
+  const navigate = useNavigate();
+  const { count: activeCount, analyses } = useActiveAnalyses();
+
+  const role = me.data?.firm_role;
+  const administersFirm = role === "FIRM_DIRECTOR" || role === "PARTNER";
+  const controlsSystem = me.data?.is_system_superadmin === true;
 
   return (
     <div className="min-h-screen">
@@ -45,48 +72,20 @@ export function AppShell() {
           </p>
         </div>
 
-        <nav className="flex-1 px-3 py-2">
-          {[
-            ...NAV,
-            // La administración del equipo sólo se ofrece a quien puede ejercerla;
-            // la autorización real la revalida el servidor en cada ruta.
-            ...(me.data?.firm_role === "FIRM_DIRECTOR" || me.data?.firm_role === "PARTNER"
-              ? ADMIN_NAV
-              : []),
-          ].map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === "/"}
-              className={({ isActive }) =>
-                clsx(
-                  "mb-0.5 flex items-center gap-3 rounded-[10px] px-3 py-2 text-[14px] transition-colors",
-                  isActive
-                    ? "bg-white/[0.10] font-medium text-white"
-                    : "text-white/65 hover:bg-white/[0.05] hover:text-white",
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon
-                    size={17}
-                    strokeWidth={isActive ? 2.2 : 1.8}
-                    className={isActive ? "text-iusia-intel" : ""}
-                    aria-hidden
-                  />
-                  {label}
-                </>
-              )}
-            </NavLink>
-          ))}
+        <nav className="flex-1 overflow-y-auto px-3 py-2">
+          <NavGroup items={WORK_NAV} />
+          {administersFirm ? <NavGroup label="Administración" items={FIRM_NAV} /> : null}
+          {controlsSystem ? <NavGroup label="Sistema" items={SYSTEM_NAV} /> : null}
         </nav>
 
         <div className="border-t border-white/10 px-4 py-4">
           <p className="truncate text-[14px] font-medium text-white">
             {me.data?.user.name ?? "…"}
           </p>
-          <p className="mt-0.5 text-[12px] text-white/55">{firmRoleLabel(me.data?.firm_role)}</p>
+          <p className="mt-0.5 text-[12px] text-white/55">
+            {firmRoleLabel(role)}
+            {controlsSystem ? " · Sistema" : ""}
+          </p>
           <button
             type="button"
             onClick={() => void signOut().then(() => window.location.assign("/entrar"))}
@@ -115,7 +114,29 @@ export function AppShell() {
               Pronto
             </span>
           </button>
+
           <div className="ml-auto flex items-center gap-4">
+            {activeCount > 0 ? (
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    activeCount === 1 && analyses[0]
+                      ? `/casos/${analyses[0].matter_id}`
+                      : "/iusia",
+                  )
+                }
+                aria-label={`IUSIA: ${activeCount} análisis en curso. Abrir.`}
+                className="flex items-center gap-2 rounded-full border border-iusia-intel/40 bg-iusia-intel/10 px-3 py-1.5 text-[13px] font-medium text-iusia-intel-text transition-colors hover:bg-iusia-intel/20"
+              >
+                {/* El punto no es decorativo: sólo late mientras hay trabajo real. */}
+                <span className="relative flex h-2 w-2" aria-hidden>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iusia-intel opacity-60 motion-reduce:animate-none" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-iusia-intel" />
+                </span>
+                IUSIA · {activeCount} {activeCount === 1 ? "análisis" : "análisis"} en curso
+              </button>
+            ) : null}
             {me.data ? <CreditBadge balance={me.data.credits} /> : null}
           </div>
         </header>
@@ -123,6 +144,46 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+    </div>
+  );
+}
+
+/** Grupo de navegación con etiqueta opcional: separa planos de autoridad. */
+function NavGroup({ label, items }: { label?: string; items: NavItem[] }) {
+  return (
+    <div className={label ? "mt-5" : ""}>
+      {label ? (
+        <p className="mb-1.5 px-3 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-white/40">
+          {label}
+        </p>
+      ) : null}
+      {items.map(({ to, label: itemLabel, icon: Icon, end }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={end}
+          className={({ isActive }) =>
+            clsx(
+              "mb-0.5 flex items-center gap-3 rounded-[10px] px-3 py-2 text-[14px] transition-colors",
+              isActive
+                ? "bg-white/[0.10] font-medium text-white"
+                : "text-white/65 hover:bg-white/[0.05] hover:text-white",
+            )
+          }
+        >
+          {({ isActive }) => (
+            <>
+              <Icon
+                size={17}
+                strokeWidth={isActive ? 2.2 : 1.8}
+                className={isActive ? "text-iusia-intel" : ""}
+                aria-hidden
+              />
+              {itemLabel}
+            </>
+          )}
+        </NavLink>
+      ))}
     </div>
   );
 }

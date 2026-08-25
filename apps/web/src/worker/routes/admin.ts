@@ -164,6 +164,40 @@ adminRoutes.post("/integrations/email/self-test", async (c) => {
   });
 });
 
+/**
+ * Ejecuciones recientes para el control del sistema.
+ *
+ * Vista técnica reservada a la autoridad de plataforma: aquí sí procede ver estado,
+ * duración, consumo y causa de un circuit breaker. La experiencia jurídica no expone
+ * nada de esto. La autorización es `requireSystemSuperadmin`, no el rol de firma.
+ */
+adminRoutes.get("/system/executions", async (c) => {
+  const { authz, executions, matters } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "system.executions.read", organizationId);
+
+  const roots = await executions.listRecentRoots(organizationId, 25);
+  const rows = await Promise.all(
+    roots.map(async (r) => {
+      const matter = await matters.findById(organizationId, r.matterId);
+      const nodes = await executions.listByRoot(r.id);
+      const specialists = nodes.filter((n) => n.id !== r.id);
+      return {
+        root_execution_id: r.id,
+        matter_id: r.matterId,
+        matter_title: matter?.title ?? r.matterId,
+        status: r.status,
+        started_at: r.createdAt,
+        completed_at: r.completedAt,
+        error_code: r.errorCode,
+        agents: specialists.length,
+        credits: specialists.reduce((sum, n) => sum + (n.creditsConsumed ?? 0), 0),
+      };
+    }),
+  );
+  return c.json({ executions: rows });
+});
+
 const RemoveMemberInput = z.object({ user_id: z.string().min(1) });
 
 /**

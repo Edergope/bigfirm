@@ -176,6 +176,17 @@ export const api = {
       last_sequence: number;
     }>(`/api/executions/${rootExecutionId}/events?since=${since}`),
 
+  activeAnalyses: () =>
+    request<{
+      active: Array<{
+        root_execution_id: string;
+        matter_id: string;
+        matter_title: string;
+        status: string;
+        started_at: string;
+      }>;
+    }>("/api/executions/active"),
+
   executionResult: (rootExecutionId: string) =>
     request<ExecutionResult>(`/api/executions/${rootExecutionId}/result`),
 
@@ -189,6 +200,9 @@ export const api = {
         domain: string;
         enabled: boolean;
         dependencies: string[];
+        runtime_role: string;
+        planner_eligible: boolean;
+        specialty: string;
       }>;
       registered: number;
       canonical_total: number;
@@ -252,6 +266,18 @@ export const api = {
       body: JSON.stringify({ user_id: userId }),
     }),
 
+  systemExecutions: () =>
+    request<{
+      executions: Array<{
+        root_execution_id: string; matter_id: string; matter_title: string;
+        status: string; started_at: string; completed_at: string | null;
+        error_code: string | null; agents: number; credits: number;
+      }>;
+    }>("/api/admin/system/executions"),
+
+  firmIntegrations: () =>
+    request<Record<string, unknown>>("/api/admin/integrations"),
+
   driveStatus: () =>
     request<{ connected: boolean; reason?: string }>("/api/integrations/drive/status"),
 
@@ -278,6 +304,10 @@ export const api = {
     risks: (firm: boolean) =>
       request<{ risks: IntelRisk[] }>(
         `/api/intelligence/case-risks${firm ? "?scope=firm" : ""}`,
+      ),
+    workload: () =>
+      request<{ workload: Array<{ assignedTo: string | null; openTasks: number }> }>(
+        "/api/intelligence/workload",
       ),
     inactive: (firm: boolean) =>
       request<{ matters: IntelInactive[] }>(

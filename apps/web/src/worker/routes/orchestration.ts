@@ -122,6 +122,47 @@ orchestrationRoutes.get("/executions/:rootExecutionId/events", async (c) => {
 });
 
 /**
+ * Análisis en curso de la firma, filtrados por acceso real a cada expediente.
+ *
+ * Alimenta el indicador global de la aplicación: el abogado puede cerrar la vista
+ * del análisis y seguir trabajando sin perder el hilo de lo que IUSIA está haciendo.
+ * No expone identificadores de workflow ni detalle técnico: sólo lo necesario para
+ * volver al análisis.
+ */
+orchestrationRoutes.get("/executions/active", async (c) => {
+  const { executions, matters, authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+
+  const roots = await executions.listActiveRoots(organizationId);
+  const visible: Array<{
+    root_execution_id: string;
+    matter_id: string;
+    matter_title: string;
+    status: string;
+    started_at: string;
+  }> = [];
+
+  for (const root of roots) {
+    // La visibilidad la decide el ACL de expediente, no la pertenencia a la firma.
+    try {
+      await authz.authorizeMatter(organizationId, userId, root.matterId, "execution:read");
+    } catch {
+      continue;
+    }
+    const matter = await matters.findById(organizationId, root.matterId);
+    visible.push({
+      root_execution_id: root.id,
+      matter_id: root.matterId,
+      matter_title: matter?.title ?? root.matterId,
+      status: root.status,
+      started_at: root.createdAt,
+    });
+  }
+
+  return c.json({ active: visible });
+});
+
+/**
  * Read-model del RESULTADO de una orquestación para la experiencia del abogado.
  *
  * Sólo LEE lo que el motor ya produjo: el texto de salida vive en R2 (la tabla
@@ -351,6 +392,10 @@ orchestrationRoutes.get("/agents", (c) => {
       dependencies: a.dependencies,
       parallelizable: a.parallelizable,
       prompt_version: a.prompt_version,
+      // Clasificación operacional (Bloque 7.7B). Nunca el prompt ni su hash.
+      runtime_role: a.runtime_role,
+      planner_eligible: a.planner_eligible,
+      specialty: a.specialty,
     })),
     // Los 27 restantes existen como conocimiento canónico pero no están habilitados.
     registered: listAgentDefinitions().length,
