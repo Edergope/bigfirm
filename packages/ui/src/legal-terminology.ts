@@ -188,3 +188,138 @@ export const MATTER_ACTION_TERMS: Record<string, string> = {
 };
 
 export const matterActionLabel = (action: string) => MATTER_ACTION_TERMS[action] ?? action;
+
+// ─────────────────────── Actividad del expediente ───────────────────────
+
+/**
+ * ACTIVITY_EVENT_LABEL_MAP — qué ocurrió, en lenguaje de despacho.
+ *
+ * El ledger registra acciones con nombre de sistema (`agent.execution.completed`)
+ * porque es un registro de auditoría, y así debe seguir. Lo que no puede es llegar
+ * así al abogado: "agent.execution.completed / SUCCESS" no le dice que IUSIA
+ * terminó de analizar su caso.
+ *
+ * `kind` clasifica el evento para elegir icono y color sin repetir la decisión en
+ * cada vista. `noise: true` marca lo que es telemetría de acceso, no trabajo
+ * jurídico: en staging hay 1.853 registros de `intelligence.firm_scope` y
+ * `portfolio.list` frente a unas decenas de eventos reales, y mezclarlos entierra
+ * la actividad del expediente. Esos eventos NO se borran —la auditoría los
+ * necesita— pero pertenecen a Control IUSIA, no a la vista jurídica.
+ */
+export interface ActivityPresentation {
+  label: string;
+  kind: "analysis" | "document" | "matter" | "people" | "access" | "system";
+  /** Telemetría de acceso: se conserva en auditoría, se excluye de la vista jurídica. */
+  noise?: boolean;
+}
+
+export const ACTIVITY_EVENT_LABELS: Record<string, ActivityPresentation> = {
+  "execution.start": { label: "Análisis iniciado con IUSIA", kind: "analysis" },
+  "agent.execution.completed": { label: "Análisis jurídico completado", kind: "analysis" },
+  "agent.execution.failed": { label: "El análisis no pudo completarse", kind: "analysis" },
+  "execution.cancel": { label: "Análisis detenido", kind: "analysis" },
+  "document.link": { label: "Documento incorporado al expediente", kind: "document" },
+  "document.unlink": { label: "Documento retirado del expediente", kind: "document" },
+  "document.ingested": { label: "Documento procesado y disponible", kind: "document" },
+  "matter.create": { label: "Expediente abierto", kind: "matter" },
+  "matter.update": { label: "Expediente actualizado", kind: "matter" },
+  "matter.archive": { label: "Expediente archivado", kind: "matter" },
+  "member.add": { label: "Persona añadida al expediente", kind: "people" },
+  "member.remove": { label: "Persona retirada del expediente", kind: "people" },
+  "member.role": { label: "Rol actualizado", kind: "people" },
+  "invitation.email": { label: "Invitación enviada", kind: "people" },
+  "task.create": { label: "Tarea creada", kind: "matter" },
+  "task.update": { label: "Tarea actualizada", kind: "matter" },
+  "gate.approve": { label: "Control de calidad aprobado", kind: "analysis" },
+  // Telemetría de acceso. Real y auditable, pero no es actividad del caso.
+  "portfolio.list": { label: "Consulta de cartera", kind: "access", noise: true },
+  "intelligence.firm_scope": { label: "Consulta de dirección", kind: "access", noise: true },
+  "matter.read": { label: "Expediente consultado", kind: "access", noise: true },
+  "document:read": { label: "Acceso a documentos denegado", kind: "access" },
+};
+
+/**
+ * Desenlace en lenguaje jurídico. `SUCCESS` no significa nada para un abogado; lo
+ * que necesita saber es si aquello quedó hecho, se detuvo o le fue negado.
+ */
+export const ACTIVITY_OUTCOME_LABELS: Record<string, TermPresentation> = {
+  SUCCESS: { label: "Completado", tone: "success" },
+  ALLOWED: { label: "Permitido", tone: "neutral" },
+  FAILURE: { label: "Con incidencia", tone: "critical" },
+  DENIED: { label: "Denegado", tone: "warning" },
+};
+
+export function activityEvent(action: string): ActivityPresentation {
+  return ACTIVITY_EVENT_LABELS[action] ?? { label: action, kind: "system" };
+}
+
+export function activityOutcome(outcome: string): TermPresentation {
+  return ACTIVITY_OUTCOME_LABELS[outcome] ?? { label: outcome, tone: "neutral" };
+}
+
+/** ¿Este evento es trabajo jurídico y no telemetría de acceso? */
+export function isLegalActivity(action: string): boolean {
+  return activityEvent(action).noise !== true;
+}
+
+// ─────────────────────── Documentos del expediente ───────────────────────
+
+/**
+ * Estado de un documento, contado desde lo que le importa al abogado: si IUSIA ya
+ * puede usarlo como evidencia. `EN_REVISION` o `INDEXED` describen el pipeline;
+ * "Disponible para análisis" describe la consecuencia.
+ */
+export const DOCUMENT_STATUS_TERMS: Record<string, TermPresentation> = {
+  PENDING: { label: "En cola", hint: "Esperando procesamiento.", tone: "neutral" },
+  PROCESSING: { label: "Procesando", hint: "IUSIA está leyendo el documento.", tone: "info" },
+  INDEXED: {
+    label: "Disponible para análisis",
+    hint: "IUSIA puede citarlo como evidencia.",
+    tone: "success",
+  },
+  EN_REVISION: { label: "En revisión", hint: "Pendiente de revisión interna.", tone: "warning" },
+  FAILED: { label: "Con incidencia", hint: "No pudo procesarse.", tone: "critical" },
+  ARCHIVED: { label: "Archivado", tone: "neutral" },
+};
+
+/** Clasificación documental. */
+export const DOCUMENT_CLASSIFICATION_TERMS: Record<string, string> = {
+  FUENTE: "Fuente",
+  EVIDENCIA: "Evidencia",
+  CONTRATO: "Contrato",
+  PROVIDENCIA: "Providencia",
+  ESCRITO: "Escrito",
+  CORRESPONDENCIA: "Correspondencia",
+  PERICIAL: "Peritaje",
+  OTRO: "Otro",
+};
+
+export const documentStatusTerm = (k?: string | null) => term(DOCUMENT_STATUS_TERMS, k);
+export const documentClassLabel = (k: string) => DOCUMENT_CLASSIFICATION_TERMS[k] ?? k;
+
+/**
+ * Estado de una integración contado al abogado, no al operador.
+ *
+ * "NOT_CONFIGURED / GOOGLE_CLIENT_ID" describe la causa técnica; el abogado
+ * necesita saber si puede trabajar y qué hacer. La causa vive en Control IUSIA.
+ */
+export const CAPABILITY_TERMS: Record<string, TermPresentation & { hint: string }> = {
+  CONNECTED: {
+    label: "Operativo",
+    hint: "Disponible para trabajar.",
+    tone: "success",
+  },
+  NOT_CONFIGURED: {
+    label: "Sin habilitar",
+    hint: "La dirección de la firma aún no lo ha habilitado.",
+    tone: "neutral",
+  },
+  ERROR: {
+    label: "Requiere atención",
+    hint: "Contacta con quien administra la plataforma.",
+    tone: "critical",
+  },
+};
+
+export const capabilityTerm = (k?: string | null) =>
+  CAPABILITY_TERMS[k ?? ""] ?? CAPABILITY_TERMS.NOT_CONFIGURED!;

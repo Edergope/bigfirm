@@ -1,27 +1,44 @@
-import { Card, CardHeader, PageHeader, StateBlock, StatusChip } from "@iusia/ui";
+import { FileSignature } from "lucide-react";
+import { Module, ScreenTitle } from "@iusia/ui";
 
 /**
- * Plantillas — biblioteca aprobada. La generación real usa adapters de Google Docs /
- * Docxtemplater (aún NOT_CONFIGURED). No se construye un procesador de texto.
+ * Plantillas — estado futuro, dicho con honestidad.
+ *
+ * La pantalla anunciaba "Motores no configurados" y "Google Docs API y
+ * Docxtemplater requieren configuración externa": eso le explica al abogado un
+ * problema de infraestructura que no puede resolver, y no le dice lo único
+ * relevante —que esto llegará y qué hará por él—. Tampoco se promete nada que no
+ * esté decidido: la biblioteca no existe todavía.
  */
 export function Templates() {
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="pb-2">
+      <ScreenTitle
+        eyebrow="Producción documental"
         title="Plantillas"
-        description="Biblioteca por tipo, área, jurisdicción y versión. Generación vía Google Docs / Docxtemplater."
+        description="Escritos, contratos y minutas institucionales de la firma."
       />
-      <Card>
-        <CardHeader
-          title="Biblioteca de plantillas"
-          action={<StatusChip label="Motores no configurados" tone="warning" dot />}
-        />
-        <StateBlock
-          kind="not_configured"
-          title="Aún sin plantillas activas"
-          hint="Los motores de generación (Google Docs API y Docxtemplater) requieren configuración externa. El dominio de plantillas y la validación de variables ya están implementados."
-        />
-      </Card>
+
+      <Module className="max-w-2xl">
+        <div className="flex items-start gap-4 py-1">
+          <span
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-iusia-navy/8 text-iusia-navy"
+            aria-hidden
+          >
+            <FileSignature size={18} />
+          </span>
+          <div>
+            <p className="text-[15px] font-medium text-iusia-navy">
+              Se habilitan en el siguiente bloque
+            </p>
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-iusia-mist-text">
+              Las plantillas institucionales permitirán generar escritos a partir del
+              expediente, con los hechos y las fuentes que IUSIA ya tiene establecidos.
+              Todavía no hay ninguna disponible.
+            </p>
+          </div>
+        </div>
+      </Module>
     </div>
   );
 }

@@ -13,7 +13,27 @@ import {
   StateBlock,
   StatusChip,
 } from "@iusia/ui";
-import { materialityTerm, riskTerm } from "@iusia/ui";
+import {
+  Module,
+  activityEvent,
+  activityOutcome,
+  documentClassLabel,
+  documentStatusTerm,
+  isLegalActivity,
+  materialityTerm,
+  riskTerm,
+} from "@iusia/ui";
+import {
+  Brain,
+  File,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FileType,
+  Scale,
+  ShieldAlert,
+  Users,
+} from "lucide-react";
 import type { RiskLevel } from "@iusia/domain";
 import { api, ApiError, type CaseBriefData, type MatterDetail } from "../api.js";
 import { authClient } from "../auth-client.js";
@@ -51,6 +71,25 @@ function tabCount(id: TabId, data: MatterDetail): number | null {
 }
 
 const TERMINAL_EXECUTION = new Set(["COMPLETED", "FAILED", "CANCELLED", "BLOCKED"]);
+
+/** Icono por naturaleza del hecho: clasifica de un vistazo sin leer la etiqueta. */
+const ACTIVITY_ICON = {
+  analysis: Brain,
+  document: FileText,
+  matter: Scale,
+  people: Users,
+  access: ShieldAlert,
+  system: ShieldAlert,
+} as const;
+
+const ACTIVITY_CHIP: Record<string, string> = {
+  analysis: "bg-iusia-intel/15 text-iusia-intel-text",
+  document: "bg-iusia-navy/8 text-iusia-navy",
+  matter: "bg-iusia-gold/15 text-iusia-gold-text",
+  people: "bg-iusia-success/12 text-iusia-success-text",
+  access: "bg-iusia-mist/20 text-iusia-mist-text",
+  system: "bg-iusia-mist/20 text-iusia-mist-text",
+};
 
 /** Dato de cabecera: rótulo pequeño arriba, valor debajo. */
 function MatterFact({ label, children }: { label: string; children: ReactNode }) {
@@ -373,55 +412,86 @@ function Documentos({ data }: { data: MatterDetail }) {
   }
 
   return (
-    <Card>
-      <CardHeader
-        title="Expediente documental"
-        subtitle="Los archivos viven en Google Drive; IUSIA administra metadata y estado."
-        action={
-          <span className="flex items-center gap-3">
-            {integrations.data ? (
-              <StatusChip
-                label={connected ? "Drive conectado" : "Drive no conectado"}
-                tone={connected ? "success" : "warning"}
-                dot
-              />
-            ) : null}
-            {driveStatus.isSuccess && !connected ? (
-              <button
-                type="button"
-                onClick={() => void connectDrive()}
-                className="text-[13px] font-medium text-iusia-action hover:underline"
-              >
-                Conectar Google Drive
-              </button>
-            ) : null}
-          </span>
-        }
-      />
+    <Module
+      title="Documentos del expediente"
+      eyebrow={`${data.documents.length} ${data.documents.length === 1 ? "documento" : "documentos"}`}
+      padded={false}
+      action={
+        driveStatus.isSuccess && !connected ? (
+          <button
+            type="button"
+            onClick={() => void connectDrive()}
+            className="text-[12.5px] font-medium text-iusia-action transition-colors hover:underline"
+          >
+            Autorizar acceso a Drive
+          </button>
+        ) : integrations.data ? (
+          <StatusChip label="Drive autorizado" tone="success" dot />
+        ) : null
+      }
+    >
       {data.documents.length === 0 ? (
-        <StateBlock
-          kind="not_configured"
-          title="Sin documentos vinculados"
-          hint="La vinculación con Google Drive Picker requiere OAuth aún no aprovisionado."
-        />
+        <div className="px-5 pb-5">
+          <p className="text-[13.5px] text-iusia-carbon">
+            Este expediente aún no tiene documentos.
+          </p>
+          <p className="mt-1 text-[12.5px] text-iusia-mist-text">
+            IUSIA sólo cita como evidencia lo que esté incorporado al expediente.
+          </p>
+        </div>
       ) : (
-        <ul className="divide-y divide-iusia-mist/20">
-          {data.documents.map((d) => (
-            <li key={d.id} className="flex items-center justify-between px-6 py-3">
-              <span className="min-w-0">
-                <span className="block truncate text-[14.5px]">{d.name}</span>
-                <span className="block text-[12.5px] text-iusia-mist-text">{d.classification}</span>
-              </span>
-              <StatusChip
-                label={d.status}
-                tone={d.status === "APROBADO" ? "success" : d.status === "CRITICO" ? "critical" : "neutral"}
-              />
-            </li>
-          ))}
+        <ul className="divide-y divide-iusia-line/70">
+          {data.documents.map((d) => {
+            const st = documentStatusTerm(d.status);
+            const Icon = documentIcon(d.mimeType, d.name);
+            return (
+              <li
+                key={d.id}
+                className="flex items-center gap-3.5 px-5 py-3 transition-colors hover:bg-iusia-ice/60"
+              >
+                {/* Icono por tipo real de archivo: el mismo glifo para todo obliga a
+                    leer la extensión para saber qué se está mirando. */}
+                <span
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-iusia-navy/8 text-iusia-navy"
+                  aria-hidden
+                >
+                  <Icon size={15} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] font-medium text-iusia-navy">
+                    {d.name}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[12px] text-iusia-mist-text">
+                    {documentClassLabel(d.classification)}
+                    <span aria-hidden className="px-1.5 text-iusia-mist">·</span>
+                    Actualizado {new Date(d.updatedAt).toLocaleDateString("es-CO")}
+                  </span>
+                </span>
+                <StatusChip label={st.label} tone={st.tone} title={st.hint} />
+              </li>
+            );
+          })}
         </ul>
       )}
-    </Card>
+    </Module>
   );
+}
+
+/**
+ * Icono por naturaleza del archivo. Se deriva del MIME y, si falta, de la
+ * extensión: un documento sin MIME registrado sigue siendo un PDF para quien lo
+ * mira. Del set que ya usa el producto; no se añade ninguna librería.
+ */
+function documentIcon(mimeType: string, name: string) {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const m = (mimeType || "").toLowerCase();
+  if (m.includes("pdf") || ext === "pdf") return FileType;
+  if (m.includes("image") || ["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return FileImage;
+  if (m.includes("sheet") || m.includes("excel") || ["xlsx", "xls", "csv"].includes(ext))
+    return FileSpreadsheet;
+  if (m.includes("word") || m.includes("document") || ["docx", "doc"].includes(ext))
+    return FileText;
+  return File;
 }
 
 const CERTAINTY_LABEL: Record<string, string> = {
@@ -429,49 +499,104 @@ const CERTAINTY_LABEL: Record<string, string> = {
   "[C]": "Contradicho", "[U]": "No verificado", "[R]": "Referido", "[X]": "Descartado",
 };
 
+/** El grado de certeza no es decorativo: un hecho contradicho exige atención. */
+const CERTAINTY_TONE: Record<string, string> = {
+  "[F]": "success",
+  "[D]": "success",
+  "[A]": "info",
+  "[R]": "neutral",
+  "[I]": "warning",
+  "[U]": "warning",
+  "[C]": "critical",
+  "[X]": "neutral",
+};
+
+/**
+ * Hechos y fuentes del expediente.
+ *
+ * Se llamaban "Fact Ledger" y "Authority Ledger", y sus estados vacíos citaban al
+ * "agente 01" y al "agente 03". Ese es el vocabulario del motor: le pide al abogado
+ * conocer la arquitectura para entender su propio caso. IUSIA se presenta por lo
+ * que hace —establecer hechos, contrastar normas—, nunca por el identificador de
+ * quién lo hace.
+ */
 function Hechos({ data }: { data: MatterDetail }) {
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <Card>
-        <CardHeader title="Fact Ledger" subtitle="Base fáctica trazable" />
+    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+      <Module
+        title="Hechos del expediente"
+        eyebrow={`${data.facts.length} ${data.facts.length === 1 ? "hecho" : "hechos"}`}
+        padded={false}
+      >
         {data.facts.length === 0 ? (
-          <StateBlock kind="empty" title="Sin hechos" hint="El agente 01 establece la base fáctica." />
+          <div className="px-5 pb-5">
+            <p className="text-[13.5px] text-iusia-carbon">Todavía no hay hechos establecidos.</p>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-iusia-mist-text">
+              IUSIA extrae los hechos de los documentos del expediente y marca cuáles
+              quedan acreditados y cuáles siguen siendo alegaciones.
+            </p>
+          </div>
         ) : (
-          <ul className="divide-y divide-iusia-mist/20">
+          <ul className="divide-y divide-iusia-line/70">
             {data.facts.map((f) => (
-              <li key={f.id} className="px-6 py-3">
+              <li key={f.id} className="px-5 py-3">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-[14.5px] leading-snug">{f.statement}</p>
-                  <StatusChip label={CERTAINTY_LABEL[f.certainty] ?? f.certainty} />
-                </div>
-                <p className="mt-1 text-[12.5px] text-iusia-mist-text">Fuente: {f.primarySource}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <Card>
-        <CardHeader title="Authority Ledger" subtitle="Normas y jurisprudencia verificables" />
-        {data.authorities.length === 0 ? (
-          <StateBlock kind="empty" title="Sin autoridades" hint="El agente 03 registra fuentes verificadas." />
-        ) : (
-          <ul className="divide-y divide-iusia-mist/20">
-            {data.authorities.map((a) => (
-              <li key={a.id} className="px-6 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="text-[14.5px] font-medium">{a.citation}</p>
+                  <p className="text-[14px] leading-snug text-iusia-carbon">{f.statement}</p>
                   <StatusChip
-                    label={a.status === "VERIFIED_CURRENT" ? "Vigente" : a.status}
-                    tone={a.status === "VERIFIED_CURRENT" ? "success" : "warning"}
+                    label={CERTAINTY_LABEL[f.certainty] ?? f.certainty}
+                    tone={CERTAINTY_TONE[f.certainty] ?? "neutral"}
                   />
                 </div>
-                <p className="mt-1 text-[12.5px] text-iusia-mist-text">{a.ruleSummary}</p>
+                <p className="mt-1 text-[12px] text-iusia-mist-text">
+                  Consta en {f.primarySource}
+                </p>
               </li>
             ))}
           </ul>
         )}
-      </Card>
+      </Module>
+
+      <Module
+        title="Fuentes jurídicas"
+        eyebrow={`${data.authorities.length} ${data.authorities.length === 1 ? "fuente" : "fuentes"}`}
+        padded={false}
+      >
+        {data.authorities.length === 0 ? (
+          <div className="px-5 pb-5">
+            <p className="text-[13.5px] text-iusia-carbon">
+              Todavía no hay normas ni jurisprudencia registradas.
+            </p>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-iusia-mist-text">
+              IUSIA contrasta el marco normativo aplicable y sólo registra fuentes cuya
+              vigencia puede verificar.
+            </p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-iusia-line/70">
+            {data.authorities.map((a) => (
+              <li key={a.id} className="px-5 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-[14px] font-medium leading-snug text-iusia-navy">
+                    {a.citation}
+                  </p>
+                  <StatusChip
+                    label={a.status === "VERIFIED_CURRENT" ? "Vigente" : "Por verificar"}
+                    tone={a.status === "VERIFIED_CURRENT" ? "success" : "warning"}
+                    title={
+                      a.status === "VERIFIED_CURRENT"
+                        ? "IUSIA verificó que sigue vigente."
+                        : "Su vigencia no ha podido confirmarse."
+                    }
+                  />
+                </div>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-iusia-mist-text">
+                  {a.ruleSummary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Module>
     </div>
   );
 }
@@ -568,36 +693,119 @@ function Estrategia({ matterId, data }: { matterId: string; data: MatterDetail }
   return <MatterOrchestration matterId={matterId} data={data} />;
 }
 
+/**
+ * Actividad del expediente como línea de tiempo jurídica.
+ *
+ * Antes era un log: `agent.execution.completed / execution / SUCCESS`. Eso es el
+ * registro de auditoría —correcto como registro, ilegible como historia—. Aquí se
+ * cuenta QUÉ pasó en el caso, agrupado por día, con un icono que clasifica el hecho
+ * y el desenlace en lenguaje jurídico.
+ *
+ * La telemetría de acceso (consultas de cartera, alcance de dirección) se excluye:
+ * son miles de registros frente a decenas de hechos reales, y mezclarlos entierra
+ * la actividad del expediente. Siguen en el ledger y en la auditoría de sistema.
+ */
 function Actividad({ data }: { data: MatterDetail }) {
+  const [showAccess, setShowAccess] = useState(false);
+
+  const all = data.activity;
+  const legal = all.filter((a) => isLegalActivity(a.action));
+  const rows = showAccess ? all : legal;
+  const hidden = all.length - legal.length;
+
+  // Agrupación por día: una fecha repetida en cada fila es ruido; como encabezado
+  // da estructura a la lectura.
+  const byDay = new Map<string, typeof rows>();
+  for (const a of rows) {
+    const day = new Date(a.occurredAt).toLocaleDateString("es-CO", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    byDay.set(day, [...(byDay.get(day) ?? []), a]);
+  }
+
   return (
-    <Card>
-      <CardHeader title="Auditoría del expediente" subtitle="Registro jurídico de decisiones y accesos" />
-      {data.activity.length === 0 ? (
-        <StateBlock kind="empty" title="Sin actividad registrada" />
+    <Module
+      title="Actividad del expediente"
+      eyebrow="Qué ha ocurrido"
+      padded={false}
+      action={
+        hidden > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowAccess((v) => !v)}
+            className="text-[12.5px] font-medium text-iusia-action transition-colors hover:underline"
+          >
+            {showAccess ? "Ocultar consultas" : `Incluir ${hidden} consultas de acceso`}
+          </button>
+        ) : null
+      }
+    >
+      {rows.length === 0 ? (
+        <p className="px-5 pb-5 text-[13.5px] text-iusia-mist-text">
+          Todavía no hay actividad registrada en este expediente.
+        </p>
       ) : (
-        <ul className="divide-y divide-iusia-mist/20">
-          {data.activity.map((a) => (
-            <li key={a.id} className="flex items-center justify-between px-6 py-3">
-              <span>
-                <span className="block text-[14px]">{a.action}</span>
-                <span className="block text-[12.5px] text-iusia-mist-text">
-                  {a.resourceType}
-                  {a.reason ? ` · ${a.reason}` : ""}
-                </span>
-              </span>
-              <span className="flex items-center gap-3">
-                <StatusChip
-                  label={a.outcome}
-                  tone={a.outcome === "DENIED" || a.outcome === "FAILURE" ? "critical" : "success"}
+        <div className="max-w-3xl px-5 pb-5">
+          {[...byDay.entries()].map(([day, events]) => (
+            <section key={day} className="mt-4 first:mt-0">
+              <h3 className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+                {day}
+              </h3>
+              <ul className="relative">
+                {/* Hilo temporal: una línea continua detrás de los puntos. */}
+                <span
+                  aria-hidden
+                  className="absolute bottom-3 left-[9px] top-3 w-px bg-iusia-line"
                 />
-                <time className="text-[12.5px] tabular-nums text-iusia-mist-text">
-                  {new Date(a.occurredAt).toLocaleString("es-CO")}
-                </time>
-              </span>
-            </li>
+                {events.map((a) => {
+                  const ev = activityEvent(a.action);
+                  const outcome = activityOutcome(a.outcome);
+                  const Icon = ACTIVITY_ICON[ev.kind];
+                  return (
+                    <li key={a.id} className="relative flex items-start gap-3 py-2 pl-0">
+                      <span
+                        className={
+                          "relative z-10 mt-0.5 flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded-full " +
+                          ACTIVITY_CHIP[ev.kind]
+                        }
+                        aria-hidden
+                      >
+                        <Icon size={11} strokeWidth={2.2} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13.5px] text-iusia-carbon">{ev.label}</span>
+                        {a.reason ? (
+                          <span className="block truncate text-[12px] text-iusia-mist-text">
+                            {a.reason}
+                          </span>
+                        ) : null}
+                      </span>
+                      {/* Un desenlace que sólo confirma lo obvio no se pinta: "Análisis
+                          completado · Completado" es redundancia, no información. */}
+                      {a.outcome !== "SUCCESS" && a.outcome !== "ALLOWED" ? (
+                        <StatusChip label={outcome.label} tone={outcome.tone} />
+                      ) : null}
+                      <time
+                        className="shrink-0 text-[12px] tnum text-iusia-mist-text"
+                        dateTime={a.occurredAt}
+                        title={new Date(a.occurredAt).toLocaleString("es-CO")}
+                      >
+                        {new Date(a.occurredAt).toLocaleTimeString("es-CO", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </time>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
-    </Card>
+    </Module>
   );
 }
+

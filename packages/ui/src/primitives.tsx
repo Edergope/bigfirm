@@ -108,8 +108,13 @@ export function Button({
       disabled={disabled}
       onClick={onClick}
       className={clsx(
-        "inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] font-medium tracking-[-0.005em] transition-[color,background-color,box-shadow,transform] duration-200 active:scale-[0.98]",
-        "disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100",
+        // Hover eleva 1px y profundiza la sombra; el clic hunde. Feedback físico
+        // sobrio: ni escalados del 10 % ni rebotes, que leerían a aplicación de consumo.
+        "inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] font-medium tracking-[-0.005em]",
+        "transition-[color,background-color,box-shadow,transform] duration-[var(--motion-fast)] ease-[var(--ease-standard)]",
+        "hover:-translate-y-px active:translate-y-0 active:scale-[var(--press-scale)]",
+        "motion-reduce:transform-none motion-reduce:transition-none",
+        "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:active:scale-100",
         size === "md" ? "h-9.5 px-4 text-[13.5px]" : "h-8 px-3 text-[12.5px]",
         variant === "primary" &&
           "bg-iusia-navy text-white shadow-[0_2px_8px_-2px_rgba(11,29,58,0.4)] hover:bg-iusia-navy-soft hover:shadow-[0_4px_14px_-4px_rgba(11,29,58,0.5)]",

@@ -11,6 +11,32 @@ import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
  * expedientes analizados y el equipo de especialistas disponible. El detalle técnico
  * de cada ejecución pertenece a Control IUSIA, no a esta vista.
  */
+/**
+ * Dominios del motor traducidos a áreas que un abogado reconoce. Sin entrada, el
+ * dominio simplemente no se muestra: es preferible una lista corta y cierta que
+ * una completa con un enum crudo dentro.
+ */
+const AGENT_DOMAIN_AREAS: Record<string, string> = {
+  ORCHESTRATION: "Dirección del análisis",
+  INTAKE: "Encuadre del caso",
+  RESEARCH: "Investigación jurídica",
+  EVIDENTIARY: "Prueba y peritaje",
+  PROCEDURAL: "Vía procesal",
+  STRATEGY: "Estrategia",
+  CONTRACTUAL: "Contratos y negocios",
+  CORPORATE: "Societario",
+  LABOR: "Laboral",
+  TAX: "Tributario",
+  CRIMINAL: "Penal económico",
+  ADMINISTRATIVE: "Administrativo",
+  COMPLIANCE: "Cumplimiento",
+  LITIGATION: "Litigio",
+  INSOLVENCY: "Insolvencia",
+  IP: "Propiedad intelectual",
+  REAL_ESTATE: "Inmobiliario",
+  QUALITY: "Control de calidad",
+};
+
 export function Iusia() {
   const { analyses, count, isLoading } = useActiveAnalyses();
   const matters = useQuery({ queryKey: ["matters"], queryFn: api.listMatters });
@@ -18,6 +44,19 @@ export function Iusia() {
 
   // El equipo se presenta por especialidad, no por código de nodo.
   const team = (agents.data?.agents ?? []).filter((a) => a.enabled);
+
+  /**
+   * Áreas de fortaleza, derivadas del catálogo real de agentes habilitados. Nunca
+   * una lista escrita a mano: si mañana se habilita un especialista tributario, la
+   * vista lo refleja sola; y si el dominio no tiene traducción, no se inventa.
+   */
+  const practiceStrengths = [
+    ...new Set(
+      team
+        .map((a) => AGENT_DOMAIN_AREAS[a.domain])
+        .filter((x): x is string => typeof x === "string"),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "es"));
 
   return (
     <div className="flex flex-col gap-6">
@@ -128,23 +167,33 @@ export function Iusia() {
 
         <Card>
           <CardHeader
-            title="Equipo de especialistas"
-            subtitle="IUSIA elige por sí misma quién interviene en cada asunto"
+            title="En qué es especialista IUSIA"
+            subtitle="Tú describes el encargo; IUSIA compone el equipo por sí misma"
           />
           {agents.isLoading ? (
             <div className="p-5"><Skeleton className="h-24" /></div>
           ) : (
             <>
-              <ul className="max-h-[280px] divide-y divide-iusia-mist/15 overflow-y-auto">
-                {team.map((a) => (
-                  <li key={a.agent_id} className="px-6 py-2.5">
-                    <span className="block truncate text-[13.5px] text-iusia-carbon">{a.name}</span>
-                    <span className="block truncate text-[12px] text-iusia-mist-text">{a.domain}</span>
+              {/*
+                Se muestran ÁREAS, no un inventario de agentes. La lista anterior
+                exponía "Managing Partner / Orquestador Jurídico", "ORCHESTRATION" e
+                "INTAKE": nombres y enums del motor, que le piden al abogado conocer
+                la arquitectura para entender qué puede pedirle a IUSIA. El catálogo
+                técnico completo vive en Control IUSIA, que es donde tiene sentido.
+              */}
+              <ul className="flex flex-wrap gap-2 px-6 py-4">
+                {practiceStrengths.map((area) => (
+                  <li
+                    key={area}
+                    className="rounded-full bg-iusia-ice px-3 py-1.5 text-[12.5px] font-medium text-iusia-navy"
+                  >
+                    {area}
                   </li>
                 ))}
               </ul>
-              <p className="border-t border-iusia-mist/20 px-6 py-3 text-[12.5px] text-iusia-mist-text">
-                {team.length} especialistas disponibles. Tú describes el encargo; IUSIA compone el equipo.
+              <p className="px-6 pb-4 text-[12.5px] leading-relaxed text-iusia-mist-text">
+                {team.length} especialistas disponibles. No eliges quién interviene: IUSIA
+                lo decide según lo que pide el encargo y deja registrada la razón.
               </p>
             </>
           )}

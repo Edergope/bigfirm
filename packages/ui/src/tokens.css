@@ -83,6 +83,18 @@
   --shadow-raised: var(--shadow-panel);
   --shadow-overlay: 0 24px 60px -20px rgba(11, 29, 58, 0.35);
 
+  /* Motion. Tres duraciones y tres curvas, nunca un valor suelto en un componente.
+     El movimiento aquí es retroalimentación y continuidad, no espectáculo: si una
+     animación llama más la atención que el dato que acompaña, sobra. */
+  --motion-fast: 140ms;
+  --motion-normal: 200ms;
+  --motion-slow: 320ms;
+  --motion-data: 620ms; /* entrada de barras y series, sólo con dato real */
+  --ease-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-enter: cubic-bezier(0.16, 0.84, 0.44, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 0.9, 0.4);
+  --press-scale: 0.985;
+
   /* Estructura del shell */
   --iusia-sidebar-width: 212px;
   --iusia-topbar-height: 60px;
@@ -180,4 +192,52 @@ body {
 }
 .on-navy :where(a, button):focus-visible {
   outline-color: var(--color-iusia-intel);
+}
+
+/* ─────────────────────────── Motion ───────────────────────────
+   Las barras y series entran una sola vez, desde su origen real, y con
+   transform en lugar de width: animar width obliga al navegador a recalcular
+   el layout en cada frame y es lo que hace que una tabla se sienta pesada. */
+@keyframes iusia-bar-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes iusia-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.iusia-bar {
+  transform-origin: left center;
+  animation: iusia-bar-in var(--motion-data) var(--ease-enter) both;
+}
+
+.iusia-rise {
+  animation: iusia-rise-in var(--motion-normal) var(--ease-enter) both;
+}
+
+/* Sin movimiento, la información sigue completa: nunca depende de la animación. */
+@media (prefers-reduced-motion: reduce) {
+  .iusia-bar,
+  .iusia-rise {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
