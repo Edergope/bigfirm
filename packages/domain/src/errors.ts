@@ -14,6 +14,10 @@ export type IusiaErrorCode =
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_TIMEOUT"
   | "GATE_BLOCKED"
+  /** Plan de equipo inválido que no pudo repararse ni sustituirse por un fallback válido. */
+  | "PLAN_INVALID"
+  /** El circuit breaker detuvo la orquestación (loop, presupuesto, límites, cancelación). */
+  | "ORCHESTRATION_ABORTED"
   | "INTERNAL";
 
 const STATUS: Record<IusiaErrorCode, number> = {
@@ -30,6 +34,8 @@ const STATUS: Record<IusiaErrorCode, number> = {
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_TIMEOUT: 504,
   GATE_BLOCKED: 409,
+  PLAN_INVALID: 422,
+  ORCHESTRATION_ABORTED: 409,
   INTERNAL: 500,
 };
 

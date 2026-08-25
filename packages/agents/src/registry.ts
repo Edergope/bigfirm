@@ -44,6 +44,42 @@ export function getAgentDefinition(agentId: string): AgentDefinition {
   return def;
 }
 
+/** Id canónico del orquestador (fases PLAN e INTEGRATE); no es un especialista. */
+export const ORCHESTRATOR_AGENT_ID = "pisoso-orquestador-juridico";
+
+/**
+ * Entrada del catálogo que ve el PLANNER. Subset SEGURO de metadata: lo justo para
+ * elegir especialistas. NUNCA incluye system prompt, sha, model_policy ni secretos.
+ */
+export interface AgentCatalogEntry {
+  agent_id: string;
+  node_code: string;
+  name: string;
+  role: string;
+  domain: string;
+  output_type: string;
+}
+
+/**
+ * Catálogo de especialistas ELEGIBLES para el planner: sólo agentes `enabled`,
+ * excluyendo al orquestador (que actúa como PLAN/INTEGRATE, no como especialista).
+ */
+export function buildAgentCatalog(): AgentCatalogEntry[] {
+  return DEFINITIONS.filter((d) => d.enabled && d.agent_id !== ORCHESTRATOR_AGENT_ID).map((d) => ({
+    agent_id: d.agent_id,
+    node_code: d.node_code,
+    name: d.name,
+    role: d.role,
+    domain: d.domain,
+    output_type: d.output_type,
+  }));
+}
+
+/** Conjunto de agent_ids ejecutables (enabled). El validador de planes lo usa. */
+export function eligibleAgentIds(): Set<string> {
+  return new Set(DEFINITIONS.filter((d) => d.enabled).map((d) => d.agent_id));
+}
+
 export function getAgentByNodeCode(nodeCode: string): AgentDefinition {
   const def = BY_NODE.get(nodeCode);
   if (!def) {
