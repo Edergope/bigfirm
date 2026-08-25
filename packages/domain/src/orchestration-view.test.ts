@@ -148,6 +148,19 @@ describe("deriveConclusionText (resultado humano, no JSON)", () => {
     expect(out).not.toContain("iusia.orchestration.v1");
   });
 
+  it("[A2] encuentra conclusion_brief aunque venga anidado (schema no estable)", () => {
+    const nested = JSON.stringify({
+      schema: "iusia.orchestration.v1",
+      result: {
+        conclusion_brief: "Atlas sostiene que el preaviso exigido para la terminación es de 90 días.",
+        evidence_citations: [{ ref_id: "doc_x#1", quote: "…noventa días…" }],
+      },
+    });
+    expect(deriveConclusionText(nested)).toBe(
+      "Atlas sostiene que el preaviso exigido para la terminación es de 90 días.",
+    );
+  });
+
   it("[C] fallback al mejor campo humano si falta conclusion_brief", () => {
     const noBrief = JSON.stringify({ schema: "x", analysis_summary: "Conclusión alterna legible." });
     expect(deriveConclusionText(noBrief)).toBe("Conclusión alterna legible.");

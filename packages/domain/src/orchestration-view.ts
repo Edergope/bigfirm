@@ -209,6 +209,42 @@ export function shouldRefreshHistory(
  * mejor campo humano disponible; si nada es interpretable, devuelve el texto crudo
  * tal cual (legible como último recurso). No cambia el schema del agente.
  */
+const HUMAN_CONCLUSION_FIELDS = [
+  "conclusion_brief",
+  "conclusion",
+  "analysis_summary",
+  "summary",
+  "resumen",
+  "respuesta",
+  "answer",
+  "text",
+] as const;
+
+/**
+ * Busca en profundidad acotada el primer valor string no vacío para `field`.
+ * El schema del agente no es estable (p.ej. `conclusion_brief` puede venir a nivel
+ * raíz o anidado bajo `result`), por eso la búsqueda recorre el árbol en vez de mirar
+ * sólo la raíz. Depth limitado para evitar coste/ciclos.
+ */
+function findStringFieldDeep(node: unknown, field: string, depth: number): string | null {
+  if (depth < 0 || node === null || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const el of node) {
+      const found = findStringFieldDeep(el, field, depth - 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const obj = node as Record<string, unknown>;
+  const direct = obj[field];
+  if (typeof direct === "string" && direct.trim().length > 0) return direct.trim();
+  for (const key of Object.keys(obj)) {
+    const found = findStringFieldDeep(obj[key], field, depth - 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 export function deriveConclusionText(rawOutput: string | null | undefined): string {
   const raw = (rawOutput ?? "").trim();
   if (raw.length === 0) return "";
@@ -224,23 +260,11 @@ export function deriveConclusionText(rawOutput: string | null | undefined): stri
   if (typeof parsed === "string") {
     return parsed.trim().length > 0 ? parsed.trim() : raw;
   }
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-    const obj = parsed as Record<string, unknown>;
-    const HUMAN_FIELDS = [
-      "conclusion_brief",
-      "conclusion",
-      "analysis_summary",
-      "summary",
-      "resumen",
-      "respuesta",
-      "answer",
-      "text",
-    ];
-    for (const field of HUMAN_FIELDS) {
-      const value = obj[field];
-      if (typeof value === "string" && value.trim().length > 0) {
-        return value.trim();
-      }
+  if (parsed && typeof parsed === "object") {
+    // Prioridad por campo: `conclusion_brief` en cualquier nivel gana a los demás.
+    for (const field of HUMAN_CONCLUSION_FIELDS) {
+      const found = findStringFieldDeep(parsed, field, 6);
+      if (found) return found;
     }
   }
   // Estructurado pero sin campo humano reconocido: se muestra crudo, legible.
