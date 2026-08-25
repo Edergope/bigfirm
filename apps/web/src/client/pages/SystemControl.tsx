@@ -48,7 +48,7 @@ export function SystemControl() {
         actions={<StatusChip label="Autoridad de sistema" tone="intel" dot />}
       />
 
-      <div role="tablist" aria-label="Áreas de control" className="flex gap-0.5 border-b border-iusia-mist/30">
+      <div role="tablist" aria-label="Áreas de control" className="flex gap-0.5 border-b border-iusia-line">
         {TABS.map((t) => {
           const selected = tab === t.id;
           return (
@@ -127,7 +127,7 @@ function AgentsTab() {
       />
       <div className="overflow-x-auto">
         <table className="w-full text-left text-[13.5px]">
-          <thead className="border-b border-iusia-mist/30 text-[12px] uppercase tracking-wide text-iusia-mist-text">
+          <thead className="border-b border-iusia-line text-[12px] uppercase tracking-wide text-iusia-mist-text">
             <tr>
               <th className="px-6 py-2.5 font-medium">Agente</th>
               <th className="px-3 py-2.5 font-medium">Rol operativo</th>
@@ -193,7 +193,7 @@ function ExecutionsTab() {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-[13.5px]">
-            <thead className="border-b border-iusia-mist/30 text-[12px] uppercase tracking-wide text-iusia-mist-text">
+            <thead className="border-b border-iusia-line text-[12px] uppercase tracking-wide text-iusia-mist-text">
               <tr>
                 <th className="px-6 py-2.5 font-medium">Expediente</th>
                 <th className="px-3 py-2.5 font-medium">Estado</th>
@@ -264,7 +264,7 @@ function IntegrationsTab() {
   return (
     <Card>
       <CardHeader title="Integraciones" subtitle="Estado real de los servicios externos. Nunca se muestran credenciales." />
-      <ul className="divide-y divide-iusia-mist/20">
+      <ul className="divide-y divide-iusia-line">
         {items.map((i) => (
           <li key={i.name} className="flex items-center justify-between px-6 py-3.5">
             <span className="min-w-0">

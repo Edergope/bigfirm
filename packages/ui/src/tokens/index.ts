@@ -21,6 +21,9 @@ export const colors = {
   mistStrong: "#89919B", // borde de control interactivo — mist a ≥3:1 (WCAG 1.4.11)
   surface: "#F7F8FA", // superficies generales
   paper: "#FFFFFF", // lectura y tarjetas
+  canvas: "#EEF1F6", // lienzo de la aplicación, por debajo del workspace (§17 nivel 0)
+  line: "#E3E7EE", // trazo estructural entre paneles
+  lineStrong: "#D3D9E3", // trazo estructural con más presencia (cabeceras de tabla)
   // Estados semánticos — nunca únicos portadores de significado.
   success: "#16A34A", // decorativo/no-texto (dots, iconos, fondos)
   successText: "#11803A", // success a ≥4.5:1 AA sobre paper y su tinte /10 — usar cuando success es texto

@@ -23,7 +23,7 @@ export function Card({
   return (
     <As
       className={clsx(
-        "rounded-[14px] border border-iusia-mist/35 bg-iusia-paper shadow-[0_1px_2px_rgba(11,29,58,0.06)]",
+        "rounded-[14px] border border-iusia-line bg-iusia-paper shadow-[0_1px_2px_rgba(11,29,58,0.05)]",
         interactive &&
           "transition-colors hover:border-iusia-action/40 focus-within:border-iusia-action/50",
         className,
@@ -44,9 +44,9 @@ export function CardHeader({
   action?: ReactNode;
 }) {
   return (
-    <header className="flex items-start justify-between gap-3 border-b border-iusia-mist/25 px-6 py-4">
+    <header className="flex items-start justify-between gap-3 border-b border-iusia-line px-5 py-3.5">
       <div className="min-w-0">
-        <h2 className="text-[15px] font-semibold text-iusia-navy">{title}</h2>
+        <h2 className="text-[14.5px] font-semibold tracking-[-0.01em] text-iusia-navy">{title}</h2>
         {subtitle ? <p className="mt-0.5 text-[13px] text-iusia-mist-text">{subtitle}</p> : null}
       </div>
       {action}
@@ -175,30 +175,43 @@ const STATUS_TONE: Record<string, string> = {
   success: "bg-iusia-success/10 text-iusia-success-text ring-iusia-success/25",
   warning: "bg-iusia-warning/10 text-iusia-warning-text ring-iusia-warning/25",
   critical: "bg-iusia-critical/10 text-iusia-critical ring-iusia-critical/25",
+  gold: "bg-iusia-gold/12 text-iusia-gold-text ring-iusia-gold/35",
 };
 
+/**
+ * Señal de estado. Compacta y de una sola línea por defecto: en una cartera de
+ * expedientes el estado acompaña al asunto, no compite con él, y una etiqueta que
+ * se parte en dos líneas dentro de una fila de tabla destruye el ritmo de lectura.
+ */
 export function StatusChip({
   label,
   tone = "neutral",
   icon,
   dot = false,
+  title,
+  size = "sm",
 }: {
   label: string;
   tone?: keyof typeof STATUS_TONE | string;
   icon?: ReactNode;
   dot?: boolean;
+  /** Explicación al pasar el cursor: el nombre corto rara vez basta para decidir. */
+  title?: string;
+  size?: "sm" | "md";
 }) {
   const cls = STATUS_TONE[tone] ?? STATUS_TONE.neutral;
   return (
     <span
+      title={title}
       className={clsx(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12.5px] font-medium ring-1 ring-inset",
+        "inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-full font-medium ring-1 ring-inset",
+        size === "sm" ? "px-2 py-[1px] text-[12px]" : "px-2.5 py-0.5 text-[12.5px]",
         cls,
       )}
     >
-      {dot ? <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" /> : null}
+      {dot ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" /> : null}
       {icon}
-      {label}
+      <span className="truncate">{label}</span>
     </span>
   );
 }
@@ -259,8 +272,10 @@ export function StateBlock({
   hint?: string;
   action?: ReactNode;
 }) {
-  const icon =
-    kind === "error" ? "⚠" : kind === "not_configured" ? "◌" : kind === "loading" ? "◍" : "—";
+  // Glifos Unicode como iconos: el craft-floor los prohíbe y aquí no aportaban
+  // nada —un "—" gigante no informa. La ausencia se comunica con el texto y con
+  // el espacio, y el error con su color.
+  const icon = null;
   const tone =
     kind === "error"
       ? "text-iusia-critical"
@@ -268,11 +283,14 @@ export function StateBlock({
         ? "text-iusia-warning"
         : "text-iusia-mist-text";
   return (
-    <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
-      <span className={clsx("text-2xl leading-none", tone)} aria-hidden>
-        {icon}
-      </span>
-      <p className="text-[15px] font-medium text-iusia-carbon">{title}</p>
+    // Un estado vacío no merece la altura de un panel lleno: anunciar "nada que
+    // revisar" con 200px de aire dice que el producto está incompleto, no que la
+    // cartera esté tranquila.
+    <div className="flex flex-col items-center justify-center gap-1.5 px-6 py-8 text-center">
+      {icon}
+      <p className={clsx("text-[14.5px] font-medium", kind === "error" ? tone : "text-iusia-carbon")}>
+        {title}
+      </p>
       {hint ? <p className="max-w-md text-[13.5px] text-iusia-mist-text">{hint}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
@@ -565,5 +583,131 @@ export function ConfirmAction({
         No
       </button>
     </span>
+  );
+}
+
+// ─────────────────────────────── Composición ───────────────────────────────
+
+/**
+ * Superficie de trabajo: el contenedor que le faltaba al producto.
+ *
+ * Sin él, una tabla blanca quedaba flotando sobre un fondo casi blanco y la página
+ * se leía como un panel de administración: nada contenía nada. Con el lienzo por
+ * debajo (`canvas`) y esta superficie por encima, la jerarquía de §17 existe de
+ * verdad —lienzo, workspace, panel, control— y se resuelve con fondo, radio y
+ * profundidad, no repartiendo bordes azules.
+ */
+export function Workspace({
+  children,
+  className,
+  toolbar,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Barra integrada en el borde superior: buscar, filtrar, ordenar. */
+  toolbar?: ReactNode;
+}) {
+  return (
+    <section
+      className={clsx(
+        "overflow-hidden rounded-[16px] border border-iusia-line bg-iusia-paper shadow-[var(--shadow-panel)]",
+        className,
+      )}
+    >
+      {toolbar ? (
+        <div className="flex flex-wrap items-center gap-3 border-b border-iusia-line bg-iusia-surface/60 px-4 py-3">
+          {toolbar}
+        </div>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Métrica en línea. Alternativa a convertir cada número en una tarjeta: una fila
+ * de tarjetas idénticas es el layout por defecto de un panel de administración, no
+ * una composición. Aquí las cifras comparten una sola superficie y se separan con
+ * un trazo, que es lo que hace legible una lectura comparativa.
+ *
+ * Deliberadamente contenida: es un resumen que precede al contenido, no la portada
+ * de la página. Cifras a 22px y no a 40 — con carteras pequeñas, un número gigante
+ * anunciando "2" convierte el resumen en decoración.
+ *
+ * Un cero nunca se pinta con color de alarma. Rojo significa "hay algo que atender";
+ * un `0` rojo en "Riesgo alto" dice exactamente lo contrario de lo que ocurre.
+ */
+export function MetricRail({
+  items,
+  onSelect,
+}: {
+  items: ReadonlyArray<{
+    id: string;
+    label: string;
+    value: string;
+    tone?: "navy" | "warning" | "critical" | "success" | "gold";
+    hint?: string;
+  }>;
+  onSelect?: (id: string) => void;
+}) {
+  const valueColor: Record<string, string> = {
+    navy: "text-iusia-navy",
+    warning: "text-iusia-warning-text",
+    critical: "text-iusia-critical",
+    success: "text-iusia-success-text",
+    gold: "text-iusia-gold-text",
+  };
+  return (
+    <div className="grid grid-cols-2 divide-iusia-line overflow-hidden rounded-[12px] border border-iusia-line bg-iusia-paper shadow-[0_1px_2px_rgba(11,29,58,0.04)] sm:grid-cols-4 sm:divide-x">
+      {items.map((m) => {
+        const empty = m.value === "0";
+        const body = (
+          <>
+            <span className="block text-[11.5px] font-medium uppercase tracking-[0.07em] text-iusia-mist-text">
+              {m.label}
+            </span>
+            <span className="mt-1 flex items-baseline gap-2">
+              <span
+                className={clsx(
+                  "text-[22px] font-semibold leading-none tnum",
+                  empty ? "text-iusia-mist-text" : valueColor[m.tone ?? "navy"],
+                )}
+              >
+                {m.value}
+              </span>
+              {m.hint ? (
+                <span className="text-[12px] text-iusia-mist-text">{m.hint}</span>
+              ) : null}
+            </span>
+          </>
+        );
+        return onSelect ? (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => onSelect(m.id)}
+            className="border-b border-iusia-line px-4 py-2.5 text-left transition-colors hover:bg-iusia-surface sm:border-b-0"
+          >
+            {body}
+          </button>
+        ) : (
+          <div key={m.id} className="border-b border-iusia-line px-4 py-2.5 sm:border-b-0">
+            {body}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Etiqueta de sección: estructura sin convertir todo en tarjeta (§18). */
+export function SectionLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="mb-2.5 flex items-baseline justify-between gap-3">
+      <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-iusia-mist-text">
+        {children}
+      </h2>
+      {action}
+    </div>
   );
 }

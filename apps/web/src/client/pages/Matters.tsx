@@ -3,19 +3,23 @@ import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
-  Card,
   Drawer,
   Field,
   Input,
-  MatterStatusChip,
+  MetricRail,
   PageHeader,
   Select,
   Skeleton,
   StateBlock,
   StatusChip,
   Textarea,
+  Workspace,
+  materialityTerm,
+  matterStatusTerm,
+  practiceAreaLabel,
+  riskTerm,
 } from "@iusia/ui";
-import { api, ApiError } from "../api.js";
+import { api, ApiError, type MatterSummary } from "../api.js";
 
 const PRACTICE_AREAS = [
   "CIVIL", "COMERCIAL_CONTRACTUAL", "SOCIETARIO_MA", "LABORAL", "TRIBUTARIO",
@@ -28,6 +32,23 @@ const MATERIALITY_HELP: Record<string, string> = {
   MATERIAL: "Ruta estándar: especialistas, estrategia y auditoría de citas.",
   HIGH_STAKES: "Aprobación humana en gates de estrategia e integridad.",
 };
+
+/** Un expediente sin movimiento en 21 días es una señal de cartera, no de caso. */
+const INACTIVE_DAYS = 21;
+const ACTIVE_STATUSES = new Set(["INTAKE", "ACTIVE", "WAITING_CLIENT", "IN_REVIEW", "ON_HOLD"]);
+
+function daysSince(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+}
+
+function relativeDays(iso: string): string {
+  const d = daysSince(iso);
+  if (d <= 0) return "hoy";
+  if (d === 1) return "ayer";
+  if (d < 30) return `hace ${d} d`;
+  const months = Math.floor(d / 30);
+  return months === 1 ? "hace 1 mes" : `hace ${months} meses`;
+}
 
 export function Matters() {
   const queryClient = useQueryClient();
@@ -47,30 +68,75 @@ export function Matters() {
     );
   }, [matters.data, filter]);
 
+  const all = matters.data?.matters ?? [];
+
+  // Resumen de cartera. Sólo cifras derivadas de expedientes reales; si un dato no
+  // existe en el modelo, no se inventa una tarjeta para rellenar la fila.
+  const summary = useMemo(
+    () => [
+      {
+        id: "activos",
+        label: "Activos",
+        value: String(all.filter((m) => ACTIVE_STATUSES.has(m.status)).length),
+        tone: "navy" as const,
+      },
+      {
+        id: "criticos",
+        label: "Riesgo alto",
+        value: String(all.filter((m) => m.riskLevel === "HIGH" || m.riskLevel === "CRITICAL").length),
+        tone: "critical" as const,
+      },
+      {
+        id: "criticidad",
+        label: "Alta criticidad",
+        value: String(all.filter((m) => m.materiality === "HIGH_STAKES").length),
+        tone: "gold" as const,
+      },
+      {
+        id: "detenidos",
+        label: "Sin actividad",
+        value: String(
+          all.filter((m) => ACTIVE_STATUSES.has(m.status) && daysSince(m.updatedAt) >= INACTIVE_DAYS)
+            .length,
+        ),
+        hint: `${INACTIVE_DAYS} días o más`,
+        tone: "warning" as const,
+      },
+    ],
+    [all],
+  );
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex min-h-[calc(100vh-118px)] flex-col gap-4">
       <PageHeader
-        title="Casos"
+        title="Cartera de casos"
         description={
           matters.data?.scope === "FIRM"
-            ? "Cartera completa de la firma (acceso de dirección, auditado)."
-            : "Expedientes asignados a ti."
+            ? "Todos los expedientes de la firma. Tu acceso de dirección queda auditado."
+            : "Los expedientes que tienes asignados."
         }
         actions={<Button onClick={() => setOpen(true)}>Nuevo expediente</Button>}
       />
 
-      <Card>
-        <div className="flex items-center gap-3 border-b border-iusia-mist/25 px-5 py-3">
-          <Input
-            placeholder="Filtrar por asunto, cliente o referencia…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="h-9 max-w-sm"
-          />
-          <span className="ml-auto text-[13px] text-iusia-mist-text tnum">
-            {rows.length} expediente{rows.length === 1 ? "" : "s"}
-          </span>
-        </div>
+      {all.length > 0 ? <MetricRail items={summary} /> : null}
+
+      <Workspace
+        className="flex min-h-0 flex-1 flex-col"
+        toolbar={
+          <>
+            <Input
+              placeholder="Buscar por asunto, cliente o referencia…"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              aria-label="Buscar expedientes"
+              className="h-8 w-full max-w-xs text-[13.5px]"
+            />
+            <span className="ml-auto text-[12.5px] text-iusia-mist-text tnum">
+              {rows.length} de {all.length}
+            </span>
+          </>
+        }
+      >
 
         {matters.isLoading ? (
           <div className="space-y-2 p-5">
@@ -85,46 +151,27 @@ export function Matters() {
             hint={filter ? "Ajusta el filtro." : "Crea uno o pide que te asignen a un caso."}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left">
-              <thead>
-                <tr className="border-b border-iusia-mist/25 text-[12.5px] font-medium text-iusia-mist-text">
-                  <th className="px-5 py-2.5">Referencia</th>
-                  <th className="px-5 py-2.5">Asunto</th>
-                  <th className="px-5 py-2.5">Cliente</th>
-                  <th className="px-5 py-2.5">Materialidad</th>
-                  <th className="px-5 py-2.5">Estado</th>
+          <div className="min-h-0 flex-1 overflow-auto">
+            <table className="w-full min-w-[880px] text-left">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-iusia-line-strong bg-iusia-paper text-[11.5px] font-semibold uppercase tracking-[0.06em] text-iusia-mist-text">
+                  <th className="py-2 pl-5 pr-3 font-semibold">Asunto</th>
+                  <th className="px-3 py-2 font-semibold">Cliente</th>
+                  <th className="px-3 py-2 font-semibold">Estado</th>
+                  <th className="px-3 py-2 font-semibold">Criticidad</th>
+                  <th className="px-3 py-2 font-semibold">Riesgo</th>
+                  <th className="py-2 pl-3 pr-5 text-right font-semibold">Actividad</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-iusia-mist/15">
+              <tbody className="divide-y divide-iusia-line">
                 {rows.map((m) => (
-                  <tr key={m.id} className="group transition-colors hover:bg-iusia-surface">
-                    <td className="px-5 py-3 text-[13px] tabular-nums text-iusia-mist-text">{m.reference}</td>
-                    <td className="px-5 py-3">
-                      <Link
-                        to={`/casos/${m.id}`}
-                        className="text-[14.5px] font-medium text-iusia-carbon group-hover:text-iusia-action"
-                      >
-                        {m.title}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3 text-[14px] text-iusia-carbon/85">{m.clientName}</td>
-                    <td className="px-5 py-3">
-                      <StatusChip
-                        label={m.materiality}
-                        tone={m.materiality === "HIGH_STAKES" ? "warning" : "neutral"}
-                      />
-                    </td>
-                    <td className="px-5 py-3">
-                      <MatterStatusChip status={m.status} />
-                    </td>
-                  </tr>
+                  <MatterRow key={m.id} matter={m} />
                 ))}
               </tbody>
             </table>
           </div>
         )}
-      </Card>
+      </Workspace>
 
       <Drawer open={open} onClose={() => setOpen(false)} title="Nuevo expediente" width={520}>
         <NewMatterForm
@@ -135,6 +182,68 @@ export function Matters() {
         />
       </Drawer>
     </div>
+  );
+}
+
+/**
+ * Fila de cartera. La referencia acompaña al asunto en vez de ocupar su propia
+ * columna: nadie busca un expediente por su código, pero sí lo necesita a la vista
+ * para citarlo. Eso libera ancho para lo que sí se compara entre casos —estado,
+ * criticidad, riesgo y cuándo se movió por última vez.
+ */
+function MatterRow({ matter: m }: { matter: MatterSummary }) {
+  const status = matterStatusTerm(m.status);
+  const materiality = materialityTerm(m.materiality);
+  const risk = riskTerm(m.riskLevel);
+  const stale = ACTIVE_STATUSES.has(m.status) && daysSince(m.updatedAt) >= INACTIVE_DAYS;
+
+  return (
+    <tr className="group transition-colors hover:bg-iusia-surface/70">
+      <td className="py-2.5 pl-5 pr-3">
+        <Link to={`/casos/${m.id}`} className="block">
+          <span className="block truncate text-[14px] font-medium text-iusia-navy group-hover:text-iusia-action">
+            {m.title}
+          </span>
+          <span className="mt-0.5 flex items-center gap-2 text-[12px] text-iusia-mist-text">
+            <span className="tnum">{m.reference}</span>
+            {m.practiceAreas[0] ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="truncate">{practiceAreaLabel(m.practiceAreas[0])}</span>
+              </>
+            ) : null}
+          </span>
+        </Link>
+      </td>
+      <td className="px-3 py-2.5 text-[13.5px] text-iusia-carbon">
+        <span className="block max-w-[240px] truncate">{m.clientName}</span>
+      </td>
+      <td className="px-3 py-2.5">
+        <StatusChip label={status.label} tone={status.tone} title={status.hint} />
+      </td>
+      <td className="px-3 py-2.5">
+        <StatusChip label={materiality.label} tone={materiality.tone} title={materiality.hint} />
+      </td>
+      <td className="px-3 py-2.5">
+        {/* El riesgo sin metodología registrada se muestra como ausencia, no como
+            un indicador que el abogado no puede auditar. */}
+        {m.riskLevel === "UNASSESSED" || !m.riskRationale ? (
+          <span className="text-[12.5px] text-iusia-mist-text">—</span>
+        ) : (
+          <StatusChip label={risk.label} tone={risk.tone} title={m.riskRationale} dot />
+        )}
+      </td>
+      <td className="py-2.5 pl-3 pr-5 text-right">
+        <span
+          className={
+            "text-[12.5px] tnum " + (stale ? "font-medium text-iusia-warning-text" : "text-iusia-mist-text")
+          }
+          title={new Date(m.updatedAt).toLocaleString("es-CO")}
+        >
+          {relativeDays(m.updatedAt)}
+        </span>
+      </td>
+    </tr>
   );
 }
 
@@ -180,17 +289,19 @@ function NewMatterForm({ onCreated }: { onCreated: () => void }) {
           <Select value={area} onChange={(e) => setArea(e.target.value)}>
             {PRACTICE_AREAS.map((a) => (
               <option key={a} value={a}>
-                {a.replaceAll("_", " ")}
+                {practiceAreaLabel(a)}
               </option>
             ))}
           </Select>
         </Field>
       </div>
-      <Field label="Materialidad" hint={MATERIALITY_HELP[materiality]}>
+      {/* La materialidad gobierna cuántos especialistas intervienen y qué gates son
+          obligatorios: se elige con su consecuencia a la vista, no con su enum. */}
+      <Field label="Criticidad del encargo" hint={MATERIALITY_HELP[materiality]}>
         <Select value={materiality} onChange={(e) => setMateriality(e.target.value)}>
           {Object.keys(MATERIALITY_HELP).map((m) => (
             <option key={m} value={m}>
-              {m}
+              {materialityTerm(m).label}
             </option>
           ))}
         </Select>

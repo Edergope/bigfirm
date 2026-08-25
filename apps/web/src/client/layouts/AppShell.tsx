@@ -66,13 +66,13 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen">
-      <aside className="fixed inset-y-0 left-0 z-40 flex w-[64px] flex-col border-r border-black/10 bg-iusia-navy text-white/85 lg:w-[236px]">
-        <div className="px-4 pb-5 pt-6 lg:px-6">
-          <p className="text-[19px] font-bold tracking-[0.18em] text-white">
+      <aside className="on-navy fixed inset-y-0 left-0 z-40 flex w-[60px] flex-col bg-iusia-navy text-white/85 lg:w-[212px]">
+        <div className="px-4 pb-5 pt-5 lg:px-5">
+          <p className="text-[16px] font-semibold tracking-[0.2em] text-white">
             <span className="lg:hidden">IA</span>
             <span className="hidden lg:inline">IUSIA</span>
           </p>
-          <p className="mt-1 hidden text-[10.5px] font-medium tracking-[0.14em] text-white/55 lg:block">
+          <p className="mt-1 hidden whitespace-nowrap text-[8.5px] font-medium tracking-[0.09em] text-white/40 lg:block">
             INTELLIGENCE · LAW · ADVANTAGE
           </p>
         </div>
@@ -83,11 +83,11 @@ export function AppShell() {
           {controlsSystem ? <NavGroup label="Sistema" items={SYSTEM_NAV} /> : null}
         </nav>
 
-        <div className="border-t border-white/10 px-3 py-4 lg:px-4">
-          <p className="hidden truncate text-[14px] font-medium text-white lg:block">
+        <div className="on-navy border-t border-white/[0.08] px-3 py-3.5 lg:px-4">
+          <p className="hidden truncate text-[13.5px] font-medium text-white/90 lg:block">
             {me.data?.user.name ?? "…"}
           </p>
-          <p className="mt-0.5 hidden text-[12px] text-white/55 lg:block">
+          <p className="mt-0.5 hidden text-[11.5px] text-white/45 lg:block">
             {firmRoleLabel(role ?? "")}
             {controlsSystem ? " · Sistema" : ""}
           </p>
@@ -103,8 +103,8 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="flex min-h-screen flex-col pl-[64px] lg:pl-[236px]">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-iusia-mist/30 bg-iusia-paper/85 px-4 backdrop-blur lg:px-8">
+      <div className="flex min-h-screen flex-col pl-[60px] lg:pl-[212px]">
+        <header className="sticky top-0 z-30 flex h-[58px] items-center gap-4 border-b border-iusia-line bg-iusia-canvas/85 px-4 backdrop-blur-md lg:px-7">
           {/* Búsqueda global prevista por el Design System pero aún no implementada:
               se muestra como control honesto y deshabilitado, no como affordance falso. */}
           <button
@@ -151,7 +151,7 @@ export function AppShell() {
             {me.data ? <CreditBadge balance={me.data.credits} /> : null}
           </div>
         </header>
-        <main className="mx-auto w-full max-w-[1360px] flex-1 px-4 py-6 lg:px-8 lg:py-7">
+        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-5 lg:px-7 lg:py-6">
           <Outlet />
           <AnalysisToasts />
         </main>
@@ -182,19 +182,26 @@ function NavGroup({ label, items }: { label?: string; items: NavItem[] }) {
           title={itemLabel}
           className={({ isActive }) =>
             clsx(
-              "mb-0.5 flex items-center gap-3 rounded-[10px] px-3 py-2 text-[14px] transition-colors max-lg:justify-center max-lg:px-2",
+              "relative mb-px flex items-center gap-3 rounded-[8px] px-3 py-[7px] text-[13.5px] transition-colors max-lg:justify-center max-lg:px-2",
               isActive
-                ? "bg-white/[0.10] font-medium text-white"
-                : "text-white/65 hover:bg-white/[0.05] hover:text-white",
+                ? "bg-white/[0.07] font-medium text-white"
+                : "text-white/60 hover:bg-white/[0.04] hover:text-white/90",
             )
           }
         >
           {({ isActive }) => (
             <>
+              {/* Línea de acento en el borde: señala sin encender el bloque entero. */}
+              {isActive ? (
+                <span
+                  aria-hidden
+                  className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-iusia-intel"
+                />
+              ) : null}
               <Icon
-                size={17}
-                strokeWidth={isActive ? 2.2 : 1.8}
-                className={isActive ? "text-iusia-intel" : ""}
+                size={16}
+                strokeWidth={isActive ? 2 : 1.6}
+                className={clsx("shrink-0", isActive ? "text-iusia-intel" : "text-white/45")}
                 aria-hidden
               />
               <span className="sr-only lg:not-sr-only">{itemLabel}</span>

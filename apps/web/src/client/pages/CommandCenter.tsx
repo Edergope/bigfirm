@@ -5,11 +5,12 @@ import {
   Card,
   CardHeader,
   Drawer,
-  KpiTile,
   PageHeader,
+  MetricRail,
   Skeleton,
   StateBlock,
   StatusChip,
+  matterStatusTerm,
 } from "@iusia/ui";
 import { AlertTriangle, CalendarClock, Clock, Scale } from "lucide-react";
 import { api, type MeResponse } from "../api.js";
@@ -23,8 +24,11 @@ import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
  * abre el detalle que lo sustenta. No se muestra ninguna métrica que el sistema no
  * pueda respaldar con datos reales.
  */
+/** Listas que sustentan cada indicador; abrir una es abrir sus registros reales. */
+type Drill = null | "matters" | "risk" | "overdue" | "upcoming" | "inactive";
+
 export function CommandCenter({ me }: { me: MeResponse }) {
-  const [drill, setDrill] = useState<null | "matters" | "risk" | "overdue" | "upcoming" | "inactive">(null);
+  const [drill, setDrill] = useState<Drill>(null);
   const firm = true;
 
   const health = useQuery({ queryKey: ["intel", "health", firm], queryFn: () => api.intelligence.caseHealth(firm) });
@@ -57,47 +61,53 @@ export function CommandCenter({ me }: { me: MeResponse }) {
         actions={<StatusChip label="Alcance: firma" tone="info" dot />}
       />
 
-      {/* Indicadores accionables: cada uno abre la lista que lo sustenta. */}
+      {/* Indicadores accionables: cada uno abre la lista que lo sustenta. Comparten
+          una sola superficie porque se leen comparándolos entre sí. */}
       {loading ? (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[92px]" />)}
-        </div>
+        <Skeleton className="h-[68px]" />
       ) : (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <DrillKpi
-            label="Expedientes activos"
-            value={health.data?.total ?? 0}
-            onOpen={() => setDrill("matters")}
-          />
-          <DrillKpi
-            label="Riesgo alto o crítico"
-            value={health.data?.at_risk ?? 0}
-            tone={(health.data?.at_risk ?? 0) > 0 ? "critical" : "navy"}
-            onOpen={() => setDrill("risk")}
-          />
-          <DrillKpi
-            label="Términos vencidos"
-            value={overdueCount}
-            tone={overdueCount > 0 ? "critical" : "navy"}
-            onOpen={() => setDrill("overdue")}
-          />
-          <DrillKpi
-            label="Vencen en 15 días"
-            value={upcomingCount}
-            tone={upcomingCount > 0 ? "warning" : "navy"}
-            onOpen={() => setDrill("upcoming")}
-          />
-        </div>
+        <MetricRail
+          onSelect={(id) => setDrill(id as Drill)}
+          items={[
+            { id: "matters", label: "Activos", value: String(health.data?.total ?? 0) },
+            {
+              id: "risk",
+              label: "Riesgo alto",
+              value: String(health.data?.at_risk ?? 0),
+              tone: "critical",
+            },
+            { id: "overdue", label: "Vencidos", value: String(overdueCount), tone: "critical" },
+            {
+              id: "upcoming",
+              label: "Vencen pronto",
+              value: String(upcomingCount),
+              hint: "15 días",
+              tone: "warning",
+            },
+          ]}
+        />
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <div className="flex flex-col gap-5 lg:col-span-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="flex flex-col gap-4 lg:col-span-2">
           {/* IUSIA recomienda: derivación determinista de datos reales, sin LLM. */}
-          <Card>
-            <CardHeader
-              title="IUSIA recomienda revisar"
-              subtitle="Derivado de los términos, riesgos y actividad reales del expediente"
-            />
+          <Card className="ring-1 ring-iusia-navy/[0.06]">
+            <header className="flex items-start justify-between gap-3 border-b border-iusia-line bg-gradient-to-b from-iusia-surface/70 to-transparent px-5 py-4">
+              <div className="min-w-0">
+                <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-iusia-navy">
+                  Requiere tu decisión
+                </h2>
+                <p className="mt-0.5 text-[13px] text-iusia-mist-text">
+                  Derivado de los términos, riesgos y actividad reales de la cartera
+                </p>
+              </div>
+              {recommendations.length > 0 ? (
+                <StatusChip
+                  label={`${recommendations.length}`}
+                  tone={overdueCount > 0 || riskCount > 0 ? "critical" : "warning"}
+                />
+              ) : null}
+            </header>
             {recommendations.length === 0 ? (
               <StateBlock
                 kind="empty"
@@ -141,8 +151,8 @@ export function CommandCenter({ me }: { me: MeResponse }) {
                     const pct = Math.round((n / total) * 100);
                     return (
                       <li key={status} className="flex items-center gap-3">
-                        <span className="w-36 shrink-0 truncate text-[13.5px] text-iusia-carbon">
-                          {status}
+                        <span className="w-40 shrink-0 truncate text-[13.5px] text-iusia-carbon">
+                          {matterStatusTerm(status).label}
                         </span>
                         <span className="h-2 flex-1 overflow-hidden rounded-full bg-iusia-mist/20">
                           <span
@@ -150,7 +160,7 @@ export function CommandCenter({ me }: { me: MeResponse }) {
                             style={{ width: `${pct}%` }}
                           />
                         </span>
-                        <span className="w-14 shrink-0 text-right text-[13px] tabular-nums text-iusia-mist-text">
+                        <span className="w-20 shrink-0 whitespace-nowrap text-right text-[13px] tabular-nums text-iusia-mist-text">
                           {n} · {pct}%
                         </span>
                       </li>
@@ -214,8 +224,8 @@ export function CommandCenter({ me }: { me: MeResponse }) {
               <ul className="divide-y divide-iusia-mist/20">
                 {workload.data?.workload.slice(0, 6).map((w) => (
                   <li key={w.assignedTo ?? "sin"} className="flex items-center justify-between px-6 py-2.5">
-                    <span className="truncate font-mono text-[12px] text-iusia-mist-text">
-                      {w.assignedTo ?? "Sin asignar"}
+                    <span className="truncate text-[13.5px] text-iusia-carbon">
+                      {w.name ?? "Sin asignar"}
                     </span>
                     <span className="text-[13px] tabular-nums text-iusia-carbon">
                       {w.openTasks} abiertas
@@ -282,29 +292,6 @@ export function CommandCenter({ me }: { me: MeResponse }) {
   );
 }
 
-/** Indicador que abre su propio detalle. Un número sin salida no sirve para decidir. */
-function DrillKpi({
-  label,
-  value,
-  tone,
-  onOpen,
-}: {
-  label: string;
-  value: number;
-  tone?: "success" | "critical" | "navy" | "warning";
-  onOpen: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label={`${label}: ${value}. Ver detalle.`}
-      className="rounded-[12px] text-left transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iusia-action/50 active:scale-[0.99]"
-    >
-      <KpiTile label={label} value={String(value)} tone={tone} hint="Ver detalle" />
-    </button>
-  );
-}
 
 function MatterList({
   rows,

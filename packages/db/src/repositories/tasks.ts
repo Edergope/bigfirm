@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNotNull, lt, gte, inArray, sql } from "drizzle-or
 import { newId } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { tasks, matterMembers } from "../schema/iusia.js";
+import { user } from "../schema/auth.js";
 
 export interface CreateTaskInput {
   organizationId: string;
@@ -126,14 +127,21 @@ export class TaskRepository {
     return this.db.select().from(tasks).where(where).orderBy(asc(tasks.dueAt));
   }
 
-  /** Carga (conteo de tareas abiertas) por usuario asignado, en la firma. */
+  /**
+   * Carga (conteo de tareas abiertas) por persona, en la firma.
+   *
+   * Devuelve el nombre además del id: un panel de dirección que lista
+   * `Me9nmiaFFMnJ…  3 abiertas` no permite decidir nada sobre el equipo.
+   */
   async workloadByAssignee(organizationId: string) {
     return this.db
       .select({
         assignedTo: tasks.assignedTo,
+        name: user.name,
         openTasks: sql<number>`count(*)`,
       })
       .from(tasks)
+      .leftJoin(user, eq(tasks.assignedTo, user.id))
       .where(
         and(
           eq(tasks.organizationId, organizationId),
@@ -141,7 +149,7 @@ export class TaskRepository {
           sql`${tasks.status} NOT IN ('COMPLETADA','CANCELADA')`,
         ),
       )
-      .groupBy(tasks.assignedTo)
+      .groupBy(tasks.assignedTo, user.name)
       .orderBy(desc(sql`count(*)`));
   }
 

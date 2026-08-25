@@ -1,5 +1,6 @@
 import type { ExecutionStatus, RiskLevel } from "@iusia/domain";
 import { StatusChip } from "./primitives.js";
+import { analysisTerm, matterStatusTerm, riskTerm } from "./legal-terminology.js";
 import { colors } from "./tokens/index.js";
 
 /**
@@ -7,33 +8,18 @@ import { colors } from "./tokens/index.js";
  * que ninguna vista tenga que reinterpretarlas.
  */
 
-const MATTER_STATUS_LABELS: Record<string, { label: string; tone: string }> = {
-  INTAKE: { label: "En intake", tone: "info" },
-  ACTIVE: { label: "En curso", tone: "intel" },
-  WAITING_CLIENT: { label: "Espera cliente", tone: "warning" },
-  IN_REVIEW: { label: "En revisión", tone: "info" },
-  ON_HOLD: { label: "En pausa", tone: "warning" },
-  CLOSED: { label: "Cerrado", tone: "success" },
-  ARCHIVED: { label: "Archivado", tone: "neutral" },
-};
+/* Los rótulos viven en LEGAL_UI_TERMINOLOGY_MAP: una sola fuente para el idioma
+   del producto, en vez de una tabla por componente que se desincroniza. */
 
 export function MatterStatusChip({ status }: { status: string }) {
-  const s = MATTER_STATUS_LABELS[status] ?? { label: status, tone: "neutral" };
-  return <StatusChip label={s.label} tone={s.tone} />;
+  const t = matterStatusTerm(status);
+  return <StatusChip label={t.label} tone={t.tone} title={t.hint} />;
 }
 
 /**
  * Indicador de riesgo. Exige justificación: sin metodología no se pinta el nivel
  * (Design System §06 — "no generar riesgo ficticio").
  */
-const RISK_LABELS: Record<RiskLevel, { label: string; tone: string }> = {
-  LOW: { label: "Riesgo bajo", tone: "success" },
-  MEDIUM: { label: "Riesgo medio", tone: "warning" },
-  HIGH: { label: "Riesgo alto", tone: "critical" },
-  CRITICAL: { label: "Riesgo crítico", tone: "critical" },
-  UNASSESSED: { label: "Riesgo sin evaluar", tone: "neutral" },
-};
-
 export function RiskIndicator({
   level,
   rationale,
@@ -44,7 +30,7 @@ export function RiskIndicator({
   // Un nivel sin justificación se degrada a "sin evaluar" en vez de mostrar un
   // indicador que el usuario no puede auditar.
   const effective: RiskLevel = level !== "UNASSESSED" && !rationale ? "UNASSESSED" : level;
-  const r = RISK_LABELS[effective];
+  const r = riskTerm(effective);
   return (
     <div className="flex flex-col gap-1">
       <StatusChip label={r.label} tone={r.tone} />
@@ -69,18 +55,18 @@ export const EXECUTION_STATUS_PRESENTATION: Record<
   ExecutionStatus,
   { label: string; tone: string; color: string }
 > = {
-  PENDING: { label: "En cola", tone: "neutral", color: colors.mistText },
-  RUNNING: { label: "Ejecutando", tone: "intel", color: colors.intelText },
-  WAITING: { label: "En espera", tone: "info", color: colors.info },
-  BLOCKED: { label: "Bloqueado", tone: "warning", color: colors.warningText },
-  COMPLETED: { label: "Completado", tone: "success", color: colors.successText },
-  FAILED: { label: "Fallido", tone: "critical", color: colors.critical },
-  CANCELLED: { label: "Cancelado", tone: "neutral", color: colors.mistText },
+  PENDING: { label: analysisTerm("PENDING").label, tone: "neutral", color: colors.mistText },
+  RUNNING: { label: analysisTerm("RUNNING").label, tone: "intel", color: colors.intelText },
+  WAITING: { label: analysisTerm("WAITING").label, tone: "info", color: colors.info },
+  BLOCKED: { label: analysisTerm("BLOCKED").label, tone: "warning", color: colors.warningText },
+  COMPLETED: { label: analysisTerm("COMPLETED").label, tone: "success", color: colors.successText },
+  FAILED: { label: analysisTerm("FAILED").label, tone: "critical", color: colors.critical },
+  CANCELLED: { label: analysisTerm("CANCELLED").label, tone: "neutral", color: colors.mistText },
 };
 
 export function ExecutionStatusChip({ status }: { status: ExecutionStatus }) {
   const p = EXECUTION_STATUS_PRESENTATION[status];
-  return <StatusChip label={p.label} tone={p.tone} />;
+  return <StatusChip label={p.label} tone={p.tone} title={analysisTerm(status).hint} />;
 }
 
 export function CreditBadge({ balance }: { balance: number }) {

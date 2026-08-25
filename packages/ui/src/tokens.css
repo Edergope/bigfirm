@@ -20,6 +20,14 @@
   --color-iusia-mist-strong: #89919b;
   --color-iusia-surface: #f7f8fa;
   --color-iusia-paper: #ffffff;
+  /* Jerarquía de superficies (§17). El producto tenía dos niveles —fondo y tarjeta—
+     y por eso una tabla blanca sobre un fondo casi blanco se leía como un panel de
+     administración: nada contenía nada. `canvas` es el lienzo de la aplicación,
+     por debajo del workspace; `line` es el trazo estructural, más suave que `mist`,
+     que estaba haciendo de borde decorativo y de estructura a la vez. */
+  --color-iusia-canvas: #eef1f6;
+  --color-iusia-line: #e3e7ee;
+  --color-iusia-line-strong: #d3d9e3;
   /* Compañeros "-text" de intel/gold: mismo tono, oscurecido a ≥4.5:1 sobre
      paper/surface y su propio tinte /15. Formaliza como token único un patrón que
      ya existía hardcoded ad-hoc (StatusChip, Strategy Room, CreditBadge), pero sin
@@ -55,6 +63,9 @@
   --shadow-hairline: 0 1px 2px rgba(11, 29, 58, 0.06);
   --shadow-raised: 0 4px 16px -6px rgba(11, 29, 58, 0.16);
   --shadow-overlay: 0 24px 60px -20px rgba(11, 29, 58, 0.35);
+  /* Profundidad del workspace: desplazamiento real y difuminado suave, nunca un
+     halo de color a offset cero. */
+  --shadow-panel: 0 1px 2px rgba(11, 29, 58, 0.05), 0 8px 24px -14px rgba(11, 29, 58, 0.22);
 
   /* Estructura del shell */
   --iusia-sidebar-width: 236px;
@@ -66,7 +77,7 @@
 }
 
 body {
-  background: var(--color-iusia-surface);
+  background: var(--color-iusia-canvas);
   color: var(--color-iusia-carbon);
   font-family: var(--font-sans);
   font-size: 15px;
@@ -102,4 +113,47 @@ body {
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-iusia-mist) transparent;
+}
+
+/* Superficies que pinta el navegador y no pertenecen a ningún sistema de diseño:
+   selección, cursor, barras y anillo de foco. Vestirlas con la paleta es la señal
+   más barata de que el producto se construyó en vez de ensamblarse. */
+::selection {
+  background: color-mix(in srgb, var(--color-iusia-action) 18%, transparent);
+  color: var(--color-iusia-navy);
+}
+
+:root {
+  accent-color: var(--color-iusia-action);
+  caret-color: var(--color-iusia-action);
+  scrollbar-color: var(--color-iusia-line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-iusia-line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-iusia-mist);
+  background-clip: content-box;
+}
+
+/* Un único anillo de foco en todo el producto, visible sobre claro y sobre navy. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-iusia-action);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.on-navy :where(a, button):focus-visible {
+  outline-color: var(--color-iusia-intel);
 }

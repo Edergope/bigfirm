@@ -272,6 +272,16 @@ export const api = {
       body: JSON.stringify({ user_id: userId }),
     }),
 
+  matterAccess: () =>
+    request<{
+      matters: Array<{
+        matter_id: string;
+        reference: string;
+        title: string;
+        members: Array<{ user_id: string; name: string; email: string; role: string }>;
+      }>;
+    }>("/api/admin/matter-access"),
+
   systemExecutions: () =>
     request<{
       executions: Array<{
@@ -312,7 +322,7 @@ export const api = {
         `/api/intelligence/case-risks${firm ? "?scope=firm" : ""}`,
       ),
     workload: () =>
-      request<{ workload: Array<{ assignedTo: string | null; openTasks: number }> }>(
+      request<{ workload: Array<{ assignedTo: string | null; name: string | null; openTasks: number }> }>(
         "/api/intelligence/workload",
       ),
     inactive: (firm: boolean) =>

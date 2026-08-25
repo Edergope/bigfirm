@@ -196,7 +196,7 @@ export function AnalysisModal({
         tabIndex={-1}
         className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[14px] bg-iusia-paper shadow-[0_24px_64px_-12px_rgba(11,29,58,0.45)] focus:outline-none"
       >
-        <header className="flex items-start justify-between gap-4 border-b border-iusia-mist/25 px-6 py-4">
+        <header className="flex items-start justify-between gap-4 px-6 py-4">
           <div>
             <p className="text-[15.5px] font-semibold text-iusia-navy">
               {finished ? ending.title : "IUSIA está analizando el expediente"}
@@ -217,7 +217,7 @@ export function AnalysisModal({
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          <div className="bg-[linear-gradient(180deg,#FBFCFE,#F4F6FA)] px-6 py-4">
+          <div className="border-b border-iusia-line bg-[radial-gradient(120%_90%_at_50%_0%,#F6F8FC_0%,#EDF1F7_100%)] px-6 py-5">
             <Suspense fallback={<Skeleton className="h-[240px]" />}>
               <Constellation
                 nodes={constellation.nodes}
@@ -228,7 +228,7 @@ export function AnalysisModal({
             </Suspense>
           </div>
 
-          <ol className="flex min-h-[168px] flex-col gap-2.5 px-6 py-5">
+          <ol className="flex min-h-[168px] flex-col gap-2 px-6 py-4">
             {events.isLoading && stages.length === 0 ? (
               <Skeleton className="h-24" />
             ) : (
@@ -265,7 +265,7 @@ export function AnalysisModal({
           ) : null}
         </div>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-iusia-mist/25 px-6 py-4">
+        <footer className="flex items-center justify-between gap-3 border-t border-iusia-line bg-iusia-surface/50 px-6 py-3.5">
           {/* Acción destructiva a la izquierda y con nombre explícito: no se confunde
               con cerrar la ventana, que está arriba y no interrumpe nada. */}
           {!finished ? (

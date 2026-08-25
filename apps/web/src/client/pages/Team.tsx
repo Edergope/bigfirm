@@ -14,7 +14,13 @@ import {
   ConfirmAction,
   FIRM_ROLE_PRESENTATION,
   firmRoleLabel,
+  SectionLabel,
+  Workspace,
+  invitationTerm,
+  matterActionLabel,
+  matterRoleTerm,
 } from "@iusia/ui";
+import { MATTER_ROLES, matterActionsFor, type MatterRole } from "@iusia/domain";
 import { FIRM_ROLES } from "@iusia/domain";
 import { api, ApiError } from "../api.js";
 import { authClient } from "../auth-client.js";
@@ -38,8 +44,17 @@ function RoleOptions() {
   );
 }
 
+const TEAM_TABS = [
+  { id: "miembros", label: "Miembros" },
+  { id: "invitaciones", label: "Invitaciones" },
+  { id: "permisos", label: "Roles y permisos" },
+  { id: "acceso", label: "Acceso a casos" },
+] as const;
+type TeamTab = (typeof TEAM_TABS)[number]["id"];
+
 export function Team() {
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<TeamTab>("miembros");
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   const members = useQuery({ queryKey: ["firm-members"], queryFn: api.firmMembers });
   const invitations = useQuery({ queryKey: ["firm-invitations"], queryFn: api.firmInvitations });
@@ -129,9 +144,44 @@ export function Team() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Equipo"
-        description="Miembros de la firma, invitaciones y roles. El acceso a cada expediente se administra por caso."
+        description="Quién pertenece a la firma, qué puede hacer y a qué expedientes accede."
       />
 
+      <div role="tablist" aria-label="Administración del equipo" className="flex gap-0.5 border-b border-iusia-line">
+        {TEAM_TABS.map((t) => {
+          const selected = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setTab(t.id)}
+              className={
+                selected
+                  ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[13.5px] font-medium text-iusia-navy"
+                  : "px-3.5 py-2.5 text-[13.5px] text-iusia-mist-text transition-colors hover:text-iusia-carbon"
+              }
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "permisos" ? <PermissionModel /> : null}
+      {tab === "acceso" ? <MatterAccess /> : null}
+
+      <div className={tab === "invitaciones" ? "" : "hidden"}>
+        <InvitationsPanel
+          pending={pending}
+          historic={historic}
+          onCancel={(id) => cancelInvite.mutate(id)}
+          cancelling={cancelInvite.isPending}
+        />
+      </div>
+
+      <div className={tab === "miembros" ? "flex flex-col gap-5" : "hidden"}>
       <Card>
         <CardHeader title="Invitar a un miembro" subtitle="El acceso a IUSIA es sólo por invitación." />
         <form
@@ -234,9 +284,29 @@ export function Team() {
         </ul>
       </Card>
 
+      </div>
+
+    </div>
+  );
+}
+
+/** Invitaciones: quién está pendiente de aceptar y qué pasó con las anteriores. */
+function InvitationsPanel({
+  pending,
+  historic,
+  onCancel,
+  cancelling,
+}: {
+  pending: Array<{ id: string; email: string; role: string | null; expires_at: string }>;
+  historic: Array<{ id: string; email: string; status: string; created_at: string }>;
+  onCancel: (id: string) => void;
+  cancelling: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-5">
       <Card>
         <CardHeader
-          title="Invitaciones pendientes"
+          title="Pendientes de aceptar"
           subtitle={
             pending.length === 0
               ? undefined
@@ -244,11 +314,15 @@ export function Team() {
           }
         />
         {pending.length === 0 ? (
-          <StateBlock kind="empty" title="Sin invitaciones pendientes" />
+          <StateBlock
+            kind="empty"
+            title="Sin invitaciones pendientes"
+            hint="Invita desde la pestaña Miembros."
+          />
         ) : (
-          <ul className="divide-y divide-iusia-mist/20">
+          <ul className="divide-y divide-iusia-line">
             {pending.map((i) => (
-              <li key={i.id} className="flex items-center justify-between px-6 py-3">
+              <li key={i.id} className="flex items-center justify-between gap-3 px-5 py-3">
                 <span className="min-w-0">
                   <span className="block truncate text-[14px] text-iusia-carbon">{i.email}</span>
                   <span className="block text-[12.5px] text-iusia-mist-text">
@@ -260,35 +334,159 @@ export function Team() {
                     })}
                   </span>
                 </span>
-                <span className="flex items-center gap-3">
+                <span className="flex shrink-0 items-center gap-3">
                   <StatusChip label="Pendiente" tone="info" dot />
                   <ConfirmAction
                     label="Cancelar"
                     confirmLabel="Sí, cancelar"
-                    pending={cancelInvite.isPending}
-                    onConfirm={() => cancelInvite.mutate(i.id)}
+                    pending={cancelling}
+                    onConfirm={() => onCancel(i.id)}
                   />
                 </span>
               </li>
             ))}
           </ul>
         )}
-        {historic.length > 0 ? (
-          <ul className="divide-y divide-iusia-mist/15 border-t border-iusia-mist/20">
-            {historic.map((i) => (
-              <li key={i.id} className="flex items-center justify-between px-6 py-2.5">
-                <span className="truncate text-[13px] text-iusia-mist-text">
-                  {i.email} · {new Date(i.created_at).toLocaleDateString("es-CO")}
+      </Card>
+
+      {historic.length > 0 ? (
+        <div>
+          <SectionLabel>Historial</SectionLabel>
+          <Card>
+            <ul className="divide-y divide-iusia-line">
+              {historic.map((i) => {
+                const t = invitationTerm(i.status);
+                return (
+                  <li key={i.id} className="flex items-center justify-between gap-3 px-5 py-2.5">
+                    <span className="truncate text-[13px] text-iusia-mist-text">
+                      {i.email} · {new Date(i.created_at).toLocaleDateString("es-CO")}
+                    </span>
+                    <StatusChip label={t.label} tone={t.tone} />
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Modelo de permisos, leído del control de acceso real.
+ *
+ * Las capacidades NO se redactan aquí: se derivan de `matterActionsFor`, la misma
+ * función que el servidor evalúa para autorizar. Si alguien cambia el modelo, esta
+ * pantalla cambia con él; si se inventara una lista paralela, prometería accesos
+ * que el servidor negaría.
+ *
+ * No hay editor granular porque el modelo es por rol: mostrar interruptores por
+ * capacidad simularía un control que no existe.
+ */
+function PermissionModel() {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-[12px] border border-iusia-line bg-iusia-paper px-5 py-4">
+        <p className="text-[14px] text-iusia-carbon">
+          Los permisos se conceden por <strong className="font-semibold">rol</strong>, no
+          capacidad por capacidad.
+        </p>
+        <p className="mt-1 text-[13px] text-iusia-mist-text">
+          Pertenecer a la firma no abre ningún expediente: el acceso se concede caso por
+          caso, y dentro de cada caso el rol determina qué puede hacer esa persona.
+        </p>
+      </div>
+
+      <div>
+        <SectionLabel>Rol en la firma</SectionLabel>
+        <Card>
+          <ul className="divide-y divide-iusia-line">
+            {Object.entries(FIRM_ROLE_PRESENTATION).map(([role, p]) => (
+              <li key={role} className="flex items-start gap-4 px-5 py-3">
+                <span className="w-40 shrink-0 text-[14px] font-medium text-iusia-navy">
+                  {p.label}
                 </span>
-                <StatusChip
-                  label={i.status === "accepted" ? "Aceptada" : i.status === "expired" ? "Caducada" : "Cancelada"}
-                  tone={i.status === "accepted" ? "success" : "neutral"}
-                />
+                <span className="text-[13.5px] text-iusia-mist-text">{p.hint}</span>
               </li>
             ))}
           </ul>
-        ) : null}
-      </Card>
+        </Card>
+      </div>
+
+      <div>
+        <SectionLabel>Rol dentro de un expediente</SectionLabel>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {MATTER_ROLES.map((role) => {
+            const t = matterRoleTerm(role);
+            const actions = matterActionsFor(role as MatterRole);
+            return (
+              <Card key={role}>
+                <CardHeader title={t.label} subtitle={t.hint} />
+                <ul className="flex flex-col gap-1.5 px-5 py-4">
+                  {actions.map((a) => (
+                    <li key={a} className="flex items-start gap-2 text-[13.5px] text-iusia-carbon">
+                      <span aria-hidden className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-iusia-mist" />
+                      {matterActionLabel(a)}
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** Quién accede a qué expediente. Sólo lectura: el acceso se concede en el caso. */
+function MatterAccess() {
+  const access = useQuery({ queryKey: ["matter-access"], queryFn: api.matterAccess });
+
+  if (access.isLoading) return <Skeleton className="h-64" />;
+  const rows = access.data?.matters ?? [];
+  if (rows.length === 0) {
+    return (
+      <Card>
+        <StateBlock kind="empty" title="Sin expedientes" hint="Aún no hay casos en la firma." />
+      </Card>
+    );
+  }
+
+  return (
+    <Workspace>
+      <ul className="divide-y divide-iusia-line">
+        {rows.map((m) => (
+          <li key={m.matter_id} className="px-5 py-3.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0">
+                <span className="block truncate text-[14px] font-medium text-iusia-navy">
+                  {m.title}
+                </span>
+                <span className="block text-[12px] text-iusia-mist-text tnum">{m.reference}</span>
+              </span>
+              <span className="shrink-0 text-[12.5px] text-iusia-mist-text tnum">
+                {m.members.length} con acceso
+              </span>
+            </div>
+            {m.members.length > 0 ? (
+              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                {m.members.map((mem) => (
+                  <li key={mem.user_id} className="flex items-center gap-2 text-[13px]">
+                    <span className="text-iusia-carbon">{mem.name}</span>
+                    <StatusChip label={matterRoleTerm(mem.role).label} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1.5 text-[13px] text-iusia-mist-text">
+                Nadie tiene acceso todavía.
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Workspace>
   );
 }

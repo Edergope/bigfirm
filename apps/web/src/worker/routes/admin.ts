@@ -30,6 +30,39 @@ async function requireFirmAdmin(
 }
 
 /** Miembros de la firma con su rol. */
+/**
+ * Acceso a expedientes de toda la firma, para administración.
+ *
+ * Sólo lectura y sólo para quien ya administra la firma: no cambia el ACL, no
+ * concede nada y no expone expedientes fuera de la organización. Existe porque la
+ * dirección podía invitar personas pero no ver, en un solo lugar, a qué casos
+ * tenía acceso cada una — que es justo la pregunta que se hace al repartir trabajo.
+ */
+adminRoutes.get("/matter-access", async (c) => {
+  const { db, matters } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await requireFirmAdmin(c.get("ctx"), organizationId, userId);
+
+  // La administración de la firma ya está verificada arriba; este listado es
+  // exactamente el alcance de firma, en sólo lectura.
+  const list = await matters.listForUser(organizationId, userId, { includeAll: true });
+  const rows = await Promise.all(
+    list.map(async (m) => ({
+      matter_id: m.id,
+      reference: m.reference,
+      title: m.title,
+      members: (await matters.listMembers(m.id)).map((mem) => ({
+        user_id: mem.userId,
+        name: mem.name,
+        email: mem.email,
+        role: mem.role,
+      })),
+    })),
+  );
+  void db;
+  return c.json({ matters: rows });
+});
+
 adminRoutes.get("/members", async (c) => {
   const { db, authz } = c.get("ctx");
   const { organizationId, userId } = c.get("session");

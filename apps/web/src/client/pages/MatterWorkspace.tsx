@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams, Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -8,12 +8,12 @@ import {
   Field,
   Input,
   MatterStatusChip,
-  PageHeader,
   RiskIndicator,
   Skeleton,
   StateBlock,
   StatusChip,
 } from "@iusia/ui";
+import { materialityTerm, riskTerm } from "@iusia/ui";
 import type { RiskLevel } from "@iusia/domain";
 import { api, ApiError, type CaseBriefData, type MatterDetail } from "../api.js";
 import { authClient } from "../auth-client.js";
@@ -51,6 +51,18 @@ function tabCount(id: TabId, data: MatterDetail): number | null {
 }
 
 const TERMINAL_EXECUTION = new Set(["COMPLETED", "FAILED", "CANCELLED", "BLOCKED"]);
+
+/** Dato de cabecera: rótulo pequeño arriba, valor debajo. */
+function MatterFact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.07em] text-iusia-mist-text">
+        {label}
+      </dt>
+      <dd className="mt-1">{children}</dd>
+    </div>
+  );
+}
 
 /** El papel de cada persona EN ESTE expediente, en el idioma del despacho. */
 const MATTER_ROLE_LABELS: Record<string, string> = {
@@ -106,21 +118,59 @@ export function MatterWorkspace() {
   );
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader
-        eyebrow={<Link to="/casos" className="hover:underline">← Casos</Link>}
-        title={m.title}
-        description={`${m.reference} · ${m.clientName} · ${m.jurisdiction}`}
-        actions={
-          <>
-            <StatusChip
-              label={m.materiality}
-              tone={m.materiality === "HIGH_STAKES" ? "warning" : "neutral"}
-            />
-            <MatterStatusChip status={m.status} />
-          </>
-        }
-      />
+    <div className="flex flex-col gap-4">
+      <header className="rounded-[16px] border border-iusia-line bg-iusia-paper px-5 py-4 shadow-[0_1px_2px_rgba(11,29,58,0.05)]">
+        <Link
+          to="/casos"
+          className="text-[12.5px] text-iusia-mist-text transition-colors hover:text-iusia-action"
+        >
+          ← Cartera de casos
+        </Link>
+        <div className="mt-1.5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0">
+            <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.02em] text-iusia-navy">
+              {m.title}
+            </h1>
+            <p className="mt-1 text-[13.5px] text-iusia-mist-text">
+              <span className="tnum">{m.reference}</span>
+              <span aria-hidden className="px-1.5">·</span>
+              {m.clientName}
+              <span aria-hidden className="px-1.5">·</span>
+              {m.jurisdiction}
+            </p>
+          </div>
+          {/* Lo que decide cómo se trata este caso, junto y a la vista. */}
+          <dl className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <MatterFact label="Estado">
+              <MatterStatusChip status={m.status} />
+            </MatterFact>
+            <MatterFact label="Criticidad">
+              <StatusChip
+                label={materialityTerm(m.materiality).label}
+                tone={materialityTerm(m.materiality).tone}
+                title={materialityTerm(m.materiality).hint}
+              />
+            </MatterFact>
+            <MatterFact label="Riesgo">
+              {m.riskLevel === "UNASSESSED" || !m.riskRationale ? (
+                <span className="text-[13px] text-iusia-mist-text">Sin evaluar</span>
+              ) : (
+                <StatusChip
+                  label={riskTerm(m.riskLevel).label}
+                  tone={riskTerm(m.riskLevel).tone}
+                  title={m.riskRationale}
+                  dot
+                />
+              )}
+            </MatterFact>
+            <MatterFact label="Responsable">
+              <span className="text-[13.5px] text-iusia-carbon">
+                {data.members.find((x) => x.role === "OWNER")?.name ?? "Sin asignar"}
+              </span>
+            </MatterFact>
+          </dl>
+        </div>
+      </header>
 
       {data.access.via_supervision ? (
         <div className="rounded-[10px] border border-iusia-action/25 bg-iusia-action/5 px-4 py-2.5 text-[13.5px] text-iusia-action">
@@ -128,7 +178,7 @@ export function MatterWorkspace() {
         </div>
       ) : null}
 
-      <div role="tablist" aria-label="Secciones del expediente" className="flex gap-0.5 border-b border-iusia-mist/30">
+      <div role="tablist" aria-label="Secciones del expediente" className="flex gap-0.5 border-b border-iusia-line">
         {TABS.map((t) => {
           const selected = tab === t.id;
           const count = tabCount(t.id, data);
@@ -152,8 +202,8 @@ export function MatterWorkspace() {
               }}
               className={
                 selected
-                  ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[14px] font-medium text-iusia-navy"
-                  : "px-3.5 py-2.5 text-[14px] text-iusia-mist-text transition-colors hover:text-iusia-carbon"
+                  ? "-mb-px border-b-2 border-iusia-action px-3.5 py-2.5 text-[13.5px] font-medium text-iusia-navy"
+                  : "px-3.5 py-2.5 text-[13.5px] text-iusia-mist-text transition-colors hover:text-iusia-carbon"
               }
             >
               <span className="flex items-center gap-1.5">
