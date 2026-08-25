@@ -105,7 +105,11 @@
         "APP_URL": "https://iusia-staging.edergope.workers.dev",
         // Account de Cloudflare (identificador, NO secreto): lo usa ModelGateway para
         // construir el endpoint del AI Gateway. Los secretos van por `wrangler secret`.
-        "CLOUDFLARE_ACCOUNT_ID": "e4478495bf6483c58722d92498f0362f"
+        "CLOUDFLARE_ACCOUNT_ID": "e4478495bf6483c58722d92498f0362f",
+        // Orquestación multiagente dinámica (Bloque 7.7A-FIX). SÓLO en staging; la
+        // config base no la declara ⇒ producción quedaría en pilot (fallback) hasta
+        // validar. El planner/circuit breaker sólo se activan con este flag.
+        "ORCHESTRATION_MODE": "dynamic"
       },
       "d1_databases": [
         {
