@@ -29,6 +29,29 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
+/**
+ * Cuántos elementos hay detrás de cada pestaña.
+ *
+ * Sin esto, saber si un expediente tiene prueba cargada o hechos establecidos
+ * obliga a abrir pestañas una por una. Sólo se cuentan las secciones cuyo
+ * contenido ya viene en el detalle: "Tareas y términos" se carga aparte y no se
+ * anota con un número que podría estar desactualizado.
+ */
+function tabCount(id: TabId, data: MatterDetail): number | null {
+  switch (id) {
+    case "documentos":
+      return data.documents.length;
+    case "hechos":
+      return data.facts.length + data.authorities.length;
+    case "actividad":
+      return data.activity.length;
+    default:
+      return null;
+  }
+}
+
+const TERMINAL_EXECUTION = new Set(["COMPLETED", "FAILED", "CANCELLED", "BLOCKED"]);
+
 export function MatterWorkspace() {
   const { matterId = "" } = useParams();
   // Llegar con `?analisis=` significa "llévame a esa experiencia": abrir el
@@ -64,6 +87,10 @@ export function MatterWorkspace() {
   }
   const data = detail.data;
   const m = data.matter;
+  // Una ejecución raíz no terminal significa que IUSIA sigue trabajando aquí.
+  const runningAnalysis = data.executions.some(
+    (e) => e.parentExecutionId === null && !TERMINAL_EXECUTION.has(e.status),
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -91,6 +118,8 @@ export function MatterWorkspace() {
       <div role="tablist" aria-label="Secciones del expediente" className="flex gap-0.5 border-b border-iusia-mist/30">
         {TABS.map((t) => {
           const selected = tab === t.id;
+          const count = tabCount(t.id, data);
+          const live = t.id === "estrategia" && runningAnalysis;
           return (
             <button
               key={t.id}
@@ -114,7 +143,21 @@ export function MatterWorkspace() {
                   : "px-3.5 py-2.5 text-[14px] text-iusia-mist-text transition-colors hover:text-iusia-carbon"
               }
             >
-              {t.label}
+              <span className="flex items-center gap-1.5">
+                {t.label}
+                {count !== null && count > 0 ? (
+                  <span className="rounded-full bg-iusia-mist/20 px-1.5 py-px text-[12px] font-medium tabular-nums text-iusia-mist-text">
+                    {count}
+                  </span>
+                ) : null}
+                {live ? (
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-iusia-intel motion-safe:animate-pulse"
+                    title="IUSIA está analizando este expediente"
+                    aria-label="IUSIA está analizando este expediente"
+                  />
+                ) : null}
+              </span>
             </button>
           );
         })}
