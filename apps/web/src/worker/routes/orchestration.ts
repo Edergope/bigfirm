@@ -5,6 +5,7 @@ import {
   TERMINAL_STATUSES,
   deriveConclusionText,
   deriveOutcome,
+  stripInternalProvenance,
   projectStrategyGraph,
   resolveEvidenceDocuments,
 } from "@iusia/domain";
@@ -231,8 +232,10 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
           agent_id: n.agentId,
           node_code: nodeCode,
           agent_name: name,
-          // Titular humano ya parseado (p.ej. conclusion_brief). El raw queda en `text`.
-          summary: deriveConclusionText(text),
+          // Titular humano ya parseado (p.ej. conclusion_brief), sin el encabezado de
+          // procedencia interna: esa trazabilidad vive en el ledger, no en la lectura
+          // jurídica. El texto íntegro sigue disponible en `text`.
+          summary: stripInternalProvenance(deriveConclusionText(text)),
           text,
           provider: stored.provenance?.provider ?? n.provider ?? null,
           model: stored.provenance?.model ?? n.model ?? null,

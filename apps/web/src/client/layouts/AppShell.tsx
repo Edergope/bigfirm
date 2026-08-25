@@ -17,6 +17,7 @@ import clsx from "clsx";
 import { api } from "../api.js";
 import { signOut } from "../auth-client.js";
 import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
+import { AnalysisToasts } from "../components/AnalysisToasts.js";
 
 /**
  * Shell de IUSIA.
@@ -122,7 +123,7 @@ export function AppShell() {
                 onClick={() =>
                   navigate(
                     activeCount === 1 && analyses[0]
-                      ? `/casos/${analyses[0].matter_id}`
+                      ? `/casos/${analyses[0].matter_id}?analisis=${analyses[0].root_execution_id}`
                       : "/iusia",
                   )
                 }
@@ -142,6 +143,7 @@ export function AppShell() {
         </header>
         <main className="mx-auto w-full max-w-[1360px] flex-1 px-8 py-7">
           <Outlet />
+          <AnalysisToasts />
         </main>
       </div>
     </div>

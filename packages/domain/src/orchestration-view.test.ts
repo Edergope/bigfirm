@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveConclusionText,
+  deriveConstellation,
+  diffFinishedAnalyses,
   deriveOutcome,
   deriveProgressStages,
   ORCHESTRATOR_AGENT_ID,
   resolveEvidenceDocuments,
   selectIntegratorExecution,
   shouldKeepPolling,
+  groupExecutionsByAgent,
   shouldRefreshHistory,
+  stripInternalProvenance,
   type EventView,
   type ExecutionView,
+  type GraphEventView,
 } from "./orchestration-view.js";
 
 /**
@@ -199,5 +204,215 @@ describe("shouldRefreshHistory (refresh en transición terminal)", () => {
   it("mientras siga en curso no refresca", () => {
     expect(shouldRefreshHistory(undefined, "RUNNING")).toBe(false);
     expect(shouldRefreshHistory("RUNNING", "WAITING")).toBe(false);
+  });
+});
+
+/** Sprint 7.10 — el ruido operacional no debe llegar a la lectura jurídica. */
+describe("RETRY_ROWS_GROUPED", () => {
+  it("colapsa los reintentos en una sola etapa por especialista", () => {
+    const executions: ExecutionView[] = [
+      { id: "root", agentId: ORCHESTRATOR_AGENT_ID, status: "COMPLETED", createdAt: "2026-08-25T10:00:00.000Z" },
+      { id: "e1", agentId: "04-analista-probatorio-y-pericial", status: "PENDING", createdAt: "2026-08-25T10:00:01.000Z" },
+      { id: "e2", agentId: "04-analista-probatorio-y-pericial", status: "COMPLETED", createdAt: "2026-08-25T10:00:02.000Z" },
+      { id: "e3", agentId: "03-investigador-normativo-jurisprudencial", status: "COMPLETED", createdAt: "2026-08-25T10:00:03.000Z" },
+    ];
+    const stages = deriveProgressStages({ rootStatus: "COMPLETED", events: [{ type: "execution.created" }], executions, rootExecutionId: "root" });
+    const agentStages = stages.filter((s) => s.agentId);
+    // Dos especialistas distintos, no tres filas.
+    expect(agentStages).toHaveLength(2);
+    expect(agentStages.filter((s) => s.agentId === "04-analista-probatorio-y-pericial")).toHaveLength(1);
+    // Conserva el desenlace alcanzado, no el reintento huérfano.
+    expect(agentStages[0]!.state).toBe("done");
+  });
+
+  it("groupExecutionsByAgent conserva el orden de primera aparición", () => {
+    const rows: ExecutionView[] = [
+      { id: "root", agentId: "x", status: "COMPLETED", createdAt: "2026-08-25T10:00:00.000Z" },
+      { id: "a1", agentId: "a", status: "FAILED", createdAt: "2026-08-25T10:00:01.000Z" },
+      { id: "b1", agentId: "b", status: "COMPLETED", createdAt: "2026-08-25T10:00:02.000Z" },
+      { id: "a2", agentId: "a", status: "COMPLETED", createdAt: "2026-08-25T10:00:03.000Z" },
+    ];
+    const grouped = groupExecutionsByAgent(rows, "root");
+    expect(grouped.map((r) => r.agentId)).toEqual(["a", "b"]);
+    expect(grouped[0]!.status).toBe("COMPLETED");
+  });
+});
+
+describe("INTERNAL_PROVENANCE_HIDDEN", () => {
+  it("retira el encabezado de procedencia interna del texto entregado", () => {
+    const raw = [
+      "PRODUCED_BY: 00-orquestador-general-juridico",
+      "AGENT_EXECUTION_ID: exe_2za8ycpk08xzn1e8",
+      "SOURCE_INPUTS: contrato (doc_x), otrosí (doc_y)",
+      "- executions/org/matter/exe_7vpgfehdv8yfkhrp.json (especialista-contractual)",
+      "DATE: 2026-08-25T00:00:00Z",
+      "STATUS: READY",
+      "",
+      "Atlas sostiene que el preaviso exigido es de 90 días.",
+    ].join("\n");
+    const out = stripInternalProvenance(raw);
+    expect(out).toBe("Atlas sostiene que el preaviso exigido es de 90 días.");
+    expect(out).not.toMatch(/exe_[a-z0-9]{8}/);
+    expect(out).not.toContain("executions/");
+  });
+
+  it("no altera un texto que ya es puramente jurídico", () => {
+    const clean = "Atlas sostiene que la terminación debía notificarse con 90 días.";
+    expect(stripInternalProvenance(clean)).toBe(clean);
+  });
+
+  it("si el recorte dejara el texto vacío, conserva el original", () => {
+    const onlyHeader = "PRODUCED_BY: 00\nSTATUS: READY";
+    expect(stripInternalProvenance(onlyHeader)).toBe(onlyHeader);
+  });
+});
+
+describe("deriveConstellation", () => {
+  const names = new Map([
+    ["03-investigador-normativo-jurisprudencial", "Investigación normativa"],
+    ["04-analista-probatorio-y-pericial", "Análisis probatorio"],
+  ]);
+
+  it("[CN-1] un nodo por especialista, sin el orquestador ni la raíz", () => {
+    const view = deriveConstellation({
+      executions: [
+        row({ id: ROOT, agentId: ORCHESTRATOR_AGENT_ID, status: "RUNNING" }),
+        row({ id: "exe_00", agentId: ORCHESTRATOR_AGENT_ID, status: "COMPLETED" }),
+        row({ id: "exe_03", agentId: "03-investigador-normativo-jurisprudencial", status: "RUNNING" }),
+        row({ id: "exe_04", agentId: "04-analista-probatorio-y-pericial", status: "COMPLETED" }),
+      ],
+      events: [],
+      rootExecutionId: ROOT,
+      agentNames: names,
+    });
+    expect(view.nodes.map((n) => n.id).sort()).toEqual([
+      "03-investigador-normativo-jurisprudencial",
+      "04-analista-probatorio-y-pericial",
+    ]);
+    expect(view.nodes.find((n) => n.id.startsWith("03"))?.state).toBe("active");
+    expect(view.nodes.find((n) => n.id.startsWith("04"))?.state).toBe("done");
+    expect(view.nodes.find((n) => n.id.startsWith("03"))?.label).toBe("Investigación normativa");
+  });
+
+  it("[CN-2] los reintentos no duplican el nodo del especialista", () => {
+    const view = deriveConstellation({
+      executions: [
+        row({ id: ROOT, agentId: ORCHESTRATOR_AGENT_ID, status: "RUNNING" }),
+        row({ id: "exe_a", agentId: "04-analista-probatorio-y-pericial", status: "FAILED" }),
+        row({ id: "exe_b", agentId: "04-analista-probatorio-y-pericial", status: "COMPLETED" }),
+      ],
+      events: [],
+      rootExecutionId: ROOT,
+      agentNames: names,
+    });
+    expect(view.nodes).toHaveLength(1);
+    expect(view.nodes[0]!.state).toBe("done");
+  });
+
+  it("[CN-3] la dependencia declarada dibuja arista, y sólo la transferencia real la enciende", () => {
+    const executions = [
+      row({ id: ROOT, agentId: ORCHESTRATOR_AGENT_ID, status: "RUNNING" }),
+      row({ id: "exe_04", agentId: "04-analista-probatorio-y-pericial", status: "COMPLETED" }),
+      row({ id: "exe_03", agentId: "03-investigador-normativo-jurisprudencial", status: "RUNNING" }),
+    ];
+    const dispatched: GraphEventView = {
+      type: "agent.dispatched",
+      to_agent_id: "03-investigador-normativo-jurisprudencial",
+      detail: { depends_on: "04-analista-probatorio-y-pericial" },
+    };
+
+    const declaredOnly = deriveConstellation({
+      executions,
+      events: [dispatched],
+      rootExecutionId: ROOT,
+      agentNames: names,
+    });
+    expect(declaredOnly.links).toEqual([
+      {
+        from: "04-analista-probatorio-y-pericial",
+        to: "03-investigador-normativo-jurisprudencial",
+        transferred: false,
+      },
+    ]);
+
+    const withTransfer = deriveConstellation({
+      executions,
+      events: [
+        dispatched,
+        {
+          type: "message.transferred",
+          from_agent_id: "04-analista-probatorio-y-pericial",
+          to_agent_id: "03-investigador-normativo-jurisprudencial",
+        },
+      ],
+      rootExecutionId: ROOT,
+      agentNames: names,
+    });
+    expect(withTransfer.links[0]!.transferred).toBe(true);
+  });
+
+  it("[CN-4] ignora aristas hacia agentes que no se ejecutaron: no inventa equipo", () => {
+    const view = deriveConstellation({
+      executions: [
+        row({ id: ROOT, agentId: ORCHESTRATOR_AGENT_ID, status: "RUNNING" }),
+        row({ id: "exe_03", agentId: "03-investigador-normativo-jurisprudencial", status: "RUNNING" }),
+      ],
+      events: [
+        {
+          type: "agent.dispatched",
+          to_agent_id: "03-investigador-normativo-jurisprudencial",
+          detail: { depends_on: "99-agente-inexistente" },
+        },
+      ],
+      rootExecutionId: ROOT,
+      agentNames: names,
+    });
+    expect(view.links).toHaveLength(0);
+  });
+
+  it("[CN-5] sin especialistas todavía, la constelación va vacía (núcleo pensando)", () => {
+    const view = deriveConstellation({
+      executions: [row({ id: ROOT, agentId: ORCHESTRATOR_AGENT_ID, status: "RUNNING" })],
+      events: [],
+      rootExecutionId: ROOT,
+      agentNames: names,
+    });
+    expect(view.nodes).toHaveLength(0);
+    expect(view.integrating).toBe(false);
+  });
+
+  it("[CN-6] la fase de integración marca la convergencia", () => {
+    const view = deriveConstellation({
+      executions: [row({ id: ROOT, agentId: ORCHESTRATOR_AGENT_ID, status: "RUNNING" })],
+      events: [{ type: "agent.started", detail: { phase: "integrate" } }],
+      rootExecutionId: ROOT,
+      agentNames: names,
+    });
+    expect(view.integrating).toBe(true);
+  });
+});
+
+describe("BACKGROUND_ANALYSIS_INDICATOR", () => {
+  const a = { root_execution_id: "exe_a", matter_id: "mtr_1", matter_title: "Delta vs Atlas" };
+  const b = { root_execution_id: "exe_b", matter_id: "mtr_2", matter_title: "Otro" };
+
+  it("[BG-1] el análisis que desaparece de los activos se considera terminado", () => {
+    expect(diffFinishedAnalyses([a, b], [b])).toEqual([a]);
+  });
+
+  it("[BG-2] mientras siga activo no avisa", () => {
+    expect(diffFinishedAnalyses([a], [a])).toEqual([]);
+  });
+
+  it("[BG-3] el primer sondeo tras cargar la app no anuncia trabajo anterior", () => {
+    expect(diffFinishedAnalyses([], [])).toEqual([]);
+    expect(diffFinishedAnalyses([], [a])).toEqual([]);
+  });
+
+  it("[BG-4] varios cierres simultáneos se avisan todos", () => {
+    expect(diffFinishedAnalyses([a, b], []).map((x) => x.root_execution_id)).toEqual([
+      "exe_a",
+      "exe_b",
+    ]);
   });
 });

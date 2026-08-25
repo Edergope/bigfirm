@@ -51,7 +51,7 @@ export function Iusia() {
             {analyses.map((a) => (
               <li key={a.root_execution_id}>
                 <Link
-                  to={`/casos/${a.matter_id}`}
+                  to={`/casos/${a.matter_id}?analisis=${a.root_execution_id}`}
                   className="flex items-center justify-between gap-3 px-6 py-3.5 transition-colors hover:bg-iusia-mist/5"
                 >
                   <span className="flex min-w-0 items-center gap-3">

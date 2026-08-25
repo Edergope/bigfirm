@@ -16,7 +16,9 @@ import {
   type ProgressStage,
   type StageState,
 } from "@iusia/domain";
+import { useSearchParams } from "react-router";
 import { api, ApiError, type ExecutionResult, type MatterDetail } from "../api.js";
+import { AnalysisModal } from "../components/AnalysisModal.js";
 import { StrategyRoom } from "./StrategyRoom.js";
 
 /**
@@ -76,6 +78,21 @@ export function MatterOrchestration({
 
   const [selectedRoot, setSelectedRoot] = useState<string | null>(roots[0]?.rootExecutionId ?? null);
   const [objective, setObjective] = useState(data.matter.objective ?? "");
+  const [liveRoot, setLiveRoot] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+
+  // Enlace profundo `?analisis=`: el indicador global y los avisos reabren aquí la
+  // experiencia que el abogado había cerrado. Se consume el parámetro para que
+  // recargar o navegar atrás no la resucite.
+  const deepLink = params.get("analisis");
+  useEffect(() => {
+    if (!deepLink) return;
+    setSelectedRoot(deepLink);
+    setLiveRoot(deepLink);
+    const next = new URLSearchParams(params);
+    next.delete("analisis");
+    setParams(next, { replace: true });
+  }, [deepLink, params, setParams]);
 
   // Si aparece una raíz nueva y aún no hay selección, la adoptamos.
   useEffect(() => {
@@ -86,7 +103,10 @@ export function MatterOrchestration({
     mutationFn: () => api.startOrchestration(matterId, objective.trim()),
     onSuccess: (res) => {
       setSelectedRoot(res.root_execution_id);
+      // El análisis abre su propia experiencia: el abogado no tiene que buscarla.
+      setLiveRoot(res.root_execution_id);
       void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
+      void queryClient.invalidateQueries({ queryKey: ["active-analyses"] });
     },
   });
 
@@ -107,6 +127,7 @@ export function MatterOrchestration({
           matterId={matterId}
           rootExecutionId={selectedRoot}
           matterDocuments={data.documents}
+          onOpenLive={() => setLiveRoot(selectedRoot)}
         />
       ) : (
         <Card>
@@ -145,6 +166,15 @@ export function MatterOrchestration({
             })}
           </ul>
         </Card>
+      ) : null}
+
+      {liveRoot ? (
+        <AnalysisModal
+          rootExecutionId={liveRoot}
+          matterId={matterId}
+          open
+          onClose={() => setLiveRoot(null)}
+        />
       ) : null}
     </div>
   );
@@ -203,10 +233,12 @@ function RunView({
   matterId,
   rootExecutionId,
   matterDocuments,
+  onOpenLive,
 }: {
   matterId: string;
   rootExecutionId: string;
   matterDocuments: MatterDetail["documents"];
+  onOpenLive: () => void;
 }) {
   const [showTrace, setShowTrace] = useState(false);
   const queryClient = useQueryClient();
@@ -301,6 +333,15 @@ function RunView({
           action={
             <span className="flex items-center gap-3">
               <OutcomeChip status={rootStatus} />
+              {!isTerminal ? (
+                <button
+                  type="button"
+                  onClick={onOpenLive}
+                  className="text-[13px] font-medium text-iusia-action hover:underline"
+                >
+                  Ver en vivo
+                </button>
+              ) : null}
               {!isTerminal ? (
                 <button
                   type="button"

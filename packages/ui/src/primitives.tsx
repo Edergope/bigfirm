@@ -361,3 +361,78 @@ export function Drawer({
     </AnimatePresence>
   );
 }
+
+/**
+ * Avisos no bloqueantes. Un análisis que termina mientras el abogado trabaja en otra
+ * cosa merece enterarse sin que le roben el foco ni le interrumpan la escritura: por
+ * eso nunca es un diálogo modal, se apila abajo a la derecha y se puede descartar.
+ */
+export interface ToastItem {
+  id: string;
+  title: string;
+  body?: string;
+  tone?: "success" | "critical" | "navy";
+  action?: { label: string; onClick: () => void };
+}
+
+const TOAST_BAR: Record<NonNullable<ToastItem["tone"]>, string> = {
+  success: "bg-iusia-success",
+  critical: "bg-iusia-critical",
+  navy: "bg-iusia-navy",
+};
+
+export function ToastStack({
+  items,
+  onDismiss,
+}: {
+  items: readonly ToastItem[];
+  onDismiss: (id: string) => void;
+}) {
+  return (
+    <div
+      className="pointer-events-none fixed bottom-5 right-5 z-[60] flex w-[340px] max-w-[calc(100vw-2.5rem)] flex-col gap-2.5"
+      role="region"
+      aria-label="Avisos de IUSIA"
+    >
+      <AnimatePresence initial={false}>
+        {items.map((t) => (
+          <motion.div
+            key={t.id}
+            layout
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.18 }}
+            role="status"
+            aria-live="polite"
+            className="pointer-events-auto flex overflow-hidden rounded-[12px] bg-iusia-paper shadow-[0_16px_40px_-12px_rgba(11,29,58,0.32)] ring-1 ring-iusia-mist/25"
+          >
+            <span className={"w-1 shrink-0 " + TOAST_BAR[t.tone ?? "navy"]} aria-hidden />
+            <div className="flex-1 px-4 py-3">
+              <p className="text-[14px] font-semibold text-iusia-navy">{t.title}</p>
+              {t.body ? <p className="mt-0.5 text-[13px] text-iusia-mist-text">{t.body}</p> : null}
+              <div className="mt-2 flex items-center gap-4">
+                {t.action ? (
+                  <button
+                    type="button"
+                    onClick={t.action.onClick}
+                    className="text-[13px] font-semibold text-iusia-action hover:underline"
+                  >
+                    {t.action.label}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => onDismiss(t.id)}
+                  className="text-[13px] font-medium text-iusia-mist-text hover:text-iusia-carbon"
+                >
+                  Descartar
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}

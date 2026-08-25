@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useParams, Link } from "react-router";
+import { useParams, useSearchParams, Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -31,7 +31,12 @@ type TabId = (typeof TABS)[number]["id"];
 
 export function MatterWorkspace() {
   const { matterId = "" } = useParams();
-  const [tab, setTab] = useState<TabId>("resumen");
+  // Llegar con `?analisis=` significa "llévame a esa experiencia": abrir el
+  // expediente en Resumen obligaría a buscarla a mano.
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<TabId>(
+    searchParams.has("analisis") ? "estrategia" : "resumen",
+  );
   const detail = useQuery({
     queryKey: ["matter", matterId],
     queryFn: () => api.getMatter(matterId),

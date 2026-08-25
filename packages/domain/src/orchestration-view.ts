@@ -146,12 +146,13 @@ export function deriveProgressStages(args: {
         : "pending";
   stages.push({ key: "evidence", state: evidenceState });
 
-  // 3. Una etapa por agente del equipo (excluye la fila raíz contenedora).
-  const agentRows = executions
-    .filter((e) => e.id !== rootExecutionId)
-    .slice()
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  for (const row of agentRows) {
+  // 3. Una etapa por AGENTE, no por fila de ejecución.
+  //
+  // El motor reintenta pasos por durabilidad: eso deja filas huérfanas (PENDING o
+  // FAILED) del mismo agente. Son ruido operacional, no trabajo jurídico distinto:
+  // mostrarlas haría creer que un especialista intervino varias veces. Se agrupan y
+  // se conserva el desenlace más avanzado de cada uno.
+  for (const row of groupExecutionsByAgent(executions, rootExecutionId)) {
     stages.push({ key: `agent:${row.agentId}`, agentId: row.agentId, state: stateFromStatus(row.status) });
   }
 
@@ -162,6 +163,175 @@ export function deriveProgressStages(args: {
   });
 
   return stages;
+}
+
+/** Un especialista tal y como debe dibujarse en la constelación. */
+export interface ConstellationView {
+  nodes: Array<{ id: string; label: string; state: "waiting" | "active" | "done" | "failed" }>;
+  links: Array<{ from: string; to: string; transferred: boolean }>;
+  integrating: boolean;
+}
+
+/** Evento con los campos de origen/destino que necesita el grafo. */
+export interface GraphEventView extends EventView {
+  from_agent_id?: string | null;
+  to_agent_id?: string | null;
+}
+
+/**
+ * Traduce lo ocurrido en el ledger a la constelación que ve el abogado.
+ *
+ * Sólo dibuja lo que el motor registró: un nodo por especialista realmente
+ * despachado, una arista por dependencia declarada en el plan y un pulso por
+ * transferencia efectivamente ocurrida. Si el equipo todavía no se conoce,
+ * devuelve una constelación vacía y la vista muestra el núcleo pensando.
+ */
+export function deriveConstellation(args: {
+  executions: readonly ExecutionView[];
+  events: readonly GraphEventView[];
+  rootExecutionId: string;
+  orchestratorAgentId?: string;
+  /** agent_id → nombre legible del especialista. */
+  agentNames: ReadonlyMap<string, string>;
+}): ConstellationView {
+  const orchestrator = args.orchestratorAgentId ?? ORCHESTRATOR_AGENT_ID;
+
+  // Los especialistas son los agentes distintos del orquestador realmente ejecutados.
+  const grouped = groupExecutionsByAgent(args.executions, args.rootExecutionId).filter(
+    (e) => e.agentId !== orchestrator,
+  );
+
+  const nodes = grouped.map((e) => ({
+    id: e.agentId,
+    label: args.agentNames.get(e.agentId) ?? e.agentId,
+    state: constellationState(e.status),
+  }));
+
+  const present = new Set(nodes.map((n) => n.id));
+
+  // Dependencias declaradas en el despacho + transferencias efectivamente emitidas.
+  const declared = new Map<string, boolean>();
+  for (const ev of args.events) {
+    if (ev.type === "agent.dispatched" && typeof ev.detail?.depends_on === "string") {
+      const to = ev.to_agent_id;
+      if (!to || !present.has(to)) continue;
+      for (const from of ev.detail.depends_on.split(",").map((x) => x.trim()).filter(Boolean)) {
+        if (present.has(from)) declared.set(`${from}->${to}`, declared.get(`${from}->${to}`) ?? false);
+      }
+    }
+    if (ev.type === "message.transferred" && ev.from_agent_id && ev.to_agent_id) {
+      if (present.has(ev.from_agent_id) && present.has(ev.to_agent_id)) {
+        declared.set(`${ev.from_agent_id}->${ev.to_agent_id}`, true);
+      }
+    }
+  }
+
+  const links = [...declared.entries()].map(([key, transferred]) => {
+    const [from, to] = key.split("->");
+    return { from: from!, to: to!, transferred };
+  });
+
+  // El integrador está consolidando cuando su fase arrancó y aún no cerró la raíz.
+  const integrating = args.events.some(
+    (e) => e.detail?.phase === "integrate" && (e.type === "agent.started" || e.type === "agent.dispatched"),
+  );
+
+  return { nodes, links, integrating };
+}
+
+function constellationState(status: string): "waiting" | "active" | "done" | "failed" {
+  switch (status) {
+    case "COMPLETED":
+      return "done";
+    case "FAILED":
+      return "failed";
+    case "RUNNING":
+    case "WAITING":
+      return "active";
+    default:
+      return "waiting";
+  }
+}
+
+/** Prioridad de desenlace: lo alcanzado pesa más que un reintento posterior fallido. */
+const STATUS_RANK: Record<string, number> = {
+  COMPLETED: 5,
+  RUNNING: 4,
+  WAITING: 3,
+  FAILED: 2,
+  BLOCKED: 2,
+  PENDING: 1,
+  CANCELLED: 1,
+};
+
+/**
+ * Colapsa las filas de ejecución en una por agente, conservando el estado más
+ * avanzado y el orden de primera aparición. Excluye la fila raíz, que es el
+ * contenedor de la orquestación y no un especialista.
+ */
+export function groupExecutionsByAgent<T extends ExecutionView>(
+  executions: readonly T[],
+  rootExecutionId: string,
+): T[] {
+  const byAgent = new Map<string, T>();
+  const order: string[] = [];
+  const rows = executions
+    .filter((e) => e.id !== rootExecutionId)
+    .slice()
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  for (const row of rows) {
+    const current = byAgent.get(row.agentId);
+    if (!current) {
+      byAgent.set(row.agentId, row);
+      order.push(row.agentId);
+      continue;
+    }
+    const rank = STATUS_RANK[row.status] ?? 0;
+    const currentRank = STATUS_RANK[current.status] ?? 0;
+    if (rank > currentRank) byAgent.set(row.agentId, row);
+  }
+  return order.map((id) => byAgent.get(id)!);
+}
+
+/**
+ * Retira del texto entregado al abogado el encabezado de procedencia interna que
+ * algunos agentes anteponen (identificadores de ejecución y rutas de almacenamiento).
+ *
+ * Esa trazabilidad es real y se conserva en el ledger y en la salida estructurada;
+ * simplemente no pertenece a la lectura jurídica. No se altera el contenido del
+ * dictamen: sólo se recorta el bloque técnico inicial.
+ */
+export function stripInternalProvenance(text: string): string {
+  const lines = text.split("\n");
+  const isProvenanceLine = (line: string): boolean => {
+    const t = line.trim();
+    if (t.length === 0) return false;
+    if (/^(PRODUCED_BY|AGENT_EXECUTION_ID|SOURCE_INPUTS|EXECUTION_ID|DATE|STATUS)\s*:/i.test(t)) return true;
+    // Continuación de una lista de fuentes con rutas internas o ids de ejecución.
+    if (/^[-*]\s/.test(t) && /(executions\/|exe_[a-z0-9]{8,})/i.test(t)) return true;
+    return false;
+  };
+
+  let cut = 0;
+  let sawProvenance = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (isProvenanceLine(lines[i]!)) {
+      sawProvenance = true;
+      cut = i + 1;
+      continue;
+    }
+    // Una línea en blanco dentro del bloque no lo interrumpe.
+    if (sawProvenance && lines[i]!.trim().length === 0) {
+      cut = i + 1;
+      continue;
+    }
+    break;
+  }
+  if (!sawProvenance) return text;
+  const rest = lines.slice(cut).join("\n").trim();
+  // Si el recorte se comiera todo el contenido, se prefiere el texto íntegro.
+  return rest.length > 0 ? rest : text;
 }
 
 /** ¿Debe seguir el polling? Sólo mientras la raíz no esté en estado terminal. */
@@ -283,4 +453,30 @@ export function resolveEvidenceDocuments(
     document_id: id,
     document_name: documentNames.get(id) ?? id,
   }));
+}
+
+// ───────────────────── Analyses en segundo plano ─────────────────────
+
+export interface ActiveAnalysisRef {
+  root_execution_id: string;
+  matter_id: string;
+  matter_title: string;
+}
+
+/**
+ * Análisis que estaban en curso y ya no lo están.
+ *
+ * El servidor sólo publica los ACTIVOS, así que la desaparición de una raíz de la
+ * lista es la señal de que terminó. Se calcula sobre listas, no sobre eventos, para
+ * que un aviso no dependa de tener el modal abierto: el abogado puede estar en otra
+ * vista y aun así enterarse. Una lista `prev` vacía no genera avisos —el primer
+ * sondeo tras cargar la aplicación no debe anunciar trabajo anterior.
+ */
+export function diffFinishedAnalyses(
+  prev: readonly ActiveAnalysisRef[],
+  next: readonly ActiveAnalysisRef[],
+): ActiveAnalysisRef[] {
+  if (prev.length === 0) return [];
+  const stillActive = new Set(next.map((a) => a.root_execution_id));
+  return prev.filter((a) => !stillActive.has(a.root_execution_id));
 }
