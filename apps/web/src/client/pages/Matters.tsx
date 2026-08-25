@@ -32,6 +32,14 @@ const MATERIALITY_HELP: Record<string, string> = {
   HIGH_STAKES: "Aprobación humana en gates de estrategia e integridad.",
 };
 
+/**
+ * Ejes de la cartera. Cabecera y filas usan la MISMA rejilla: si cada fila
+ * calculara su propio reparto, un asunto largo desplazaría los estados y la
+ * columna dejaría de poder compararse de un vistazo.
+ */
+const ROW_GRID =
+  "grid grid-cols-[3px_minmax(0,1fr)_150px] items-center gap-x-5 md:grid-cols-[3px_minmax(0,1fr)_190px_160px_104px]";
+
 /** Un expediente sin movimiento en 21 días es una señal de cartera, no de caso. */
 const INACTIVE_DAYS = 21;
 const ACTIVE_STATUSES = new Set(["INTAKE", "ACTIVE", "WAITING_CLIENT", "IN_REVIEW", "ON_HOLD"]);
@@ -106,7 +114,7 @@ export function Matters() {
   );
 
   return (
-    <div className="pb-2">
+    <div className="flex h-full flex-col pb-2">
       <ScreenTitle
         eyebrow="Cartera"
         title="Casos"
@@ -119,108 +127,102 @@ export function Matters() {
       />
 
       {/*
-        El resumen NO es otra fila de métricas: vive como una columna lateral que
-        acompaña a la cartera. Un expediente se lee en la lista; la salud de la
-        cartera se lee al lado, sin robarle la primera pantalla.
+        UN solo objeto: salud, búsqueda, ejes y expedientes. El resumen estaba como
+        columna lateral y se leía como un panel auxiliar pegado al listado; aquí
+        encabeza el mismo workspace, que es lo que hace que la cartera se lea junta.
       */}
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-4">
-        <Module
-          className="lg:col-span-3"
-          padded={false}
-          action={
-            <div className="flex w-full items-center gap-3">
-              <Input
-                placeholder="Buscar por asunto, cliente o referencia…"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                aria-label="Buscar expedientes"
-                className="h-8 w-full max-w-xs rounded-[10px] text-[13px]"
-              />
-              <span className="ml-auto shrink-0 text-[12px] tnum text-iusia-mist-text">
-                {rows.length} de {all.length}
+      <Module className="flex min-h-0 flex-1 flex-col" padded={false}>
+        {all.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-x-12 gap-y-3 bg-iusia-ice/70 px-5 py-4">
+            {summary.map((x) => (
+              <div key={x.id}>
+                <p className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-iusia-mist-text">
+                  {x.label}
+                </p>
+                <p className="mt-1 flex items-baseline gap-1.5">
+                  <span
+                    className={
+                      "text-[21px] font-semibold leading-none tracking-[-0.02em] tnum " +
+                      (x.value === "0" ? "text-iusia-mist-text" : x.color)
+                    }
+                  >
+                    {x.value}
+                  </span>
+                  {x.hint ? (
+                    <span className="text-[11px] text-iusia-mist-text">{x.hint}</span>
+                  ) : null}
+                </p>
+              </div>
+            ))}
+
+          </div>
+        ) : null}
+
+        <div className="flex items-center gap-3 px-5 py-3">
+          <Input
+            placeholder="Buscar por asunto, cliente o referencia…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label="Buscar expedientes"
+            className="h-8 w-full max-w-sm rounded-[10px] text-[13px]"
+          />
+          <span className="ml-auto shrink-0 text-[12px] tnum text-iusia-mist-text">
+            {rows.length === all.length
+              ? `${all.length} expediente${all.length === 1 ? "" : "s"}`
+              : `${rows.length} de ${all.length}`}
+          </span>
+        </div>
+
+        {matters.isLoading ? (
+          <div className="space-y-2 px-5 pb-5">
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+          </div>
+        ) : rows.length === 0 ? (
+          <StateBlock
+            kind="empty"
+            title={filter ? "Ningún expediente coincide" : "No hay expedientes en tu alcance"}
+            hint={filter ? "Prueba con otro término." : "Crea uno o pide que te asignen a un caso."}
+            action={
+              filter ? (
+                <Button variant="secondary" size="sm" onClick={() => setFilter("")}>
+                  Limpiar búsqueda
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setOpen(true)}>
+                  Nuevo expediente
+                </Button>
+              )
+            }
+          />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* Ejes fijos. Nombrarlos es lo que convierte una lista en una cartera
+                legible: el abogado sabe qué compara en cada columna sin leerlas. */}
+            <div className={ROW_GRID + " sticky top-0 z-10 bg-iusia-paper px-5 pb-1.5 pt-1"}>
+              <span />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+                Expediente
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+                Estado
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+                Criticidad
+              </span>
+              <span className="text-right text-[10px] font-semibold uppercase tracking-[0.1em] text-iusia-mist-text">
+                Actualizado
               </span>
             </div>
-          }
-        >
-          {matters.isLoading ? (
-            <div className="space-y-2 px-5 pb-5">
-              <Skeleton className="h-14" />
-              <Skeleton className="h-14" />
-              <Skeleton className="h-14" />
-            </div>
-          ) : rows.length === 0 ? (
-            <StateBlock
-              kind="empty"
-              title={filter ? "Sin coincidencias" : "No hay expedientes en tu alcance"}
-              hint={filter ? "Ajusta la búsqueda." : "Crea uno o pide que te asignen a un caso."}
-            />
-          ) : (
-            <ul className="divide-y divide-iusia-line/70">
+            <ul className="divide-y divide-iusia-line/60">
               {rows.map((m) => (
                 <MatterRow key={m.id} matter={m} />
               ))}
             </ul>
-          )}
-        </Module>
-
-        <div className="flex flex-col gap-4">
-          <Module title="Salud de la cartera" eyebrow="Resumen">
-            <ul className="flex flex-col gap-3">
-              {summary.map((x) => (
-                <li key={x.id} className="flex items-baseline justify-between gap-3">
-                  <span className="text-[13px] text-iusia-carbon">{x.label}</span>
-                  <span className="flex items-baseline gap-2">
-                    {x.hint ? (
-                      <span className="text-[10.5px] uppercase tracking-[0.06em] text-iusia-mist-text">
-                        {x.hint}
-                      </span>
-                    ) : null}
-                    <span
-                      className={
-                        "text-[19px] font-semibold leading-none tnum " +
-                        (x.value === "0" ? "text-iusia-mist-text" : x.color)
-                      }
-                    >
-                      {x.value}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Module>
-
-          <Module tone="ice" title="Criticidad" eyebrow="Distribución">
-            {all.length === 0 ? (
-              <p className="text-[13px] text-iusia-mist-text">Sin expedientes todavía.</p>
-            ) : (
-              <ul className="flex flex-col gap-2.5">
-                {(["HIGH_STAKES", "MATERIAL", "SIMPLE"] as const).map((level) => {
-                  const n = all.filter((m) => m.materiality === level).length;
-                  const pct = all.length ? Math.round((n / all.length) * 100) : 0;
-                  const t = materialityTerm(level);
-                  return (
-                    <li key={level}>
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-[12.5px] text-iusia-carbon">{t.label}</span>
-                        <span className="shrink-0 text-[12px] tnum text-iusia-mist-text">{n}</span>
-                      </div>
-                      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-iusia-paper">
-                        <span
-                          className={
-                            "block h-full rounded-full " +
-                            (level === "HIGH_STAKES" ? "bg-iusia-gold" : "bg-iusia-navy/45")
-                          }
-                          style={{ width: `${pct}%` }}
-                        />
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Module>
-        </div>
-      </div>
+          </div>
+        )}
+      </Module>
 
       <Drawer open={open} onClose={() => setOpen(false)} title="Nuevo expediente" width={520}>
         <NewMatterForm
@@ -235,13 +237,19 @@ export function Matters() {
 }
 
 /**
- * Un expediente como objeto jurídico, no como fila de hoja de cálculo.
+ * Un expediente como objeto jurídico.
  *
- * Dos niveles tipográficos: arriba lo que identifica el caso ante un cliente
- * —asunto y cliente—, abajo lo que lo sitúa —referencia, área, última actividad—.
- * El estado y la criticidad viven a la derecha porque son lo que se compara entre
- * expedientes al repasar la cartera; la referencia baja a metadato porque nadie
- * busca un caso por su código, pero necesita verlo para citarlo.
+ * Tres niveles tipográficos que funcionan incluso en escala de grises, porque la
+ * jerarquía la lleva el tamaño y el peso, no el color:
+ *
+ *   CASE_TITLE      15px / 600 / navy      — identifica el caso ante un cliente
+ *   CASE_CLIENT     13px / 500 / carbon    — de quién es
+ *   CASE_AREA       13px / 400 / mist      — de qué trata
+ *   CASE_REFERENCE  11px / tnum / mist/75  — cómo se cita
+ *
+ * La identidad del expediente vive a la izquierda; su estado operativo, en ejes
+ * fijos a la derecha. Mezclar ambos en una sola línea era lo que obligaba a leer
+ * cada carácter para saber de qué caso se trataba.
  */
 function MatterRow({ matter: m }: { matter: MatterSummary }) {
   const status = matterStatusTerm(m.status);
@@ -249,57 +257,75 @@ function MatterRow({ matter: m }: { matter: MatterSummary }) {
   const risk = riskTerm(m.riskLevel);
   const stale = ACTIVE_STATUSES.has(m.status) && daysSince(m.updatedAt) >= INACTIVE_DAYS;
   const showRisk = m.riskLevel !== "UNASSESSED" && !!m.riskRationale;
+  const critical = m.riskLevel === "HIGH" || m.riskLevel === "CRITICAL";
 
   return (
     <li>
       <Link
         to={`/casos/${m.id}`}
-        className="group flex h-[62px] items-center gap-4 px-5 transition-colors hover:bg-iusia-ice"
+        className={ROW_GRID + " group px-5 py-3 transition-colors hover:bg-iusia-ice/70"}
       >
-        {/* Marca de prioridad: sólo aparece cuando el expediente la merece. */}
+        {/* Señal de exploración. Nunca es el único portador del significado: la
+            criticidad y el riesgo van además como texto en sus propios ejes. */}
         <span
           aria-hidden
           className={
-            "h-9 w-[3px] shrink-0 rounded-full " +
-            (m.materiality === "HIGH_STAKES"
-              ? "bg-iusia-gold"
-              : showRisk && (m.riskLevel === "HIGH" || m.riskLevel === "CRITICAL")
-                ? "bg-iusia-critical"
+            "h-10 w-[3px] rounded-full " +
+            (critical
+              ? "bg-iusia-critical"
+              : m.materiality === "HIGH_STAKES"
+                ? "bg-iusia-gold"
                 : "bg-transparent")
           }
         />
 
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14.5px] font-medium tracking-[-0.01em] text-iusia-navy group-hover:text-iusia-action">
+        <span className="min-w-0">
+          <span className="block truncate text-[15px] font-semibold leading-snug tracking-[-0.012em] text-iusia-navy group-hover:text-iusia-action">
             {m.title}
           </span>
-          <span className="mt-0.5 block truncate text-[12px] text-iusia-mist-text">
-            {m.clientName}
-            <span aria-hidden className="px-1.5 text-iusia-mist">·</span>
-            <span className="tnum">{m.reference}</span>
+          <span className="mt-0.5 block truncate text-[13px] leading-snug">
+            <span className="font-medium text-iusia-carbon">{m.clientName}</span>
             {m.practiceAreas[0] ? (
               <>
                 <span aria-hidden className="px-1.5 text-iusia-mist">·</span>
-                {practiceAreaLabel(m.practiceAreas[0])}
+                <span className="text-iusia-mist-text">
+                  {practiceAreaLabel(m.practiceAreas[0])}
+                </span>
               </>
             ) : null}
           </span>
+          <span
+            className="mt-1 block truncate text-[11px] leading-none tracking-[0.03em] tnum text-iusia-mist-text/75"
+            title={m.reference}
+          >
+            {m.reference}
+          </span>
         </span>
 
-        <span className="hidden shrink-0 items-center gap-2 md:flex">
+        <span className="flex flex-col items-start gap-1">
           <StatusChip label={status.label} tone={status.tone} title={status.hint} />
-          <StatusChip label={materiality.label} tone={materiality.tone} title={materiality.hint} />
+          {/* El riesgo acompaña al estado: es lo que decide si un caso "en curso"
+              está tranquilo o no, y no merecía una cuarta columna con dos casos. */}
           {showRisk ? (
-            <StatusChip label={risk.label} tone={risk.tone} title={m.riskRationale ?? undefined} dot />
+            <StatusChip
+              label={risk.label}
+              tone={risk.tone}
+              title={m.riskRationale ?? undefined}
+              dot
+            />
           ) : null}
+        </span>
+
+        <span className="hidden md:block">
+          <StatusChip label={materiality.label} tone={materiality.tone} title={materiality.hint} />
         </span>
 
         <span
           className={
-            "hidden w-20 shrink-0 text-right text-[12px] tnum sm:block " +
+            "hidden text-right text-[12px] tnum md:block " +
             (stale ? "font-medium text-iusia-warning-text" : "text-iusia-mist-text")
           }
-          title={new Date(m.updatedAt).toLocaleString("es-CO")}
+          title={`Última actividad: ${new Date(m.updatedAt).toLocaleString("es-CO")}`}
         >
           {relativeDays(m.updatedAt)}
         </span>

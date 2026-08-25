@@ -23,6 +23,15 @@ import { useActiveAnalyses } from "../hooks/use-active-analyses.js";
  * abre el detalle que lo sustenta. No se muestra ninguna métrica que el sistema no
  * pueda respaldar con datos reales.
  */
+/** Bandas de la barra de operación. Tonos del ADN navy, no una paleta nueva. */
+const STATUS_BAND = [
+  "bg-iusia-navy",
+  "bg-iusia-navy/65",
+  "bg-iusia-intel/70",
+  "bg-iusia-mist/70",
+  "bg-iusia-gold/70",
+];
+
 /** Listas que sustentan cada indicador; abrir una es abrir sus registros reales. */
 type Drill = null | "matters" | "risk" | "overdue" | "upcoming" | "inactive";
 
@@ -144,30 +153,37 @@ export function CommandCenter({ me }: { me: MeResponse }) {
           {Object.keys(health.data?.by_status ?? {}).length === 0 ? (
             <p className="py-4 text-[13.5px] text-iusia-mist-text">Sin expedientes todavía.</p>
           ) : (
-            <ul className="flex flex-col gap-3">
-              {Object.entries(health.data?.by_status ?? {}).map(([status, n]) => {
-                const total = health.data?.total || 1;
-                const pct = Math.round((n / total) * 100);
-                return (
-                  <li key={status}>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="truncate text-[13px] text-iusia-carbon">
-                        {matterStatusTerm(status).label}
-                      </span>
-                      <span className="shrink-0 text-[12.5px] tnum text-iusia-mist-text">
-                        {n} · {pct}%
-                      </span>
-                    </div>
-                    <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-iusia-ice">
-                      <span
-                        className="block h-full rounded-full bg-iusia-navy/70"
-                        style={{ width: `${pct}%` }}
-                      />
+            <>
+              {/* Una sola barra apilada: la cartera se entiende por la PROPORCIÓN
+                  entre estados, y tres barras independientes al 100 % cada una no
+                  dejan verla. */}
+              <div className="flex h-2.5 overflow-hidden rounded-full bg-iusia-ice">
+                {Object.entries(health.data?.by_status ?? {}).map(([status, n], i) => (
+                  <span
+                    key={status}
+                    className={STATUS_BAND[i % STATUS_BAND.length]}
+                    style={{ width: `${(n / (health.data?.total || 1)) * 100}%` }}
+                    title={`${matterStatusTerm(status).label}: ${n}`}
+                  />
+                ))}
+              </div>
+              <ul className="mt-3.5 flex flex-col gap-2">
+                {Object.entries(health.data?.by_status ?? {}).map(([status, n], i) => (
+                  <li key={status} className="flex items-center gap-2.5">
+                    <span
+                      aria-hidden
+                      className={"h-2 w-2 shrink-0 rounded-full " + STATUS_BAND[i % STATUS_BAND.length]}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-iusia-carbon">
+                      {matterStatusTerm(status).label}
+                    </span>
+                    <span className="shrink-0 text-[12.5px] tnum text-iusia-mist-text">
+                      {n} · {Math.round((n / (health.data?.total || 1)) * 100)}%
                     </span>
                   </li>
-                );
-              })}
-            </ul>
+                ))}
+              </ul>
+            </>
           )}
           {inactiveCount > 0 ? (
             <button
@@ -225,20 +241,31 @@ export function CommandCenter({ me }: { me: MeResponse }) {
               Nadie tiene trabajo pendiente registrado.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1.5">
-              {workload.data?.workload.slice(0, 5).map((w) => (
-                <li
-                  key={w.assignedTo ?? "sin"}
-                  className="flex items-center justify-between gap-2"
-                >
-                  <span className="truncate text-[13px] text-iusia-carbon">
-                    {w.name ?? "Sin asignar"}
-                  </span>
-                  <span className="shrink-0 text-[12.5px] tnum text-iusia-mist-text">
-                    {w.openTasks}
-                  </span>
-                </li>
-              ))}
+            <ul className="flex flex-col gap-2.5">
+              {(() => {
+                const rows = workload.data?.workload.slice(0, 5) ?? [];
+                const max = Math.max(...rows.map((r) => r.openTasks), 1);
+                return rows.map((w) => (
+                  <li key={w.assignedTo ?? "sin"}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-[13px] text-iusia-carbon">
+                        {w.name ?? "Sin asignar"}
+                      </span>
+                      <span className="shrink-0 text-[12.5px] tnum text-iusia-mist-text">
+                        {w.openTasks}
+                      </span>
+                    </div>
+                    {/* La carga se compara entre personas, así que la barra se mide
+                        contra quien más tiene, no contra un total inventado. */}
+                    <span className="mt-1 block h-1 overflow-hidden rounded-full bg-iusia-paper">
+                      <span
+                        className="block h-full rounded-full bg-iusia-navy/45"
+                        style={{ width: `${(w.openTasks / max) * 100}%` }}
+                      />
+                    </span>
+                  </li>
+                ));
+              })()}
             </ul>
           )}
           <Link
