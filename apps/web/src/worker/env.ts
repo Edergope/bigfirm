@@ -32,6 +32,14 @@ export interface IusiaSecrets {
    * global `AiSearchInstance` de @cloudflare/workers-types.
    */
   AI_SEARCH?: AiSearchInstance;
+  /**
+   * Modo de orquestación. "dynamic" activa el planner multiagente; cualquier otro
+   * valor (o ausencia) mantiene el DAG piloto validado (00→01→03) como fallback
+   * operacional. Se controla por entorno; nunca por frontend ni por el modelo.
+   */
+  ORCHESTRATION_MODE?: string;
+  /** Límite duro de créditos por root execution dinámica (string→número). */
+  ROOT_CREDIT_LIMIT?: string;
 }
 
 declare global {

@@ -1,22 +1,42 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import {
+  IusiaError,
+  ORCHESTRATION_LIMITS,
+  canAffordNextExecution,
+  computeRootCreditBudget,
+  creditsForCost,
+  deriveConclusionText,
   newId,
+  providerCostUsd,
+  ExecutionSafetyLedger,
+  type CircuitBreakerReason,
   type DocumentExcerpt,
   type Materiality,
+  type TeamPlan,
+  type TeamPlanTask,
+  type UpstreamOutputRef,
   type WorkPackage,
 } from "@iusia/domain";
-import { getAgentDefinition } from "@iusia/agents";
 import {
+  buildAgentCatalog,
+  eligibleAgentIds,
+  getAgentDefinition,
+  ORCHESTRATOR_AGENT_ID,
+} from "@iusia/agents";
+import {
+  buildFallbackTeamPlan,
   dispatchBatches,
   evaluateGate,
   planFor,
+  teamPlanToDag,
   WAVE_GATE,
   type DagNode,
   type Wave,
 } from "@iusia/orchestration";
 import {
   AuditRepository,
+  CreditRepository,
   DocumentRepository,
   ExecutionEventRepository,
   ExecutionRepository,
@@ -28,6 +48,8 @@ import type { LegalWorker, RunResult } from "../agents/legal-worker.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import { collectMatterEvidence } from "./rag-evidence.js";
 import { NotificationService } from "../services/notifications.js";
+import { ModelGateway, rateFor } from "../services/model-gateway.js";
+import { planTeam, type MatterBrief } from "../services/team-planner.js";
 
 export interface MatterOrchestrationParams {
   organization_id: string;
@@ -37,16 +59,23 @@ export interface MatterOrchestrationParams {
   objective: string;
 }
 
+/** Estimación conservadora de créditos por ejecución (alineada con la ruta HTTP). */
+const ESTIMATED_CREDITS_PER_RUN = 300;
+const DEFAULT_ROOT_CREDIT_LIMIT = 5000;
+
+type DagResult = { root_execution_id: string; completed: string[]; failed: string[] };
+
 /**
  * DAG jurídico sobre Cloudflare Workflows.
  *
- * Reparto de responsabilidades (Blueprint §06):
- *  - Workflows aporta durabilidad, pasos, reintentos y espera de eventos.
- *  - IUSIA aporta QUÉ agentes corren, en qué orden, qué va en paralelo y qué
- *    gate bloquea el avance.
+ * Dos modos (feature flag `ORCHESTRATION_MODE`):
+ *  - "pilot": DAG estático validado 00→01→03 (se conserva como fallback operacional).
+ *  - "dynamic": el Managing Partner planifica el equipo (00 PLAN), el servidor valida
+ *    el TeamPlan, se ejecutan los especialistas con dependencias y fan-in, y el 00
+ *    INTEGRATE consolida. Con circuit breaker y presupuesto server-side.
  *
- * Los gates se evalúan aquí, de forma determinista. El modelo nunca decide si
- * el DAG puede avanzar.
+ * Los gates se evalúan aquí, de forma determinista. El modelo nunca decide si el DAG
+ * puede avanzar, qué agentes existen, ni el scope/modelo/tools.
  */
 export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
   Env,
@@ -55,7 +84,18 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
   override async run(
     event: WorkflowEvent<MatterOrchestrationParams>,
     step: WorkflowStep,
-  ): Promise<{ root_execution_id: string; completed: string[]; failed: string[] }> {
+  ): Promise<DagResult> {
+    const dynamic = this.env.ORCHESTRATION_MODE === "dynamic";
+    return dynamic ? this.runDynamic(event, step) : this.runPilot(event, step);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // RUTA PILOTO (validada en Bloques 7/7.5/7.6). Intacta como fallback.
+  // ────────────────────────────────────────────────────────────────────────
+  private async runPilot(
+    event: WorkflowEvent<MatterOrchestrationParams>,
+    step: WorkflowStep,
+  ): Promise<DagResult> {
     const params = event.payload;
     const db = createDb(this.env.DB);
     const matters = new MatterRepository(db);
@@ -70,7 +110,6 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       rootExecutionId: params.root_execution_id,
     };
 
-    // ── Plan de ejecución según materialidad ──
     const plan = await step.do("resolve-plan", async () => {
       const matter = await matters.findById(params.organization_id, params.matter_id);
       if (!matter) throw new Error(`Matter ${params.matter_id} no encontrado`);
@@ -82,8 +121,6 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       };
     });
 
-    // La raíz pasa de WAITING (esperando al motor durable) a RUNNING en cuanto el
-    // Workflow arranca de verdad. La máquina de estados no admite atajos.
     await step.do("start-root-execution", async () => {
       await executions.transition(params.root_execution_id, "RUNNING");
     });
@@ -93,13 +130,11 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         ...eventBase,
         executionId: params.root_execution_id,
         type: "execution.created",
-        // Sin agente: la raíz es la orquestación, no un nodo del grafo.
         status: "RUNNING",
         detail: { materiality: plan.materiality, node_count: plan.nodes.length },
       });
     });
 
-    // Contexto documental del matter: referencias autorizadas (punteros, no contenido).
     const sources = await step.do("collect-authorized-sources", async () => {
       const docs = await documents.listForMatter(params.organization_id, params.matter_id);
       return docs.map((d) => ({
@@ -110,11 +145,6 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       }));
     });
 
-    // Evidencia RAG scopeada al matter: recuperada del índice AI Search YA validado.
-    // El alcance se deriva SIEMPRE en el servidor (esta organización + este matter);
-    // nunca del modelo, del prompt, del cliente ni de un output previo. Los chunks
-    // autorizados se inyectan como document_excerpts para que los agentes razonen
-    // sobre la evidencia real del expediente y no sobre conocimiento general.
     const evidence = await step.do(
       "collect-rag-evidence",
       async (): Promise<DocumentExcerpt[]> => {
@@ -123,7 +153,6 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
           organizationId: params.organization_id,
           matterId: params.matter_id,
-          // La query es el objetivo real de la ejecución, no un texto hardcodeado.
           objective: params.objective,
           documentNames: new Map(docs.map((d) => [d.id, d.name])),
           maxResults: 5,
@@ -131,7 +160,6 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       },
     );
 
-    // Provenance de la recuperación como tool call real (alimenta el ledger de eventos).
     await step.do("emit-rag-retrieval", async () => {
       await events.append({
         ...eventBase,
@@ -141,9 +169,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         detail: {
           tool: "ai_search.retrieval",
           chunk_count: evidence.length,
-          document_ids: [
-            ...new Set(evidence.map((e) => e.ref_id.split("#")[0] ?? e.ref_id)),
-          ].join(","),
+          document_ids: [...new Set(evidence.map((e) => e.ref_id.split("#")[0] ?? e.ref_id))].join(","),
           query_source: "execution.objective",
         },
       });
@@ -154,43 +180,31 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     const failed: string[] = [];
 
     for (const [batchIndex, batch] of batches.entries()) {
-      // Un lote con más de un nodo son ramas realmente paralelas del DAG.
       const results = await Promise.all(
         batch.map((node) =>
           step.do(
             `dispatch-${batchIndex}-${node.agent_id}`,
-            {
-              retries: { limit: 2, delay: "10 seconds", backoff: "exponential" },
-              timeout: "10 minutes",
-            },
+            { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "10 minutes" },
             async (): Promise<RunResult> => {
               const def = getAgentDefinition(node.agent_id);
-
               const executionId = await executions.create({
                 organizationId: params.organization_id,
                 matterId: params.matter_id,
                 agentId: node.agent_id,
-                // Toda ejecución de nodo cuelga de la raíz del grafo, incluido el 00:
-                // la raíz representa la orquestación, no a un agente concreto.
                 parentExecutionId: params.root_execution_id,
                 rootExecutionId: params.root_execution_id,
                 startedBy: params.started_by,
                 workflowInstanceId: event.instanceId,
               });
-
               await events.append({
                 ...eventBase,
                 executionId,
                 type: "agent.dispatched",
-                fromAgentId:
-                  node.agent_id === "pisoso-orquestador-juridico"
-                    ? null
-                    : "pisoso-orquestador-juridico",
+                fromAgentId: node.agent_id === ORCHESTRATOR_AGENT_ID ? null : ORCHESTRATOR_AGENT_ID,
                 toAgentId: node.agent_id,
                 status: "PENDING",
                 detail: { wave: node.wave, batch: batchIndex },
               });
-
               const workPackage: WorkPackage = {
                 work_package_id: newId("workPackage"),
                 matter_id: params.matter_id,
@@ -201,7 +215,6 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                 questions: [],
                 fact_refs: [],
                 source_refs: sources,
-                // Evidencia RAG autorizada y scopeada, compartida por los nodos del DAG.
                 document_excerpts: evidence,
                 upstream_outputs: [],
                 constraints: [
@@ -214,12 +227,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                 language: "es-CO",
                 created_at: new Date().toISOString(),
               };
-
-              // Sub-agente real: instancia direccionada por execution_id.
-              const worker = await getAgentByName<Env, LegalWorker>(
-                this.env.LegalWorker,
-                executionId,
-              );
+              const worker = await getAgentByName<Env, LegalWorker>(this.env.LegalWorker, executionId);
               return worker.run(workPackage);
             },
           ),
@@ -231,25 +239,17 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         else failed.push(r.execution_id);
       }
 
-      // ── Gate de la ola, determinista y del lado del servidor ──
       const wave = batch[0]!.wave as Wave;
       const isLastBatchOfWave =
-        batchIndex === batches.length - 1 ||
-        batches[batchIndex + 1]!.some((n) => n.wave !== wave);
+        batchIndex === batches.length - 1 || batches[batchIndex + 1]!.some((n) => n.wave !== wave);
 
       if (isLastBatchOfWave) {
         const gateResult = await step.do(`gate-${wave}`, async () => {
-          // La fila raíz se excluye: comparte agent_id con el 00 y contarla podría
-          // dar por satisfecho un nodo que nunca se ejecutó.
           const rows = (await executions.listByRoot(params.root_execution_id)).filter(
             (r) => r.id !== params.root_execution_id,
           );
-          const completedAgents = new Set(
-            rows.filter((r) => r.status === "COMPLETED").map((r) => r.agentId),
-          );
-          const failedAgents = new Set(
-            rows.filter((r) => r.status === "FAILED").map((r) => r.agentId),
-          );
+          const completedAgents = new Set(rows.filter((r) => r.status === "COMPLETED").map((r) => r.agentId));
+          const failedAgents = new Set(rows.filter((r) => r.status === "FAILED").map((r) => r.agentId));
           return evaluateGate({
             wave,
             materiality: plan.materiality,
@@ -270,13 +270,11 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           });
         });
 
-        // Approval gate: en asuntos HIGH_STAKES el DAG espera decisión humana.
         if (!gateResult.passed && gateResult.requiresHumanApproval) {
           const approval = await step.waitForEvent<{ approved: boolean; user_id: string }>(
             `human-approval-${wave}`,
             { type: `gate.approval.${WAVE_GATE[wave]}`, timeout: "7 days" },
           );
-
           await step.do(`gate-approval-audit-${wave}`, async () => {
             await audit.record({
               organizationId: params.organization_id,
@@ -289,26 +287,19 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
               detail: { wave },
             });
           });
-
           if (!approval.payload.approved) break;
         } else if (!gateResult.passed) {
-          // Gate bloqueado sin vía de aprobación humana: el DAG se detiene aquí.
           break;
         }
       }
     }
 
-    // Cierra la ejecución raíz: sin esto el grafo quedaría eternamente en WAITING
-    // y la UI no podría afirmar que la orquestación terminó.
     await step.do("close-root-execution", async () => {
       await executions.transition(
         params.root_execution_id,
         failed.length > 0 ? "FAILED" : "COMPLETED",
         failed.length > 0
-          ? {
-              errorCode: "DOWNSTREAM_EXECUTION_FAILED",
-              errorMessage: `${failed.length} ejecución(es) de agente fallaron`,
-            }
+          ? { errorCode: "DOWNSTREAM_EXECUTION_FAILED", errorMessage: `${failed.length} ejecución(es) de agente fallaron` }
           : {},
       );
     });
@@ -323,8 +314,6 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       });
     });
 
-    // Notifica al owner del matter el cierre de la orquestación. NO bloquea:
-    // sin Resend configurado, la notificación queda NOT_CONFIGURED y el DAG termina igual.
     await step.do("notify-owner", async () => {
       const matter = await matters.findById(params.organization_id, params.matter_id);
       const email = await matters.ownerEmail(params.matter_id);
@@ -337,14 +326,555 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         event: failed.length > 0 ? "EXECUTION_FAILED" : "EXECUTION_COMPLETED",
         execution_id: params.root_execution_id,
         correlation_id: event.instanceId,
-        payload: {
-          matter_reference: matter?.reference ?? params.matter_id,
+        payload: { matter_reference: matter?.reference ?? params.matter_id, completed: completed.length, failed: failed.length },
+      });
+    });
+
+    return { root_execution_id: params.root_execution_id, completed, failed };
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // RUTA DINÁMICA (multiagente) — con circuit breaker y presupuesto server-side.
+  // ────────────────────────────────────────────────────────────────────────
+  private async runDynamic(
+    event: WorkflowEvent<MatterOrchestrationParams>,
+    step: WorkflowStep,
+  ): Promise<DagResult> {
+    const params = event.payload;
+    const db = createDb(this.env.DB);
+    const matters = new MatterRepository(db);
+    const executions = new ExecutionRepository(db);
+    const events = new ExecutionEventRepository(db);
+    const documents = new DocumentRepository(db);
+    const credits = new CreditRepository(db);
+
+    const eventBase = {
+      organizationId: params.organization_id,
+      matterId: params.matter_id,
+      rootExecutionId: params.root_execution_id,
+    };
+    const safety = new ExecutionSafetyLedger();
+    const completed: string[] = [];
+    const failed: string[] = [];
+    let spentCredits = 0;
+
+    const startedAtMs = await step.do("dyn-start", async () => {
+      await executions.transition(params.root_execution_id, "RUNNING");
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "execution.created",
+        status: "RUNNING",
+        detail: { mode: "dynamic" },
+      });
+      return Date.now();
+    });
+
+    // Cancelación server-side: re-lee la raíz antes de cada nueva llamada/despacho.
+    const isCancelled = async (label: string): Promise<boolean> =>
+      step.do(`dyn-cancel-check-${label}`, async () => {
+        const root = await executions.findById(params.root_execution_id);
+        return !root || root.status === "CANCELLED";
+      });
+
+    const abort = async (
+      reason: CircuitBreakerReason,
+      detail: string,
+    ): Promise<DagResult> => {
+      await step.do(`dyn-abort-${reason}-${Math.random().toString(36).slice(2, 7)}`, async () => {
+        const status = reason === "USER_CANCELLED" ? "CANCELLED" : "FAILED";
+        const root = await executions.findById(params.root_execution_id);
+        if (root && root.status !== "CANCELLED" && root.status !== "COMPLETED" && root.status !== "FAILED") {
+          await executions.transition(params.root_execution_id, status, {
+            errorCode: reason,
+            errorMessage: detail,
+          });
+        }
+        await events.append({
+          ...eventBase,
+          executionId: params.root_execution_id,
+          type: reason === "USER_CANCELLED" ? "agent.cancelled" : "gate.blocked",
+          status: reason === "USER_CANCELLED" ? "CANCELLED" : "BLOCKED",
+          detail: { circuit_breaker_reason: reason, detail: detail.slice(0, 200) },
+        });
+        await events.append({
+          ...eventBase,
+          executionId: params.root_execution_id,
+          type: "execution.failed",
+          status: "FAILED",
+          detail: { circuit_breaker_reason: reason, completed: completed.length },
+        });
+      });
+      return { root_execution_id: params.root_execution_id, completed, failed };
+    };
+
+    // Contexto del expediente.
+    const ctx = await step.do("dyn-resolve-context", async () => {
+      const matter = await matters.findById(params.organization_id, params.matter_id);
+      if (!matter) throw new IusiaError("NOT_FOUND", `Matter ${params.matter_id} no encontrado`);
+      const docs = await documents.listForMatter(params.organization_id, params.matter_id);
+      return {
+        materiality: matter.materiality as Materiality,
+        jurisdiction: matter.jurisdiction,
+        title: matter.title,
+        practice_areas: matter.practiceAreas ?? [],
+        document_summary: docs.map((d) => `${d.name} (${d.classification})`),
+        document_names: docs.map((d) => [d.id, d.name] as const),
+      };
+    });
+    const documentNames = new Map(ctx.document_names);
+
+    if (await isCancelled("pre-plan")) return abort("USER_CANCELLED", "cancelado antes de planificar");
+
+    // ── FASE 00 PLAN ──
+    const orchestratorDef = getAgentDefinition(ORCHESTRATOR_AGENT_ID);
+    const planExecutionId = await step.do("dyn-create-plan-exec", async () =>
+      executions.create({
+        organizationId: params.organization_id,
+        matterId: params.matter_id,
+        agentId: ORCHESTRATOR_AGENT_ID,
+        parentExecutionId: params.root_execution_id,
+        rootExecutionId: params.root_execution_id,
+        startedBy: params.started_by,
+        workflowInstanceId: event.instanceId,
+      }),
+    );
+
+    const planned = await step.do("dyn-plan", async () => {
+      const gateway = new ModelGateway(this.env);
+      const brief: MatterBrief = {
+        title: ctx.title,
+        materiality: ctx.materiality,
+        jurisdiction: ctx.jurisdiction,
+        practice_areas: ctx.practice_areas,
+        document_summary: ctx.document_summary,
+      };
+      let usage = { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 };
+      let provider = "";
+      let model = "";
+      const result = await planTeam({
+        objective: params.objective,
+        brief,
+        catalog: buildAgentCatalog(),
+        eligible: eligibleAgentIds(),
+        runModel: async (messages) => {
+          const r = await gateway.complete(orchestratorDef.model_policy, messages, {
+            organization_id: params.organization_id,
+            matter_id: params.matter_id,
+            agent_id: ORCHESTRATOR_AGENT_ID,
+            execution_id: planExecutionId,
+          });
+          usage = {
+            input_tokens: usage.input_tokens + r.usage.input_tokens,
+            output_tokens: usage.output_tokens + r.usage.output_tokens,
+            cached_input_tokens: usage.cached_input_tokens + r.usage.cached_input_tokens,
+          };
+          provider = r.provider;
+          model = r.model;
+          return r.text;
+        },
+        fallback: () =>
+          buildFallbackTeamPlan(
+            { objective: params.objective, materiality: ctx.materiality, practice_areas: ctx.practice_areas },
+            [orchestratorDef, ...buildAgentCatalog().map((c) => getAgentDefinition(c.agent_id))],
+          ),
+      });
+
+      // Persistir el TeamPlan como artefacto de control + costear la planificación.
+      const outputRef = `executions/${params.organization_id}/${params.matter_id}/${planExecutionId}.json`;
+      await this.env.ARTIFACTS.put(
+        outputRef,
+        JSON.stringify({ kind: "team_plan", plan_source: result.source, plan: result.plan }),
+        { httpMetadata: { contentType: "application/json" } },
+      );
+      const rate = rateFor(provider, model);
+      const costUsd = providerCostUsd(rate, usage);
+      const creditsUsed = creditsForCost(costUsd);
+      await credits.post({
+        organizationId: params.organization_id,
+        kind: "CONSUMPTION",
+        amount: -creditsUsed,
+        idempotencyKey: `execution:${planExecutionId}`,
+        matterId: params.matter_id,
+        executionId: planExecutionId,
+        userId: params.started_by,
+        provider,
+        model,
+        providerCostUsd: costUsd,
+        allowNegative: true,
+      });
+      await executions.transition(planExecutionId, "RUNNING");
+      await executions.transition(planExecutionId, "COMPLETED", {
+        provider,
+        model,
+        outputRef,
+        outputType: "STRATEGY",
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        providerCostUsd: costUsd,
+        creditsConsumed: creditsUsed,
+      });
+      await events.append({
+        ...eventBase,
+        executionId: planExecutionId,
+        type: "agent.dispatched",
+        toAgentId: ORCHESTRATOR_AGENT_ID,
+        status: "COMPLETED",
+        detail: { phase: "plan", plan_source: result.source, specialist_count: result.plan.tasks.length },
+      });
+      await events.append({
+        ...eventBase,
+        executionId: planExecutionId,
+        type: "agent.output.received",
+        toAgentId: ORCHESTRATOR_AGENT_ID,
+        status: "COMPLETED",
+        detail: { phase: "plan", credits: creditsUsed },
+      });
+      return { plan: result.plan, source: result.source, creditsUsed };
+    });
+
+    spentCredits += planned.creditsUsed;
+    const plan: TeamPlan = planned.plan;
+    const taskByAgent = new Map<string, TeamPlanTask>(plan.tasks.map((t) => [t.agent_id, t]));
+
+    const planGuard = safety.registerPlanOrIntegration("plan");
+    if (!planGuard.ok) return abort(planGuard.reason, planGuard.detail);
+
+    // ── Presupuesto de la root ──
+    const estimatedRemaining = plan.tasks.length + 1; // specialists + INTEGRATE
+    const hardBudget = computeRootCreditBudget({
+      estimatedExecutions: estimatedRemaining + 1,
+      perExecutionCredits: ESTIMATED_CREDITS_PER_RUN,
+      configuredRootLimit: Number(this.env.ROOT_CREDIT_LIMIT ?? DEFAULT_ROOT_CREDIT_LIMIT),
+    });
+    const balanceOk = await step.do("dyn-budget-check", async () => {
+      const balance = await credits.balance(params.organization_id);
+      return balance >= estimatedRemaining * ESTIMATED_CREDITS_PER_RUN;
+    });
+    if (!balanceOk) return abort("CREDIT_BUDGET_EXCEEDED", "saldo insuficiente para el equipo planificado");
+
+    // ── DAG dinámico ──
+    const nodes = teamPlanToDag(plan);
+    const batches = dispatchBatches(nodes);
+    const outputByAgent = new Map<string, { execution_id: string; output_ref: string; output_type: string }>();
+
+    for (const [batchIndex, batch] of batches.entries()) {
+      if (await isCancelled(`batch-${batchIndex}`)) return abort("USER_CANCELLED", "cancelado durante la ejecución");
+
+      const elapsedMin = (await step.do(`dyn-clock-${batchIndex}`, async () => Date.now())) - startedAtMs;
+      if (elapsedMin / 60000 > ORCHESTRATION_LIMITS.MAX_ROOT_WALL_TIME_MINUTES) {
+        return abort("WALL_TIME_EXCEEDED", `> ${ORCHESTRATION_LIMITS.MAX_ROOT_WALL_TIME_MINUTES} min`);
+      }
+
+      // Cap de concurrencia real: subdividir el batch en chunks ≤ MAX_PARALLEL_AGENTS.
+      for (let i = 0; i < batch.length; i += ORCHESTRATION_LIMITS.MAX_PARALLEL_AGENTS) {
+        const chunk = batch.slice(i, i + ORCHESTRATION_LIMITS.MAX_PARALLEL_AGENTS);
+        const parGuard = safety.checkParallelBatch(chunk.length);
+        if (!parGuard.ok) return abort(parGuard.reason, parGuard.detail);
+
+        // Guardas por task antes de despachar (duplicados, ejecuciones, presupuesto).
+        for (const node of chunk) {
+          const task = taskByAgent.get(node.agent_id);
+          if (!task) return abort("PLAN_VIOLATION", `nodo fuera del TeamPlan: ${node.agent_id}`);
+          const g = safety.registerTask({
+            taskId: task.task_id,
+            agentId: node.agent_id,
+            mission: task.mission,
+            matterId: params.matter_id,
+          });
+          if (!g.ok) return abort(g.reason, g.detail);
+          if (!canAffordNextExecution({ spentCredits, nextEstimatedCredits: ESTIMATED_CREDITS_PER_RUN, hardBudget })) {
+            return abort("CREDIT_BUDGET_EXCEEDED", `presupuesto ${hardBudget} agotado`);
+          }
+          for (const depAgent of node.requires) {
+            const t = safety.registerTransfer(depAgent, node.agent_id);
+            if (!t.ok) return abort(t.reason, t.detail);
+          }
+        }
+
+        const results = await Promise.all(
+          chunk.map((node) => {
+            const task = taskByAgent.get(node.agent_id)!;
+            // Dependencias resueltas (ya ejecutadas en batches previos, topológico).
+            const deps = node.requires
+              .map((depAgent) => {
+                const o = outputByAgent.get(depAgent);
+                return o ? { agent_id: depAgent, ...o } : null;
+              })
+              .filter((d): d is NonNullable<typeof d> => Boolean(d));
+            return step.do(
+              `dyn-dispatch-${batchIndex}-${node.agent_id}`,
+              { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "10 minutes" },
+              async (): Promise<RunResult & { agent_id: string; output_ref: string | null }> => {
+                const def = getAgentDefinition(node.agent_id);
+                const executionId = await executions.create({
+                  organizationId: params.organization_id,
+                  matterId: params.matter_id,
+                  agentId: node.agent_id,
+                  parentExecutionId: params.root_execution_id,
+                  rootExecutionId: params.root_execution_id,
+                  startedBy: params.started_by,
+                  workflowInstanceId: event.instanceId,
+                });
+                await events.append({
+                  ...eventBase,
+                  executionId,
+                  type: "agent.dispatched",
+                  fromAgentId: ORCHESTRATOR_AGENT_ID,
+                  toAgentId: node.agent_id,
+                  status: "PENDING",
+                  detail: {
+                    phase: "specialist",
+                    task_id: task.task_id,
+                    why_selected: task.why_selected.slice(0, 200),
+                    depends_on: node.requires.join(","),
+                  },
+                });
+                // Transferencias de dependencias (fan-in parcial specialist→specialist).
+                for (const depAgent of node.requires) {
+                  await events.append({
+                    ...eventBase,
+                    executionId,
+                    type: "message.transferred",
+                    fromAgentId: depAgent,
+                    toAgentId: node.agent_id,
+                    status: "RUNNING",
+                    detail: { task_id: task.task_id },
+                  });
+                }
+                // Upstream outputs reales (leídos de R2, acotados).
+                const resolvedUpstream: UpstreamOutputRef[] = [];
+                for (const dep of deps) {
+                  resolvedUpstream.push({
+                    execution_id: dep.execution_id,
+                    agent_id: dep.agent_id,
+                    output_type: dep.output_type,
+                    output_ref: dep.output_ref,
+                    summary: await this.readUpstreamSummary(dep.output_ref),
+                  });
+                }
+                // RAG por misión.
+                const excerpts = await collectMatterEvidence({
+                  retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
+                  organizationId: params.organization_id,
+                  matterId: params.matter_id,
+                  objective: `${task.mission} ${task.questions.join(" ")}`.trim(),
+                  documentNames,
+                  maxResults: 5,
+                });
+                await events.append({
+                  ...eventBase,
+                  executionId,
+                  type: "agent.tool.called",
+                  status: "RUNNING",
+                  detail: {
+                    tool: "ai_search.retrieval",
+                    chunk_count: excerpts.length,
+                    document_ids: [...new Set(excerpts.map((e) => e.ref_id.split("#")[0] ?? e.ref_id))].join(","),
+                    query_source: "task.mission",
+                  },
+                });
+                const workPackage: WorkPackage = {
+                  work_package_id: newId("workPackage"),
+                  matter_id: params.matter_id,
+                  execution_id: executionId,
+                  parent_execution_id: params.root_execution_id,
+                  agent_id: node.agent_id,
+                  objective: task.mission,
+                  questions: task.questions,
+                  fact_refs: [],
+                  source_refs: [],
+                  document_excerpts: excerpts,
+                  upstream_outputs: resolvedUpstream,
+                  constraints: [
+                    `Contexto del encargo global (subordinado a tu rol): ${params.objective}`,
+                    "Trabaja únicamente con la evidencia autorizada del WorkPackage.",
+                    "Declara expresamente lo que no consta en el expediente.",
+                  ],
+                  expected_output_schema: def.output_schema_id,
+                  allowed_tools: def.tools_policy,
+                  jurisdiction: ctx.jurisdiction,
+                  language: "es-CO",
+                  created_at: new Date().toISOString(),
+                };
+                const worker = await getAgentByName<Env, LegalWorker>(this.env.LegalWorker, executionId);
+                const rr = await worker.run(workPackage);
+                return { ...rr, agent_id: node.agent_id, output_ref: rr.output_ref };
+              },
+            );
+          }),
+        );
+
+        for (const r of results) {
+          spentCredits += r.credits_consumed;
+          if (r.status === "COMPLETED") {
+            completed.push(r.execution_id);
+            if (r.output_ref) {
+              outputByAgent.set(r.agent_id, {
+                execution_id: r.execution_id,
+                output_ref: r.output_ref,
+                output_type: getAgentDefinition(r.agent_id).output_type,
+              });
+            }
+          } else {
+            failed.push(r.execution_id);
+          }
+        }
+      }
+
+      // Gate de la ola (determinista). Un required fallido bloquea.
+      const wave = batch[0]!.wave as Wave;
+      const isLastBatchOfWave =
+        batchIndex === batches.length - 1 || batches[batchIndex + 1]!.some((n) => n.wave !== wave);
+      if (isLastBatchOfWave) {
+        const gateResult = await step.do(`dyn-gate-${wave}`, async () => {
+          const rows = (await executions.listByRoot(params.root_execution_id)).filter(
+            (r) => r.id !== params.root_execution_id && r.id !== planExecutionId,
+          );
+          const completedAgents = new Set(rows.filter((r) => r.status === "COMPLETED").map((r) => r.agentId));
+          const failedAgents = new Set(rows.filter((r) => r.status === "FAILED").map((r) => r.agentId));
+          const requiredNodes = nodes.filter(
+            (n) => n.wave === wave && (taskByAgent.get(n.agent_id)?.required ?? true),
+          );
+          return evaluateGate({
+            wave,
+            materiality: ctx.materiality,
+            requiredNodes,
+            completedAgentIds: completedAgents,
+            failedAgentIds: failedAgents,
+            humanApproval: null,
+          });
+        });
+        await step.do(`dyn-gate-event-${wave}`, async () => {
+          await events.append({
+            ...eventBase,
+            executionId: params.root_execution_id,
+            type: gateResult.passed ? "gate.passed" : "gate.blocked",
+            status: gateResult.passed ? "RUNNING" : "BLOCKED",
+            detail: { gate: gateResult.gate, reason: gateResult.reason },
+          });
+        });
+        if (!gateResult.passed) {
+          return abort("PLAN_VIOLATION", `gate ${gateResult.gate}: ${gateResult.reason}`);
+        }
+      }
+    }
+
+    if (await isCancelled("pre-integrate")) return abort("USER_CANCELLED", "cancelado antes de integrar");
+
+    // ── FASE 00 INTEGRATE (usa el agent.md canónico del 00, sin modificarlo) ──
+    const intGuard = safety.registerPlanOrIntegration("integration");
+    if (!intGuard.ok) return abort(intGuard.reason, intGuard.detail);
+    if (!canAffordNextExecution({ spentCredits, nextEstimatedCredits: ESTIMATED_CREDITS_PER_RUN, hardBudget })) {
+      return abort("CREDIT_BUDGET_EXCEEDED", `presupuesto ${hardBudget} agotado antes de integrar`);
+    }
+
+    const integration = await step.do(
+      "dyn-integrate",
+      { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "10 minutes" },
+      async (): Promise<RunResult> => {
+        const executionId = await executions.create({
+          organizationId: params.organization_id,
+          matterId: params.matter_id,
+          agentId: ORCHESTRATOR_AGENT_ID,
+          parentExecutionId: params.root_execution_id,
+          rootExecutionId: params.root_execution_id,
+          startedBy: params.started_by,
+          workflowInstanceId: event.instanceId,
+        });
+        await events.append({
+          ...eventBase,
+          executionId,
+          type: "agent.started",
+          toAgentId: ORCHESTRATOR_AGENT_ID,
+          status: "RUNNING",
+          detail: { phase: "integrate" },
+        });
+        // Fan-in: todos los outputs de especialistas como upstream (no confiables).
+        const upstream: UpstreamOutputRef[] = [];
+        for (const [agentId, o] of outputByAgent.entries()) {
+          upstream.push({
+            execution_id: o.execution_id,
+            agent_id: agentId,
+            output_type: o.output_type,
+            output_ref: o.output_ref,
+            summary: await this.readUpstreamSummary(o.output_ref),
+          });
+        }
+        const excerpts = await collectMatterEvidence({
+          retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
+          organizationId: params.organization_id,
+          matterId: params.matter_id,
+          objective: params.objective,
+          documentNames,
+          maxResults: 5,
+        });
+        const def = getAgentDefinition(ORCHESTRATOR_AGENT_ID);
+        const workPackage: WorkPackage = {
+          work_package_id: newId("workPackage"),
+          matter_id: params.matter_id,
+          execution_id: executionId,
+          parent_execution_id: params.root_execution_id,
+          agent_id: ORCHESTRATOR_AGENT_ID,
+          objective: params.objective,
+          questions: [],
+          fact_refs: [],
+          source_refs: [],
+          document_excerpts: excerpts,
+          upstream_outputs: upstream,
+          constraints: [
+            "Integra los hallazgos de los especialistas: compara, detecta contradicciones y prioriza la evidencia del expediente.",
+            "No asumas que un especialista tiene razón; marca la incertidumbre y la evidencia faltante.",
+            failed.length > 0 ? `Ejecuciones fallidas: ${failed.length} (repórtalas).` : "Todas las tareas requeridas se completaron.",
+          ],
+          expected_output_schema: def.output_schema_id,
+          allowed_tools: def.tools_policy,
+          jurisdiction: ctx.jurisdiction,
+          language: "es-CO",
+          created_at: new Date().toISOString(),
+        };
+        const worker = await getAgentByName<Env, LegalWorker>(this.env.LegalWorker, executionId);
+        return worker.run(workPackage);
+      },
+    );
+    spentCredits += integration.credits_consumed;
+    if (integration.status === "COMPLETED") completed.push(integration.execution_id);
+    else failed.push(integration.execution_id);
+
+    await step.do("dyn-close-root", async () => {
+      await executions.transition(
+        params.root_execution_id,
+        integration.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+        integration.status === "COMPLETED"
+          ? {}
+          : { errorCode: "INTEGRATION_FAILED", errorMessage: "la integración final falló" },
+      );
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: integration.status === "COMPLETED" ? "execution.completed" : "execution.failed",
+        status: integration.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+        detail: {
           completed: completed.length,
           failed: failed.length,
+          specialists: outputByAgent.size,
+          spent_credits: spentCredits,
         },
       });
     });
 
     return { root_execution_id: params.root_execution_id, completed, failed };
+  }
+
+  /** Lee un output de especialista desde R2 y devuelve un resumen humano acotado. */
+  private async readUpstreamSummary(outputRef: string): Promise<string> {
+    try {
+      const obj = await this.env.ARTIFACTS.get(outputRef);
+      if (!obj) return "";
+      const stored = await obj.json<{ text?: string }>();
+      return deriveConclusionText(stored.text ?? "").slice(0, ORCHESTRATION_LIMITS.MAX_UPSTREAM_OUTPUT_SIZE);
+    } catch {
+      return "";
+    }
   }
 }

@@ -29,6 +29,7 @@ export const UpstreamOutputRef = z.object({
   output_ref: z.string().min(1),
   summary: z.string().max(4000).optional(),
 });
+export type UpstreamOutputRef = z.infer<typeof UpstreamOutputRef>;
 
 /**
  * Fragmento de documento externo. Se transporta siempre envuelto y etiquetado
