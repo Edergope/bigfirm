@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  deriveConclusionText,
   deriveOutcome,
   deriveProgressStages,
   ORCHESTRATOR_AGENT_ID,
   resolveEvidenceDocuments,
   selectIntegratorExecution,
   shouldKeepPolling,
+  shouldRefreshHistory,
   type EventView,
   type ExecutionView,
 } from "./orchestration-view.js";
@@ -122,5 +124,67 @@ describe("evidencia y polling", () => {
     expect(shouldKeepPolling("COMPLETED")).toBe(false);
     expect(shouldKeepPolling("FAILED")).toBe(false);
     expect(shouldKeepPolling("CANCELLED")).toBe(false);
+  });
+});
+
+/** Microbloque 7.6 — presentación humana del resultado. */
+describe("deriveConclusionText (resultado humano, no JSON)", () => {
+  const structured = JSON.stringify({
+    schema: "iusia.orchestration.v1",
+    conclusion_brief: "Atlas sostiene que la terminación debía notificarse con 90 días de anticipación.",
+    analysis_summary: "Resumen técnico más largo.",
+    evidence: [{ ref_id: "doc_x#1", excerpt: "…noventa días…" }],
+  });
+
+  it("[A] usa conclusion_brief como titular cuando existe", () => {
+    expect(deriveConclusionText(structured)).toBe(
+      "Atlas sostiene que la terminación debía notificarse con 90 días de anticipación.",
+    );
+  });
+
+  it("[B] el JSON estructurado NO es el contenido primario cuando hay conclusion_brief", () => {
+    const out = deriveConclusionText(structured);
+    expect(out).not.toContain("{");
+    expect(out).not.toContain("iusia.orchestration.v1");
+  });
+
+  it("[C] fallback al mejor campo humano si falta conclusion_brief", () => {
+    const noBrief = JSON.stringify({ schema: "x", analysis_summary: "Conclusión alterna legible." });
+    expect(deriveConclusionText(noBrief)).toBe("Conclusión alterna legible.");
+  });
+
+  it("[C2] si no es JSON, devuelve el texto humano tal cual", () => {
+    expect(deriveConclusionText("Texto plano del agente.")).toBe("Texto plano del agente.");
+  });
+
+  it("[D] nunca produce [object Object], nunca lanza, nunca vacía un resultado válido", () => {
+    const weird = JSON.stringify({ schema: "x", nested: { a: 1 } });
+    const out = deriveConclusionText(weird);
+    expect(out).not.toContain("[object Object]");
+    expect(out.length).toBeGreaterThan(0);
+    expect(deriveConclusionText("")).toBe("");
+    expect(deriveConclusionText(null)).toBe("");
+  });
+});
+
+/** Microbloque 7.6 — refresco del historial al estado terminal. */
+describe("shouldRefreshHistory (refresh en transición terminal)", () => {
+  it("[E] RUNNING → COMPLETED dispara el refresh", () => {
+    expect(shouldRefreshHistory("RUNNING", "COMPLETED")).toBe(true);
+  });
+
+  it("[G] COMPLETED → COMPLETED no vuelve a disparar (sin bucle)", () => {
+    expect(shouldRefreshHistory("COMPLETED", "COMPLETED")).toBe(false);
+  });
+
+  it("[H] RUNNING → FAILED también refresca; CANCELLED y BLOCKED igual", () => {
+    expect(shouldRefreshHistory("RUNNING", "FAILED")).toBe(true);
+    expect(shouldRefreshHistory("RUNNING", "CANCELLED")).toBe(true);
+    expect(shouldRefreshHistory("WAITING", "BLOCKED")).toBe(true);
+  });
+
+  it("mientras siga en curso no refresca", () => {
+    expect(shouldRefreshHistory(undefined, "RUNNING")).toBe(false);
+    expect(shouldRefreshHistory("RUNNING", "WAITING")).toBe(false);
   });
 });

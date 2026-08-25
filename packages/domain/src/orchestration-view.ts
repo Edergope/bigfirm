@@ -171,6 +171,83 @@ export function shouldKeepPolling(rootStatus: string | undefined): boolean {
 }
 
 /**
+ * Estados terminales de una orquestación desde la perspectiva de la UI. Incluye
+ * BLOCKED además de los tres del ledger: la vista deja de esperar en cuanto el
+ * flujo no puede avanzar por sí solo.
+ */
+export function isTerminalOrchestrationStatus(status: string): boolean {
+  return (
+    status === "COMPLETED" ||
+    status === "FAILED" ||
+    status === "CANCELLED" ||
+    status === "BLOCKED"
+  );
+}
+
+/**
+ * ¿Hay que refrescar el historial? Sólo en la TRANSICIÓN real de no-terminal a
+ * terminal. Devuelve false si ya estaba terminal (evita bucles de invalidación) y
+ * false mientras siga en curso.
+ */
+export function shouldRefreshHistory(
+  prevStatus: string | undefined,
+  currentStatus: string | undefined,
+): boolean {
+  return (
+    isTerminalOrchestrationStatus(currentStatus ?? "") &&
+    !isTerminalOrchestrationStatus(prevStatus ?? "")
+  );
+}
+
+/**
+ * Extrae la conclusión HUMANA de la salida de un agente para presentarla como
+ * titular. La salida real puede ser JSON estructurado (p.ej. schema
+ * `iusia.orchestration.v1`) cuyo campo legible es `conclusion_brief`.
+ *
+ * Robustez (no negociable): nunca devuelve "[object Object]", nunca lanza, nunca
+ * deja vacío un resultado válido. Prioriza `conclusion_brief`; si falta, usa el
+ * mejor campo humano disponible; si nada es interpretable, devuelve el texto crudo
+ * tal cual (legible como último recurso). No cambia el schema del agente.
+ */
+export function deriveConclusionText(rawOutput: string | null | undefined): string {
+  const raw = (rawOutput ?? "").trim();
+  if (raw.length === 0) return "";
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // No es JSON: ya es texto humano.
+    return raw;
+  }
+
+  if (typeof parsed === "string") {
+    return parsed.trim().length > 0 ? parsed.trim() : raw;
+  }
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    const HUMAN_FIELDS = [
+      "conclusion_brief",
+      "conclusion",
+      "analysis_summary",
+      "summary",
+      "resumen",
+      "respuesta",
+      "answer",
+      "text",
+    ];
+    for (const field of HUMAN_FIELDS) {
+      const value = obj[field];
+      if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+  }
+  // Estructurado pero sin campo humano reconocido: se muestra crudo, legible.
+  return raw;
+}
+
+/**
  * Resuelve nombres legibles de documentos de evidencia a partir de sus ids,
  * conservando el orden y sin inventar: un id sin nombre conocido se muestra tal cual.
  */

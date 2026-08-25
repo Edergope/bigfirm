@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -12,6 +12,7 @@ import {
 import {
   deriveProgressStages,
   shouldKeepPolling,
+  shouldRefreshHistory,
   type ProgressStage,
   type StageState,
 } from "@iusia/domain";
@@ -101,7 +102,12 @@ export function MatterOrchestration({
       />
 
       {selectedRoot ? (
-        <RunView key={selectedRoot} rootExecutionId={selectedRoot} matterDocuments={data.documents} />
+        <RunView
+          key={selectedRoot}
+          matterId={matterId}
+          rootExecutionId={selectedRoot}
+          matterDocuments={data.documents}
+        />
       ) : (
         <Card>
           <CardHeader title="Análisis de IUSIA" />
@@ -194,13 +200,16 @@ function StartCard({
 }
 
 function RunView({
+  matterId,
   rootExecutionId,
   matterDocuments,
 }: {
+  matterId: string;
   rootExecutionId: string;
   matterDocuments: MatterDetail["documents"];
 }) {
   const [showTrace, setShowTrace] = useState(false);
+  const queryClient = useQueryClient();
 
   const eventsQuery = useQuery({
     queryKey: ["execution-events", rootExecutionId],
@@ -227,6 +236,19 @@ function RunView({
     queryFn: () => api.executionResult(rootExecutionId),
     enabled: isTerminal,
   });
+
+  // Al ENTRAR en estado terminal (una sola transición), refresca el historial y el
+  // resultado sin recargar la página. El historial se hidrata de ["matter", id], que
+  // sólo se invalidaba al iniciar; aquí se sincroniza al cierre. `shouldRefreshHistory`
+  // sólo dispara en la transición real no-terminal → terminal, evitando bucles.
+  const prevStatus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (shouldRefreshHistory(prevStatus.current, rootStatus)) {
+      void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
+      void queryClient.invalidateQueries({ queryKey: ["execution-result", rootExecutionId] });
+    }
+    prevStatus.current = rootStatus;
+  }, [rootStatus, matterId, rootExecutionId, queryClient]);
 
   const stages = useMemo(() => {
     if (!eventsQuery.data) return [] as ProgressStage[];
@@ -381,9 +403,19 @@ function ResultView({
         />
         <div className="px-6 py-5">
           {headline ? (
-            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-iusia-carbon">
-              {headline.text}
-            </p>
+            <>
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-iusia-carbon">
+                {headline.summary}
+              </p>
+              <details className="mt-4">
+                <summary className="cursor-pointer text-[13px] text-iusia-mist-text hover:text-iusia-carbon">
+                  Ver salida estructurada
+                </summary>
+                <pre className="mt-2 max-h-80 overflow-auto rounded-[10px] bg-iusia-mist/10 p-3 text-[12px] leading-relaxed text-iusia-carbon">
+                  {headline.text}
+                </pre>
+              </details>
+            </>
           ) : (
             <StateBlock kind="empty" title="Sin salida integrada" />
           )}
@@ -420,8 +452,16 @@ function ResultView({
               <div key={o.execution_id}>
                 <p className="mb-1 text-[13px] font-semibold text-iusia-navy">{o.agent_name}</p>
                 <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-iusia-carbon">
-                  {o.text}
+                  {o.summary}
                 </p>
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-[12px] text-iusia-mist-text hover:text-iusia-carbon">
+                    Ver salida estructurada
+                  </summary>
+                  <pre className="mt-2 max-h-72 overflow-auto rounded-[10px] bg-iusia-mist/10 p-3 text-[12px] leading-relaxed text-iusia-carbon">
+                    {o.text}
+                  </pre>
+                </details>
               </div>
             ))}
           </div>

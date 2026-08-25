@@ -267,6 +267,7 @@ export interface ExecutionResult {
     agent_id: string;
     node_code: string;
     agent_name: string;
+    summary: string;
     text: string;
     provider: string | null;
     model: string | null;

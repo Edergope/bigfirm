@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   IusiaError,
   TERMINAL_STATUSES,
+  deriveConclusionText,
   deriveOutcome,
   projectStrategyGraph,
   resolveEvidenceDocuments,
@@ -180,12 +181,15 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
         } catch {
           // Agente no registrado: se muestra el id crudo, sin inventar metadata.
         }
+        const text = stored.text ?? "";
         return {
           execution_id: n.id,
           agent_id: n.agentId,
           node_code: nodeCode,
           agent_name: name,
-          text: stored.text ?? "",
+          // Titular humano ya parseado (p.ej. conclusion_brief). El raw queda en `text`.
+          summary: deriveConclusionText(text),
+          text,
           provider: stored.provenance?.provider ?? n.provider ?? null,
           model: stored.provenance?.model ?? n.model ?? null,
           produced_at: stored.provenance?.produced_at ?? n.completedAt ?? null,
