@@ -681,20 +681,20 @@ function Tareas({ matterId }: { matterId: string }) {
             e.preventDefault();
             if (title.trim()) create.mutate();
           }}
-          className="flex flex-wrap items-center gap-2 px-5 pb-3"
+          className="flex items-center gap-2 px-5 pb-3"
         >
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Describe la tarea o el término…"
             aria-label="Nueva tarea o término"
-            className="h-9 min-w-0 flex-1 rounded-[10px] text-[13.5px]"
+            className="h-9 w-0 min-w-0 flex-1 rounded-[10px] text-[13.5px]"
           />
           <Select
             value={kind}
             onChange={(e) => setKind(e.target.value as typeof kind)}
             aria-label="Tipo"
-            className="h-9 rounded-[10px] text-[13px]"
+            className="h-9 w-[9.5rem] shrink-0 rounded-[10px] text-[13px]"
           >
             <option value="TASK">Tarea</option>
             <option value="PROCEDURAL_DEADLINE">Término procesal</option>
