@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from "react-router";
 import { useSession } from "./auth-client.js";
 import { AppShell } from "./layouts/AppShell.js";
 import { SignIn } from "./pages/SignIn.js";
+import { AcceptInvitation } from "./pages/AcceptInvitation.js";
+import { Team } from "./pages/Team.js";
 import { Home } from "./pages/Home.js";
 import { Matters } from "./pages/Matters.js";
 import { MatterWorkspace } from "./pages/MatterWorkspace.js";
@@ -25,6 +27,7 @@ export function App() {
     return (
       <Routes>
         <Route path="/entrar" element={<SignIn />} />
+        <Route path="/invitacion" element={<AcceptInvitation />} />
         <Route path="*" element={<Navigate to="/entrar" replace />} />
       </Routes>
     );
@@ -36,6 +39,7 @@ export function App() {
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
         <Route path="casos" element={<Matters />} />
+        <Route path="equipo" element={<Team />} />
         <Route path="casos/:matterId" element={<MatterWorkspace />} />
         <Route path="tareas" element={<Deadlines />} />
         <Route path="documentos" element={<Documents />} />

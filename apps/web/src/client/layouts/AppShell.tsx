@@ -9,6 +9,7 @@ import {
   BrainCircuit,
   Search,
   LogOut,
+  Users,
 } from "lucide-react";
 import { CreditBadge } from "@iusia/ui";
 import clsx from "clsx";
@@ -28,6 +29,9 @@ const NAV = [
   { to: "/inteligencia", label: "Inteligencia", icon: BrainCircuit },
 ];
 
+/** Sólo la administración de la firma ve la gestión del equipo. */
+const ADMIN_NAV = [{ to: "/equipo", label: "Equipo", icon: Users }];
+
 export function AppShell() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
 
@@ -42,7 +46,14 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 px-3 py-2">
-          {NAV.map(({ to, label, icon: Icon }) => (
+          {[
+            ...NAV,
+            // La administración del equipo sólo se ofrece a quien puede ejercerla;
+            // la autorización real la revalida el servidor en cada ruta.
+            ...(me.data?.firm_role === "FIRM_DIRECTOR" || me.data?.firm_role === "PARTNER"
+              ? ADMIN_NAV
+              : []),
+          ].map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}

@@ -50,6 +50,34 @@ adminRoutes.get("/members", async (c) => {
   return c.json({ members: rows });
 });
 
+/**
+ * Impide dejar el tenant sin administración. No es gobernanza multi-tenant: es la
+ * integridad operacional mínima de la firma.
+ */
+export async function assertNotLastDirector(
+  db: AppBindings["Variables"]["ctx"]["db"],
+  organizationId: string,
+  targetUserId: string,
+  action: "degradar" | "retirar",
+): Promise<void> {
+  const directors = await db
+    .select({ userId: schema.member.userId })
+    .from(schema.member)
+    .where(
+      and(
+        eq(schema.member.organizationId, organizationId),
+        eq(schema.member.role, "FIRM_DIRECTOR"),
+      ),
+    );
+  const isTargetDirector = directors.some((d) => d.userId === targetUserId);
+  if (isTargetDirector && directors.length <= 1) {
+    throw new IusiaError(
+      "CONFLICT",
+      `No se puede ${action} al último director: la firma quedaría sin dirección`,
+    );
+  }
+}
+
 const SetRoleInput = z.object({ user_id: z.string().min(1), role: FirmRole });
 
 /** Cambia el rol de firma de un miembro. */
@@ -61,20 +89,10 @@ adminRoutes.post("/members/role", async (c) => {
   const parsed = SetRoleInput.safeParse(await c.req.json());
   if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Rol inválido");
 
-  // Un director no puede degradarse a sí mismo dejando la firma sin dirección.
-  if (parsed.data.user_id === userId && parsed.data.role !== "FIRM_DIRECTOR") {
-    const directors = await db
-      .select({ id: schema.member.id })
-      .from(schema.member)
-      .where(
-        and(
-          eq(schema.member.organizationId, organizationId),
-          eq(schema.member.role, "FIRM_DIRECTOR"),
-        ),
-      );
-    if (directors.length <= 1) {
-      throw new IusiaError("CONFLICT", "La firma no puede quedarse sin dirección");
-    }
+  // Integridad operacional: la firma nunca puede quedarse sin dirección, ni por
+  // autodegradación ni degradando al último director.
+  if (parsed.data.role !== "FIRM_DIRECTOR") {
+    await assertNotLastDirector(db, organizationId, parsed.data.user_id, "degradar");
   }
 
   await db
@@ -98,6 +116,102 @@ adminRoutes.post("/members/role", async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+const RemoveMemberInput = z.object({ user_id: z.string().min(1) });
+
+/**
+ * Retira a un miembro de la firma.
+ *
+ * Al dejar de ser miembro pierde el tenant y, con él, cualquier acceso a
+ * expedientes: `AuthorizationService` deniega sin rol de firma. Las filas de
+ * `matter_members` se retiran para que no quede acceso utilizable; el rastro de lo
+ * ocurrido queda en la auditoría, que es donde corresponde.
+ */
+adminRoutes.post("/members/remove", async (c) => {
+  const { db, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await requireFirmAdmin(c.get("ctx"), organizationId, userId);
+
+  const parsed = RemoveMemberInput.safeParse(await c.req.json());
+  if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Miembro inválido");
+  const targetUserId = parsed.data.user_id;
+
+  await assertNotLastDirector(db, organizationId, targetUserId, "retirar");
+
+  const [existing] = await db
+    .select({ id: schema.member.id })
+    .from(schema.member)
+    .where(
+      and(
+        eq(schema.member.organizationId, organizationId),
+        eq(schema.member.userId, targetUserId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new IusiaError("NOT_FOUND", "El usuario no es miembro de esta firma");
+
+  await db
+    .delete(schema.member)
+    .where(
+      and(
+        eq(schema.member.organizationId, organizationId),
+        eq(schema.member.userId, targetUserId),
+      ),
+    );
+  await db
+    .delete(schema.matterMembers)
+    .where(
+      and(
+        eq(schema.matterMembers.organizationId, organizationId),
+        eq(schema.matterMembers.userId, targetUserId),
+      ),
+    );
+
+  await audit.record({
+    organizationId,
+    actorUserId: userId,
+    action: "member.removed",
+    resourceType: "member",
+    resourceId: targetUserId,
+    outcome: "SUCCESS",
+  });
+
+  return c.json({ ok: true });
+});
+
+/** Invitaciones de la firma con su estado real (Better Auth). Nunca expone tokens. */
+adminRoutes.get("/invitations", async (c) => {
+  const { db } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await requireFirmAdmin(c.get("ctx"), organizationId, userId);
+
+  const rows = await db
+    .select({
+      id: schema.invitation.id,
+      email: schema.invitation.email,
+      role: schema.invitation.role,
+      status: schema.invitation.status,
+      expiresAt: schema.invitation.expiresAt,
+      createdAt: schema.invitation.createdAt,
+    })
+    .from(schema.invitation)
+    .where(eq(schema.invitation.organizationId, organizationId));
+
+  const now = Date.now();
+  return c.json({
+    invitations: rows.map((r) => ({
+      // El id se usa como identificador de la fila, no como credencial: quien no
+      // recibió el correo tampoco puede aceptarla (Better Auth exige sesión propia).
+      id: r.id,
+      email: r.email,
+      role: r.role,
+      // El estado mostrado refleja también la caducidad efectiva.
+      status: r.status === "pending" && r.expiresAt.getTime() < now ? "expired" : r.status,
+      expires_at: r.expiresAt.toISOString(),
+      created_at: r.createdAt.toISOString(),
+    })),
+  });
 });
 
 const GrantMatterAccessInput = z.object({

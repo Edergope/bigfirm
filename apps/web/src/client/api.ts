@@ -230,6 +230,28 @@ export const api = {
       method: "POST",
     }),
 
+  firmMembers: () =>
+    request<{ members: Array<{ userId: string; role: string; name: string; email: string; createdAt: string }> }>(
+      "/api/admin/members",
+    ),
+
+  firmInvitations: () =>
+    request<{
+      invitations: Array<{ id: string; email: string; role: string | null; status: string; expires_at: string; created_at: string }>;
+    }>("/api/admin/invitations"),
+
+  setMemberRole: (userId: string, role: string) =>
+    request<{ ok: boolean }>("/api/admin/members/role", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, role }),
+    }),
+
+  removeMember: (userId: string) =>
+    request<{ ok: boolean }>("/api/admin/members/remove", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    }),
+
   driveStatus: () =>
     request<{ connected: boolean; reason?: string }>("/api/integrations/drive/status"),
 

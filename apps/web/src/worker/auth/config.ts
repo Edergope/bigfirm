@@ -1,8 +1,10 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins/organization";
 import { createDb, schema } from "@iusia/db";
 import { ResendNotificationProvider } from "../integrations/notifications.js";
+import { authorizeOnboarding } from "./invitation-guard.js";
 import type { Env } from "../env.js";
 import { firmAccessControl, firmRoles } from "./roles.js";
 
@@ -67,6 +69,35 @@ export function createAuth(env: Env) {
     trustedOrigins: [env.APP_URL],
 
     /**
+     * ONBOARDING SÓLO POR INVITACIÓN (Sprint 7.9).
+     *
+     * Toda creación de usuario —por contraseña o por Google— atraviesa este hook.
+     * Sin una invitación vigente para ese email exacto, se aborta: no queda usuario
+     * huérfano, no se devuelve sólo un código de error. Es el cierre server-side del
+     * alta pública; ocultar el botón de la UI no cerraría nada.
+     */
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (userData, context) => {
+            const decision = await authorizeOnboarding({
+              db,
+              email: String((userData as { email?: unknown }).email ?? ""),
+              userData: userData as { emailVerified?: unknown },
+              context,
+            });
+            if (decision.allowed) return;
+            throw new APIError("FORBIDDEN", {
+              code: "INVITATION_REQUIRED",
+              message:
+                "IUSIA no admite registro público: el acceso lo habilita la dirección de tu firma mediante invitación.",
+            });
+          },
+        },
+      },
+    },
+
+    /**
      * Campo de sistema gobernado por Better Auth con `input: false`: si un cliente
      * lo envía en signup/update, Better Auth responde BAD_REQUEST, y el perfil de
      * Google tampoco puede inyectarlo. Sólo se escribe server-side (bootstrap).
@@ -117,6 +148,27 @@ export function createAuth(env: Env) {
         // NO hay alta self-service de firmas: IUSIA no es todavía un SaaS abierto.
         // El tenant se aprovisiona server-side. Capacidad nativa del plugin.
         allowUserToCreateOrganization: false,
+        /**
+         * Entrega de la invitación con el transporte que ya existe. El enlace lleva
+         * el id de la invitación: recibirlo es lo que acredita el control del correo.
+         * Sin API key el proveedor queda NOT_CONFIGURED y no se filtra nada.
+         */
+        sendInvitationEmail: async (data) => {
+          const provider = new ResendNotificationProvider({
+            apiKey: env.RESEND_API_KEY ?? null,
+            from: env.RESEND_FROM ?? "no-reply@iusia.co",
+          });
+          const link = `${env.APP_URL}/invitacion?invitationId=${encodeURIComponent(data.id)}`;
+          await provider.send({
+            to: data.email,
+            subject: `${data.organization.name} te invitó a IUSIA`,
+            text:
+              `${data.inviter.user.name} te invitó a trabajar en ${data.organization.name}.\n\n` +
+              `Acepta la invitación aquí: ${link}\n\n` +
+              "El enlace caduca y sólo puede usarse una vez. Si no esperabas esta invitación, ignora este mensaje.",
+            tags: { flow: "organization_invitation" },
+          });
+        },
         // Roles de firma de IUSIA. Gobiernan la administración de la organización,
         // NO el acceso a cada Matter: eso lo decide AuthorizationService.
         ac: firmAccessControl,
