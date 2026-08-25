@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins/organization";
-import { createDb, schema } from "@iusia/db";
+import { AuditRepository, createDb, schema } from "@iusia/db";
 import { ResendNotificationProvider } from "../integrations/notifications.js";
 import { authorizeOnboarding } from "./invitation-guard.js";
 import type { Env } from "../env.js";
@@ -184,21 +184,51 @@ export function createAuth(env: Env) {
          * Sin API key el proveedor queda NOT_CONFIGURED y no se filtra nada.
          */
         sendInvitationEmail: async (data) => {
-          const provider = new ResendNotificationProvider({
-            apiKey: env.RESEND_API_KEY ?? null,
-            from: env.RESEND_FROM ?? DEFAULT_SENDER,
-          });
-          const link = `${env.APP_URL}/invitacion?invitationId=${encodeURIComponent(data.id)}`;
-          const result = await provider.send({
-            to: data.email,
-            subject: `${data.organization.name} te invitó a IUSIA`,
-            text:
-              `${data.inviter.user.name} te invitó a trabajar en ${data.organization.name}.\n\n` +
-              `Acepta la invitación aquí: ${link}\n\n` +
-              "El enlace caduca y sólo puede usarse una vez. Si no esperabas esta invitación, ignora este mensaje.",
-            tags: { flow: "organization_invitation" },
-          });
-          logDeliveryOutcome("organization_invitation", result);
+          // El resultado del envío se AUDITA: una invitación cuyo correo no sale deja
+          // al invitado esperando indefinidamente, y sin rastro es indistinguible de
+          // un correo no abierto. Se registra el desenlace, nunca el enlace ni la clave.
+          const audit = new AuditRepository(db);
+          const organizationId = data.organization?.id ?? "";
+          let outcome = "SENT";
+          let detail: string | null = null;
+          try {
+            const provider = new ResendNotificationProvider({
+              apiKey: env.RESEND_API_KEY ?? null,
+              from: env.RESEND_FROM ?? DEFAULT_SENDER,
+            });
+            const link = `${env.APP_URL}/invitacion?invitationId=${encodeURIComponent(data.id)}`;
+            const inviterName = data.inviter?.user?.name ?? "La dirección de tu firma";
+            const organizationName = data.organization?.name ?? "tu firma";
+            const result = await provider.send({
+              to: data.email,
+              subject: `${organizationName} te invitó a IUSIA`,
+              text:
+                `${inviterName} te invitó a trabajar en ${organizationName}.\n\n` +
+                `Acepta la invitación aquí: ${link}\n\n` +
+                "El enlace caduca y sólo puede usarse una vez. Si no esperabas esta invitación, ignora este mensaje.",
+              tags: { flow: "organization_invitation" },
+            });
+            logDeliveryOutcome("organization_invitation", result);
+            outcome = result.status;
+            detail = "error" in result ? (result.error ?? null) : null;
+          } catch (error) {
+            // Better Auth traga las excepciones de este callback: sin este catch, un
+            // fallo de plantilla o de red desaparecería sin dejar rastro.
+            outcome = "THREW";
+            detail = error instanceof Error ? error.message.slice(0, 200) : "error desconocido";
+          }
+          if (organizationId) {
+            await audit.record({
+              organizationId,
+              actorUserId: data.inviter?.user?.id ?? null,
+              action: "invitation.email",
+              resourceType: "invitation",
+              resourceId: data.id,
+              outcome: outcome === "SENT" ? "SUCCESS" : "FAILURE",
+              reason: outcome === "SENT" ? null : outcome,
+              detail: detail ? { detail } : undefined,
+            });
+          }
         },
         // Roles de firma de IUSIA. Gobiernan la administración de la organización,
         // NO el acceso a cada Matter: eso lo decide AuthorizationService.
