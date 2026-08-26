@@ -99,6 +99,7 @@ export class IngestionService {
       if (error instanceof StorageNotConfiguredError) {
         return { status: "STORAGE_NOT_CONFIGURED" };
       }
+      await documents.markIngestionFailed(message.organization_id, message.document_id);
       return {
         status: "ERROR",
         detail: error instanceof Error ? error.message : "error desconocido",

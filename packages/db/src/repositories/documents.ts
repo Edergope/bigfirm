@@ -248,4 +248,25 @@ export class DocumentRepository {
         ),
       );
   }
+
+  async markIngestionFailed(organizationId: string, documentId: string) {
+    const now = new Date().toISOString();
+    await this.db
+      .update(documents)
+      .set({
+        ingestionStatus: "ERROR",
+        updatedAt: now,
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+    await this.db
+      .update(documentVersions)
+      .set({ ingestionStatus: "ERROR" })
+      .where(
+        and(
+          eq(documentVersions.organizationId, organizationId),
+          eq(documentVersions.documentId, documentId),
+          eq(documentVersions.isCurrent, true),
+        ),
+      );
+  }
 }

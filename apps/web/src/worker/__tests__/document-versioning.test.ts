@@ -85,6 +85,34 @@ describe("versionamiento documental", () => {
     expect(await t.documents.findById(b.organizationId, documentId)).toBeNull();
     expect(await t.documents.findVersion(b.organizationId, documentId)).toBeNull();
   });
+
+  it("marca documento y versión vigente como ERROR cuando falla la ingesta", async () => {
+    const t = createTestDb();
+    const { organizationId, directorUserId } = await seedFirm(t, {
+      orgName: "Firma Error Ingesta",
+      directorEmail: "ingestion-error@iusia.test",
+    });
+    const matterId = await t.matters.create(
+      organizationId,
+      directorUserId,
+      matterInput,
+      "VER-ERR",
+    );
+    const documentId = await t.documents.link({
+      organizationId,
+      matterId,
+      driveFileId: "drive-error",
+      name: "Fuente con error.txt",
+      mimeType: "text/plain",
+      linkedBy: directorUserId,
+      ingestionStatus: "PROCESSING",
+    });
+
+    await t.documents.markIngestionFailed(organizationId, documentId);
+
+    expect((await t.documents.findById(organizationId, documentId))?.ingestionStatus).toBe("ERROR");
+    expect((await t.documents.findVersion(organizationId, documentId))?.ingestionStatus).toBe("ERROR");
+  });
 });
 
 describe("Template Bank versionado", () => {
