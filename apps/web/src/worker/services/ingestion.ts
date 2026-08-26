@@ -80,6 +80,14 @@ export class IngestionService {
         },
       });
 
+      await uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
+        organization_id: message.organization_id,
+        matter_id: message.matter_id,
+        document_id: message.document_id,
+        document_version: String(doc.currentVersion),
+        is_current: "true",
+      });
+
       await documents.markIndexed(
         message.organization_id,
         message.document_id,
@@ -97,6 +105,44 @@ export class IngestionService {
       };
     }
   }
+}
+
+type AiSearchIngestionBinding = {
+  items?: {
+    uploadAndPoll?: (
+      name: string,
+      content: string,
+      options?: {
+        metadata?: Record<string, string>;
+        pollIntervalMs?: number;
+        timeoutMs?: number;
+      },
+    ) => Promise<unknown>;
+  };
+};
+
+/**
+ * Ingesta inmediata en Cloudflare AI Search.
+ *
+ * R2 sigue siendo el mirror trazable del Markdown normalizado, pero `AI_INDEXED`
+ * sólo se marca después de usar la capacidad nativa `items.uploadAndPoll`. Esto
+ * evita que la orquestación arranque sobre un documento recién escrito en R2 que
+ * todavía no ha entrado al índice por sync diferido.
+ */
+export async function uploadToAiSearch(
+  aiSearch: AiSearchIngestionBinding | null,
+  key: string,
+  text: string,
+  metadata: Record<string, string>,
+): Promise<void> {
+  if (!aiSearch?.items?.uploadAndPoll) {
+    throw new Error("AI Search uploadAndPoll no está configurado");
+  }
+  await aiSearch.items.uploadAndPoll(key, text, {
+    metadata,
+    pollIntervalMs: 1000,
+    timeoutMs: 30000,
+  });
 }
 
 /**

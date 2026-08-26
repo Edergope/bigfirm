@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isIndexableMimeType, normalizeToText } from "./ingestion.js";
+import { isIndexableMimeType, normalizeToText, uploadToAiSearch } from "./ingestion.js";
 
 describe("normalización documental", () => {
   it("conserva el decoder estable para texto sin invocar Workers AI", async () => {
@@ -65,5 +65,43 @@ describe("normalización documental", () => {
     expect(isIndexableMimeType("image/png")).toBe(false);
     expect(isIndexableMimeType("video/mp4")).toBe(false);
     expect(isIndexableMimeType("audio/wav")).toBe(false);
+  });
+
+  it("indexa inmediatamente en AI Search con metadata ACL antes de marcar AI_INDEXED", async () => {
+    const uploadAndPoll = vi.fn().mockResolvedValue({ id: "item-1", key: "org/org1/matter/mtr1/doc/doc1.txt" });
+    await uploadToAiSearch(
+      { items: { uploadAndPoll } },
+      "org/org1/matter/mtr1/doc/doc1.txt",
+      "IUSIA_E2E_NEW_MATTER_20260826",
+      {
+        organization_id: "org1",
+        matter_id: "mtr1",
+        document_id: "doc1",
+        document_version: "2",
+        is_current: "true",
+      },
+    );
+
+    expect(uploadAndPoll).toHaveBeenCalledWith(
+      "org/org1/matter/mtr1/doc/doc1.txt",
+      "IUSIA_E2E_NEW_MATTER_20260826",
+      {
+        metadata: {
+          organization_id: "org1",
+          matter_id: "mtr1",
+          document_id: "doc1",
+          document_version: "2",
+          is_current: "true",
+        },
+        pollIntervalMs: 1000,
+        timeoutMs: 30000,
+      },
+    );
+  });
+
+  it("falla cerrado si AI Search uploadAndPoll no está configurado", async () => {
+    await expect(uploadToAiSearch(null, "doc.txt", "contenido", {})).rejects.toThrow(
+      "AI Search uploadAndPoll no está configurado",
+    );
   });
 });
