@@ -185,7 +185,7 @@ export async function uploadToAiSearch(
   const item = await aiSearch.items.uploadAndPoll(key, text, {
     metadata,
     pollIntervalMs: 1000,
-    timeoutMs: 30000,
+    timeoutMs: 120000,
   });
   if (item.status !== "completed") {
     throw new Error(

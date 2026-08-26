@@ -98,7 +98,7 @@ describe("normalización documental", () => {
           is_current: "true",
         },
         pollIntervalMs: 1000,
-        timeoutMs: 30000,
+        timeoutMs: 120000,
       },
     );
   });
