@@ -17,6 +17,7 @@ coverage/
 # Artefactos de trabajo local
 *.log
 .turbo/
+.pnpm-store/
 
 # Toolchain de diseño instalado localmente (no es runtime de IUSIA):
 # skills de Emil/Taste, Impeccable y su config/hooks. Se instala con

@@ -4,15 +4,14 @@ import { DriveCredentialResolver } from "./drive-credentials.js";
 import { DriveWorkspaceService } from "./drive-workspace.js";
 
 /**
- * Semilla del Template Bank: crea la plantilla institucional "Opinión Legal" como
- * un Google Doc real (estándar editorial Pisoso Legal) y la registra.
+ * Fixture técnico histórico del Template Bank: crea la antigua plantilla
+ * "Opinión Legal" sólo para trazabilidad del pipeline y la deja retirada.
  *
  * El estándar editorial vive en el propio Google Doc (estilos con nombre TITLE /
  * HEADING_1 / NORMAL_TEXT, que Word conserva al exportar). El contenido variable son
  * {{placeholders}} que el agente rellena; la plantilla nunca los inventa.
  *
- * Idempotente por template_id fijo: re-seedear actualiza la fila y crea un doc nuevo
- * sólo si aún no hay source_ref.
+ * Idempotente por template_id fijo: re-seedear no la vuelve seleccionable.
  */
 
 const OPINION_TEMPLATE_ID = "tpl_system_opinion_legal";
@@ -54,6 +53,9 @@ export async function seedOpinionTemplate(
 
   const existing = await templates.findById(OPINION_TEMPLATE_ID);
   if (existing?.sourceRef) {
+    if (existing.status !== "RETIRED") {
+      await templates.setSystemStatus(OPINION_TEMPLATE_ID, "RETIRED");
+    }
     return { template_id: OPINION_TEMPLATE_ID, source_ref: existing.sourceRef, created: false };
   }
 
@@ -95,6 +97,7 @@ export async function seedOpinionTemplate(
     sourceRef: docId,
     variables: VARIABLES,
   });
+  await templates.setSystemStatus(OPINION_TEMPLATE_ID, "RETIRED");
 
   return { template_id: OPINION_TEMPLATE_ID, source_ref: docId, created: true };
 }

@@ -137,7 +137,7 @@ devRoutes.post("/e2e/drive-read", async (c) => {
 
   const metadata = await adapter.getMetadata(parsed.data.drive_file_id);
   const bytes = await adapter.download(parsed.data.drive_file_id);
-  const normalized = await normalizeToText(bytes, metadata.mime_type);
+  const normalized = await normalizeToText(bytes, metadata.mime_type, metadata.name, c.env.AI);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalized));
   const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 

@@ -112,6 +112,11 @@ export const documents = sqliteTable(
     /** Espejo normalizado en R2 para indexación; null si aún no se ha generado. */
     r2MirrorKey: text("r2_mirror_key"),
     indexedAt: text("indexed_at"),
+    /** Versión vigente del documento lógico. El binario permanece en Drive. */
+    currentVersion: integer("current_version").notNull().default(1),
+    sizeBytes: integer("size_bytes"),
+    /** FILE_STORED | PROCESSING | AI_INDEXED | NOT_INDEXABLE | ERROR */
+    ingestionStatus: text("ingestion_status").notNull().default("FILE_STORED"),
     linkedBy: text("linked_by")
       .notNull()
       .references(() => user.id),
@@ -121,6 +126,44 @@ export const documents = sqliteTable(
   (t) => [
     index("documents_org_matter_idx").on(t.organizationId, t.matterId),
     uniqueIndex("documents_matter_drive_uq").on(t.matterId, t.driveFileId),
+  ],
+);
+
+/**
+ * Historial inmutable de binarios de un documento lógico. Cada versión conserva
+ * su propio id de Drive; `documents.drive_file_id` es sólo el puntero vigente.
+ */
+export const documentVersions = sqliteTable(
+  "document_versions",
+  {
+    id: text("id").primaryKey(),
+    organizationId: orgId(),
+    matterId: text("matter_id")
+      .notNull()
+      .references(() => matters.id, { onDelete: "cascade" }),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    driveFileId: text("drive_file_id").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes"),
+    checksum: text("checksum"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: text("created_at").notNull(),
+    changeType: text("change_type").notNull().default("ORIGINAL"),
+    changeSummary: text("change_summary").notNull().default("Versión inicial"),
+    ingestionStatus: text("ingestion_status").notNull().default("FILE_STORED"),
+    isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(true),
+  },
+  (t) => [
+    uniqueIndex("document_versions_number_uq").on(t.documentId, t.versionNumber),
+    uniqueIndex("document_versions_drive_uq").on(t.matterId, t.driveFileId),
+    index("document_versions_org_document_idx").on(t.organizationId, t.documentId),
+    index("document_versions_org_current_idx").on(t.organizationId, t.matterId, t.isCurrent),
   ],
 );
 
@@ -450,15 +493,25 @@ export const templates = sqliteTable(
     engine: text("engine").notNull().default("GOOGLE_DOCS"),
     /** Id del Google Doc plantilla en Drive (para files.copy), o clave R2. */
     sourceRef: text("source_ref"),
+    /** Id del DOCX original preservado en Drive; sourceRef puede ser su Google Doc operativo. */
+    originalSourceRef: text("original_source_ref"),
+    familyId: text("family_id").notNull().default(""),
+    category: text("category").notNull().default("General"),
+    description: text("description"),
+    mimeType: text("mime_type").notNull().default("application/vnd.google-apps.document"),
+    checksum: text("checksum"),
+    originalFilename: text("original_filename"),
     /** Variables requeridas: [{ key, label, required }]. */
     variables: text("variables", { mode: "json" }).$type<
-      Array<{ key: string; label: string; required: boolean }>
+      Array<{ key: string; label: string; required: boolean; placeholder?: string }>
     >(),
+    createdBy: text("created_by").references(() => user.id),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
   (t) => [
     index("templates_scope_type_idx").on(t.scope, t.documentType),
     index("templates_org_idx").on(t.organizationId),
+    index("templates_family_version_idx").on(t.familyId, t.version),
   ],
 );

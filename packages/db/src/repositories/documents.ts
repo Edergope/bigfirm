@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { newId } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
-import { documents } from "../schema/iusia.js";
+import { documents, documentVersions } from "../schema/iusia.js";
 
 /**
  * Metadata documental. El archivo del usuario vive en Google Drive; IUSIA guarda
@@ -19,6 +19,9 @@ export class DocumentRepository {
     mimeType: string;
     classification?: string;
     linkedBy: string;
+    sizeBytes?: number | null;
+    checksum?: string | null;
+    ingestionStatus?: string;
   }): Promise<string> {
     const id = newId("document");
     const now = new Date().toISOString();
@@ -41,6 +44,9 @@ export class DocumentRepository {
         contentHash: null,
         r2MirrorKey: null,
         indexedAt: null,
+        currentVersion: 1,
+        sizeBytes: input.sizeBytes ?? null,
+        ingestionStatus: input.ingestionStatus ?? "FILE_STORED",
         linkedBy: input.linkedBy,
         createdAt: now,
         updatedAt: now,
@@ -48,7 +54,27 @@ export class DocumentRepository {
       .onConflictDoNothing()
       .returning({ id: documents.id });
 
-    if (inserted[0]) return inserted[0].id;
+    if (inserted[0]) {
+      await this.db.insert(documentVersions).values({
+        id: newId("documentVersion"),
+        organizationId: input.organizationId,
+        matterId: input.matterId,
+        documentId: inserted[0].id,
+        versionNumber: 1,
+        driveFileId: input.driveFileId,
+        filename: input.name,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes ?? null,
+        checksum: input.checksum ?? null,
+        createdBy: input.linkedBy,
+        createdAt: now,
+        changeType: "ORIGINAL",
+        changeSummary: "Versión inicial",
+        ingestionStatus: input.ingestionStatus ?? "FILE_STORED",
+        isCurrent: true,
+      });
+      return inserted[0].id;
+    }
 
     // Conflicto de unicidad: recupera el documento existente para esa clave.
     const [existing] = await this.db
@@ -82,6 +108,107 @@ export class DocumentRepository {
     return row ?? null;
   }
 
+  async listVersions(organizationId: string, documentId: string) {
+    return this.db
+      .select()
+      .from(documentVersions)
+      .where(
+        and(
+          eq(documentVersions.organizationId, organizationId),
+          eq(documentVersions.documentId, documentId),
+        ),
+      )
+      .orderBy(desc(documentVersions.versionNumber));
+  }
+
+  async findVersion(organizationId: string, documentId: string, versionNumber?: number) {
+    const clauses = [
+      eq(documentVersions.organizationId, organizationId),
+      eq(documentVersions.documentId, documentId),
+      versionNumber === undefined
+        ? eq(documentVersions.isCurrent, true)
+        : eq(documentVersions.versionNumber, versionNumber),
+    ];
+    const [row] = await this.db
+      .select()
+      .from(documentVersions)
+      .where(and(...clauses))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** Añade una versión sin sobrescribir la anterior; el número se resuelve en servidor. */
+  async addVersion(input: {
+    organizationId: string;
+    matterId: string;
+    documentId: string;
+    driveFileId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes?: number | null;
+    checksum?: string | null;
+    createdBy: string;
+    changeType: string;
+    changeSummary: string;
+    ingestionStatus?: string;
+  }) {
+    const document = await this.findById(input.organizationId, input.documentId);
+    if (!document || document.matterId !== input.matterId) return null;
+
+    const nextVersion = document.currentVersion + 1;
+    const now = new Date().toISOString();
+    const versionId = newId("documentVersion");
+    await this.db.batch([
+      this.db
+        .update(documentVersions)
+        .set({ isCurrent: false })
+        .where(
+          and(
+            eq(documentVersions.organizationId, input.organizationId),
+            eq(documentVersions.documentId, input.documentId),
+            eq(documentVersions.isCurrent, true),
+          ),
+        ),
+      this.db.insert(documentVersions).values({
+        id: versionId,
+        organizationId: input.organizationId,
+        matterId: input.matterId,
+        documentId: input.documentId,
+        versionNumber: nextVersion,
+        driveFileId: input.driveFileId,
+        filename: input.filename,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes ?? null,
+        checksum: input.checksum ?? null,
+        createdBy: input.createdBy,
+        createdAt: now,
+        changeType: input.changeType,
+        changeSummary: input.changeSummary,
+        ingestionStatus: input.ingestionStatus ?? "FILE_STORED",
+        isCurrent: true,
+      }),
+      this.db
+        .update(documents)
+        .set({
+          driveFileId: input.driveFileId,
+          name: input.filename,
+          mimeType: input.mimeType,
+          currentVersion: nextVersion,
+          sizeBytes: input.sizeBytes ?? null,
+          contentHash: input.checksum ?? null,
+          r2MirrorKey: null,
+          indexedAt: null,
+          ingestionStatus: input.ingestionStatus ?? "FILE_STORED",
+          linkedBy: input.createdBy,
+          updatedAt: now,
+        })
+        .where(
+          and(eq(documents.organizationId, input.organizationId), eq(documents.id, input.documentId)),
+        ),
+    ]);
+    return { versionId, versionNumber: nextVersion };
+  }
+
   async setStatus(organizationId: string, documentId: string, status: string) {
     await this.db
       .update(documents)
@@ -99,7 +226,26 @@ export class DocumentRepository {
     const now = new Date().toISOString();
     await this.db
       .update(documents)
-      .set({ r2MirrorKey, contentHash, indexedAt: now, status: "EN_REVISION", updatedAt: now })
+      .set({
+        r2MirrorKey,
+        contentHash,
+        indexedAt: now,
+        status: "EN_REVISION",
+        ingestionStatus: "AI_INDEXED",
+        updatedAt: now,
+      })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+    await this.db
+      .update(documentVersions)
+      // El checksum de la versión es el hash del binario original y es inmutable.
+      // `contentHash` corresponde al Markdown normalizado y vive en `documents`.
+      .set({ ingestionStatus: "AI_INDEXED" })
+      .where(
+        and(
+          eq(documentVersions.organizationId, organizationId),
+          eq(documentVersions.documentId, documentId),
+          eq(documentVersions.isCurrent, true),
+        ),
+      );
   }
 }

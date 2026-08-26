@@ -10,7 +10,9 @@ import {
   DocumentGenerationService,
 } from "../services/document-generation.js";
 import { DocumentDraftError, DocumentDraftService } from "../services/document-draft.js";
-import { seedOpinionTemplate } from "../services/template-seed.js";
+import { SEED_TEMPLATE_IDS, seedOpinionTemplate } from "../services/template-seed.js";
+import { isIndexableMimeType, normalizeToText } from "../services/ingestion.js";
+import { discoverTemplateVariables } from "../services/template-placeholders.js";
 
 export const documentWorkspaceRoutes = new Hono<AppBindings>();
 
@@ -19,10 +21,48 @@ const ACCEPTED_MIME = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/msword",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
   "text/plain",
   "text/markdown",
+  "application/json",
+  "application/xml",
+  "text/xml",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/wav",
 ]);
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const OFFICIAL_TEMPLATE_PREFIX = "official-templates/pisoso-legal/";
+const OfficialTemplateManifest = z.object({
+  templates: z.array(z.object({
+    file: z.string().min(1),
+    name: z.string().min(1),
+    document_type: z.string().min(1),
+    category: z.string().min(1),
+    version: z.number().int().positive(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  })),
+});
+
+function initialIngestionStatus(mime: string): "NOT_INDEXABLE" | "PROCESSING" {
+  return isIndexableMimeType(mime) ? "PROCESSING" : "NOT_INDEXABLE";
+}
+
+async function checksum(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function safeFilename(value: string): string {
+  return value.replace(/[\r\n"]/g, "_");
+}
 
 /** Traduce un fallo de Drive a código de producto (nunca el enum crudo). */
 function driveErrorToCode(error: unknown): string {
@@ -80,11 +120,13 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
       continue;
     }
     try {
+      const bytes = await file.arrayBuffer();
+      const ingestionStatus = initialIngestionStatus(mime);
       const meta = await drive.uploadFile({
         name: file.name,
         parentId: uploadedFolder,
         mimeType: mime,
-        content: await file.arrayBuffer(),
+        content: bytes,
       });
       const documentId = await documents.link({
         organizationId,
@@ -94,16 +136,21 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
         mimeType: mime,
         classification: "FUENTE",
         linkedBy: userId,
+        sizeBytes: file.size,
+        checksum: await checksum(bytes),
+        ingestionStatus,
       });
-      await c.env.DOCUMENT_INGESTION.send({
-        organization_id: organizationId,
-        matter_id: matterId,
-        document_id: documentId,
-        drive_file_id: meta.provider_file_id,
-        reason: "LINKED",
-        enqueued_at: new Date().toISOString(),
-      });
-      results.push({ document_id: documentId, name: meta.name, status: "PROCESSING" });
+      if (ingestionStatus === "PROCESSING") {
+        await c.env.DOCUMENT_INGESTION.send({
+          organization_id: organizationId,
+          matter_id: matterId,
+          document_id: documentId,
+          drive_file_id: meta.provider_file_id,
+          reason: "LINKED",
+          enqueued_at: new Date().toISOString(),
+        });
+      }
+      results.push({ document_id: documentId, name: meta.name, status: ingestionStatus });
     } catch {
       results.push({ document_id: "", name: file.name, status: "UPLOAD_FAILED" });
     }
@@ -143,6 +190,9 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
     status: d.status,
     classification: d.classification,
     drive_file_id: d.driveFileId,
+    current_version: d.currentVersion,
+    size_bytes: d.sizeBytes,
+    ingestion_status: d.ingestionStatus,
     updated_at: d.updatedAt,
   });
 
@@ -150,6 +200,162 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
     uploaded: docs.filter((d) => d.classification !== "ENTREGABLE").map(shape),
     generated: docs.filter((d) => d.classification === "ENTREGABLE").map(shape),
   });
+});
+
+/** Historial de versiones, siempre después de autorizar el Matter. */
+documentWorkspaceRoutes.get("/matters/:matterId/documents/:documentId/versions", async (c) => {
+  const { documents, authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const documentId = c.req.param("documentId");
+  await authz.authorizeMatter(organizationId, userId, matterId, "document:read");
+  const document = await documents.findById(organizationId, documentId);
+  if (!document || document.matterId !== matterId) {
+    throw new IusiaError("NOT_FOUND", "Documento no encontrado");
+  }
+  const versions = await documents.listVersions(organizationId, documentId);
+  return c.json({
+    versions: versions.map((v) => ({
+      id: v.id,
+      version_number: v.versionNumber,
+      filename: v.filename,
+      mime_type: v.mimeType,
+      size_bytes: v.sizeBytes,
+      checksum: v.checksum,
+      created_by: v.createdBy,
+      created_at: v.createdAt,
+      change_type: v.changeType,
+      change_summary: v.changeSummary,
+      ingestion_status: v.ingestionStatus,
+      is_current: v.isCurrent,
+    })),
+  });
+});
+
+/**
+ * Descarga/preview privado. El cliente nunca envía drive_file_id: lo resolvemos
+ * desde document_id + versión después de comprobar ACL y tenant.
+ */
+documentWorkspaceRoutes.get("/matters/:matterId/documents/:documentId/content", async (c) => {
+  const { documents, authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const documentId = c.req.param("documentId");
+  await authz.authorizeMatter(organizationId, userId, matterId, "document:read");
+  const document = await documents.findById(organizationId, documentId);
+  if (!document || document.matterId !== matterId) {
+    throw new IusiaError("NOT_FOUND", "Documento no encontrado");
+  }
+  const rawVersion = c.req.query("version");
+  const versionNumber = rawVersion ? Number.parseInt(rawVersion, 10) : undefined;
+  if (rawVersion && (!Number.isInteger(versionNumber) || (versionNumber ?? 0) < 1)) {
+    throw new IusiaError("VALIDATION_FAILED", "Versión inválida");
+  }
+  const version = await documents.findVersion(organizationId, documentId, versionNumber);
+  if (!version || version.matterId !== matterId) {
+    throw new IusiaError("NOT_FOUND", "Versión no encontrada");
+  }
+  // La ACL autoriza al solicitante; el token físico corresponde a quien subió ESA
+  // versión, que es quien tiene garantizado drive.file sobre el binario.
+  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(version.createdBy);
+  const bytes = await drive.download(version.driveFileId);
+  const disposition = c.req.query("download") === "1" ? "attachment" : "inline";
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": version.mimeType,
+      "Content-Disposition": `${disposition}; filename="${safeFilename(version.filename)}"`,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+});
+
+const VERSION_CHANGE_TYPES = [
+  "Corrección",
+  "Revisión jurídica",
+  "Comentarios del cliente",
+  "Versión para firma",
+  "Documento firmado",
+  "Otro",
+] as const;
+
+/** Nueva versión: número server-side, versión anterior preservada y reingestión vigente. */
+documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/versions", async (c) => {
+  const { documents, matters, authz, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const documentId = c.req.param("documentId");
+  await authz.authorizeMatter(organizationId, userId, matterId, "document:link");
+  const [document, matter] = await Promise.all([
+    documents.findById(organizationId, documentId),
+    matters.findById(organizationId, matterId),
+  ]);
+  if (!document || document.matterId !== matterId || !matter) {
+    throw new IusiaError("NOT_FOUND", "Documento no encontrado");
+  }
+
+  const form = await c.req.formData();
+  const file = form.get("file");
+  const changeType = String(form.get("change_type") ?? "");
+  const changeSummary = String(form.get("change_summary") ?? "").trim();
+  if (!(file instanceof File) || !VERSION_CHANGE_TYPES.includes(changeType as never) || !changeSummary) {
+    throw new IusiaError(
+      "VALIDATION_FAILED",
+      "Archivo, tipo de modificación y descripción de cambios son obligatorios",
+    );
+  }
+  if (file.size > MAX_FILE_BYTES) throw new IusiaError("VALIDATION_FAILED", "El archivo supera 50 MB");
+  const mime = file.type || "application/octet-stream";
+  if (!ACCEPTED_MIME.has(mime)) throw new IusiaError("VALIDATION_FAILED", "Tipo de archivo no admitido");
+
+  const workspace = DriveWorkspaceService.forEnv(c.env);
+  const folders = await workspace.ensureMatterFolders(userId, organizationId, matter);
+  const targetFolder = document.classification === "ENTREGABLE" ? folders.generated : folders.uploaded;
+  const bytes = await file.arrayBuffer();
+  const ingestionStatus = initialIngestionStatus(mime);
+  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  const meta = await drive.uploadFile({
+    name: file.name,
+    parentId: targetFolder,
+    mimeType: mime,
+    content: bytes,
+  });
+  const added = await documents.addVersion({
+    organizationId,
+    matterId,
+    documentId,
+    driveFileId: meta.provider_file_id,
+    filename: meta.name,
+    mimeType: mime,
+    sizeBytes: file.size,
+    checksum: await checksum(bytes),
+    createdBy: userId,
+    changeType,
+    changeSummary,
+    ingestionStatus,
+  });
+  if (!added) throw new IusiaError("NOT_FOUND", "Documento no encontrado");
+  if (ingestionStatus === "PROCESSING") {
+    await c.env.DOCUMENT_INGESTION.send({
+      organization_id: organizationId,
+      matter_id: matterId,
+      document_id: documentId,
+      drive_file_id: meta.provider_file_id,
+      reason: "DRIVE_CHANGE",
+      enqueued_at: new Date().toISOString(),
+    });
+  }
+  await audit.record({
+    organizationId,
+    matterId,
+    actorUserId: userId,
+    action: "document.version.created",
+    resourceType: "document",
+    resourceId: documentId,
+    outcome: "SUCCESS",
+    detail: { version: added.versionNumber, change_type: changeType },
+  });
+  return c.json({ version_number: added.versionNumber, ingestion_status: ingestionStatus }, 201);
 });
 
 const GenerateInput = z.object({
@@ -329,7 +535,7 @@ documentWorkspaceRoutes.get("/drive/smoke", async (c) => {
   }
 });
 
-/** Siembra/actualiza la plantilla institucional de Opinión Legal. Sólo superadmin. */
+/** Preserva la antigua fixture técnica de Opinión Legal como retirada. Sólo superadmin. */
 documentWorkspaceRoutes.post("/templates/seed", async (c) => {
   const { authz } = c.get("ctx");
   const { organizationId, userId } = c.get("session");
@@ -359,7 +565,250 @@ documentWorkspaceRoutes.get("/templates", async (c) => {
       version: t.version,
       status: t.status,
       scope: t.scope,
+      family_id: t.familyId,
+      category: t.category,
+      description: t.description,
+      mime_type: t.mimeType,
+      original_filename: t.originalFilename,
       variables: t.variables ?? [],
     })),
   });
+});
+
+/** Preview privado de plantilla visible para la firma. */
+documentWorkspaceRoutes.get("/templates/:templateId/content", async (c) => {
+  const { organizationId, userId } = c.get("session");
+  const repo = new TemplateRepository(createDb(c.env.DB));
+  const template = await repo.findVisibleById(organizationId, c.req.param("templateId"));
+  if (!template || template.status === "RETIRED") {
+    throw new IusiaError("NOT_FOUND", "Plantilla no encontrada");
+  }
+  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(template.createdBy ?? userId);
+  const ref = template.originalSourceRef ?? template.sourceRef;
+  if (!ref) throw new IusiaError("NOT_FOUND", "Archivo de plantilla no encontrado");
+  const bytes = template.originalSourceRef
+    ? await drive.download(ref)
+    : await drive.exportFile(ref, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  const filename = template.originalFilename ?? `${template.name}.docx`;
+  const disposition = c.req.query("download") === "1" ? "attachment" : "inline";
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Disposition": `${disposition}; filename="${safeFilename(filename)}"`,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+});
+
+/** Historial completo del Template Bank. Exclusivo SYSTEM_SUPERADMIN. */
+documentWorkspaceRoutes.get("/admin/templates", async (c) => {
+  const { authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "templates.manage", organizationId);
+  const rows = await new TemplateRepository(createDb(c.env.DB)).listSystemHistory();
+  return c.json({
+    templates: rows.map((t) => ({
+      id: t.id,
+      family_id: t.familyId,
+      name: t.name,
+      document_type: t.documentType,
+      category: t.category,
+      description: t.description,
+      version: t.version,
+      status: t.status,
+      scope: t.scope,
+      mime_type: t.mimeType,
+      checksum: t.checksum,
+      original_filename: t.originalFilename,
+      variables: t.variables ?? [],
+      created_by: t.createdBy,
+      created_at: t.createdAt,
+      updated_at: t.updatedAt,
+    })),
+  });
+});
+
+/** Alta o nueva versión de una plantilla oficial, sin código ni borrado destructivo. */
+documentWorkspaceRoutes.post("/admin/templates", async (c) => {
+  const { authz, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "templates.manage", organizationId);
+  const form = await c.req.formData();
+  const file = form.get("file");
+  const name = String(form.get("name") ?? "").trim();
+  const documentType = String(form.get("document_type") ?? "").trim().toUpperCase();
+  const category = String(form.get("category") ?? "").trim();
+  const description = String(form.get("description") ?? "").trim();
+  const familyId = String(form.get("family_id") ?? "").trim() || undefined;
+  const activate = String(form.get("activate") ?? "true") !== "false";
+  if (!(file instanceof File) || !name || !documentType || !category) {
+    throw new IusiaError("VALIDATION_FAILED", "Archivo, nombre, tipo documental y categoría son obligatorios");
+  }
+  const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (file.type !== DOCX_MIME && !file.name.toLowerCase().endsWith(".docx")) {
+    throw new IusiaError("VALIDATION_FAILED", "La plantilla oficial debe ser un archivo DOCX");
+  }
+  const variablesRaw = String(form.get("variables") ?? "[]");
+  let variablesJson: unknown;
+  try {
+    variablesJson = JSON.parse(variablesRaw);
+  } catch {
+    throw new IusiaError("VALIDATION_FAILED", "Los campos requeridos de la plantilla no son válidos");
+  }
+  const variablesParsed = z.array(z.object({
+    key: z.string().regex(/^[a-z][a-z0-9_]*$/),
+    label: z.string().min(1),
+    required: z.boolean(),
+    placeholder: z.string().min(1).optional(),
+  })).safeParse(variablesJson);
+  if (!variablesParsed.success) {
+    throw new IusiaError("VALIDATION_FAILED", "Los campos requeridos de la plantilla no son válidos");
+  }
+  const bytes = await file.arrayBuffer();
+  const normalizedTemplate = await normalizeToText(bytes, DOCX_MIME, file.name, c.env.AI);
+  const detectedVariables = discoverTemplateVariables(normalizedTemplate);
+  const variables = detectedVariables.length > 0 ? detectedVariables : variablesParsed.data;
+  const workspace = DriveWorkspaceService.forEnv(c.env);
+  const { templates: templatesFolder } = await workspace.ensureFirmStructure(userId, organizationId);
+  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  const original = await drive.uploadFile({
+    name: file.name,
+    parentId: templatesFolder,
+    mimeType: DOCX_MIME,
+    content: bytes,
+  });
+  const operationalRef = await drive.importDocxAsGoogleDoc({
+    name: `${name} — fuente operativa`,
+    parentId: templatesFolder,
+    content: bytes,
+  });
+  const repo = new TemplateRepository(createDb(c.env.DB));
+  const created = await repo.createSystemVersion({
+    familyId,
+    name,
+    documentType,
+    category,
+    description: description || null,
+    sourceRef: operationalRef,
+    originalSourceRef: original.provider_file_id,
+    mimeType: DOCX_MIME,
+    checksum: await checksum(bytes),
+    originalFilename: file.name,
+    variables,
+    createdBy: userId,
+    activate,
+  });
+  await audit.record({
+    organizationId,
+    actorUserId: userId,
+    action: familyId ? "template.version.created" : "template.created",
+    resourceType: "template",
+    resourceId: created.id,
+    outcome: "SUCCESS",
+    detail: { family_id: created.familyId, version: created.version, status: activate ? "ACTIVE" : "INACTIVE" },
+  });
+  return c.json(created, 201);
+});
+
+/** Importa plantillas oficiales previamente cargadas en el R2 existente. */
+documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
+  const { authz, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "templates.manage", organizationId);
+
+  const manifestObject = await c.env.ARTIFACTS.get(`${OFFICIAL_TEMPLATE_PREFIX}manifest.json`);
+  if (!manifestObject) throw new IusiaError("NOT_FOUND", "Manifest de plantillas oficiales no encontrado en R2");
+  const manifest = OfficialTemplateManifest.safeParse(JSON.parse(await manifestObject.text()));
+  if (!manifest.success) throw new IusiaError("VALIDATION_FAILED", "Manifest de plantillas oficiales inválido");
+
+  const repo = new TemplateRepository(createDb(c.env.DB));
+  await repo.setSystemStatus(SEED_TEMPLATE_IDS.opinion, "RETIRED");
+  const existing = await repo.listSystemHistory();
+  const existingChecksums = new Set(existing.map((row) => row.checksum).filter(Boolean));
+  const workspace = DriveWorkspaceService.forEnv(c.env);
+  const { templates: templatesFolder } = await workspace.ensureFirmStructure(userId, organizationId);
+  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+  const imported: Array<{ id: string; name: string; version: number; checksum: string }> = [];
+  const skipped: Array<{ name: string; checksum: string; reason: string }> = [];
+
+  for (const item of manifest.data.templates) {
+    if (existingChecksums.has(item.sha256)) {
+      skipped.push({ name: item.name, checksum: item.sha256, reason: "already_registered" });
+      continue;
+    }
+    const object = await c.env.ARTIFACTS.get(`${OFFICIAL_TEMPLATE_PREFIX}${item.file}`);
+    if (!object) throw new IusiaError("NOT_FOUND", `Plantilla oficial no encontrada: ${item.file}`);
+    const bytes = await object.arrayBuffer();
+    const actualChecksum = await checksum(bytes);
+    if (actualChecksum !== item.sha256) {
+      throw new IusiaError("VALIDATION_FAILED", `Checksum inválido para ${item.file}`);
+    }
+    const normalizedTemplate = await normalizeToText(bytes, DOCX_MIME, item.file, c.env.AI);
+    const variables = discoverTemplateVariables(normalizedTemplate);
+    const filename = item.file.split("/").pop() ?? `${item.name}.docx`;
+    const original = await drive.uploadFile({
+      name: filename,
+      parentId: templatesFolder,
+      mimeType: DOCX_MIME,
+      content: bytes,
+    });
+    const operationalRef = await drive.importDocxAsGoogleDoc({
+      name: `${item.name} — fuente operativa`,
+      parentId: templatesFolder,
+      content: bytes,
+    });
+    const created = await repo.createSystemVersion({
+      name: item.name,
+      documentType: item.document_type.toUpperCase(),
+      category: item.category,
+      description: `Plantilla oficial Pisoso Legal preservada desde ${item.file}.`,
+      sourceRef: operationalRef,
+      originalSourceRef: original.provider_file_id,
+      mimeType: DOCX_MIME,
+      checksum: actualChecksum,
+      originalFilename: filename,
+      variables,
+      createdBy: userId,
+      activate: true,
+    });
+    existingChecksums.add(actualChecksum);
+    imported.push({ id: created.id, name: item.name, version: created.version, checksum: actualChecksum });
+  }
+
+  await audit.record({
+    organizationId,
+    actorUserId: userId,
+    action: "template.official_import",
+    resourceType: "template",
+    resourceId: "official:pisoso-legal",
+    outcome: "SUCCESS",
+    detail: { imported: imported.length, skipped: skipped.length },
+  });
+  return c.json({ imported, skipped });
+});
+
+const TemplateStatusInput = z.object({ status: z.enum(["ACTIVE", "INACTIVE", "RETIRED"]) });
+
+documentWorkspaceRoutes.patch("/admin/templates/:templateId/status", async (c) => {
+  const { authz, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "templates.manage", organizationId);
+  const parsed = TemplateStatusInput.safeParse(await c.req.json());
+  if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Estado de plantilla inválido");
+  const repo = new TemplateRepository(createDb(c.env.DB));
+  const updated = await repo.setSystemStatus(c.req.param("templateId"), parsed.data.status);
+  if (!updated) throw new IusiaError("NOT_FOUND", "Plantilla no encontrada");
+  await audit.record({
+    organizationId,
+    actorUserId: userId,
+    action: "template.status.set",
+    resourceType: "template",
+    resourceId: updated.id,
+    outcome: "SUCCESS",
+    detail: { status: parsed.data.status },
+  });
+  return c.json({ ok: true, status: parsed.data.status });
 });

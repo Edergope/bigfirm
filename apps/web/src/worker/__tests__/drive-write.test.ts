@@ -68,4 +68,22 @@ describe("docsReplaceText", () => {
     await drive.docsReplaceText("doc-1", {});
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("reemplaza tokens literales de la plantilla oficial y conserva mustache legacy", async () => {
+    let sent = "";
+    const fetchImpl = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      sent = String(init?.body ?? "");
+      return jsonResponse({});
+    });
+    const drive = new GoogleDriveAdapter({ accessToken: "t" }, fetchImpl as unknown as typeof fetch);
+    await drive.docsReplaceText("doc-1", {
+      "[CLIENTE]": "Atlas Synthetic Fixture",
+      firmante: "Eder Gonzalez",
+    });
+    const body = JSON.parse(sent) as { requests: Array<{ replaceAllText: { containsText: { text: string } } }> };
+    expect(body.requests.map((request) => request.replaceAllText.containsText.text)).toEqual([
+      "[CLIENTE]",
+      "{{firmante}}",
+    ]);
+  });
 });

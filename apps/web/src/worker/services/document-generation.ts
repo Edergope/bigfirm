@@ -9,6 +9,30 @@ import { DocumentRepository, TemplateRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
 import { DriveWorkspaceService } from "./drive-workspace.js";
 import { DriveCredentialResolver } from "./drive-credentials.js";
+import { DriveApiError } from "../integrations/google-drive.js";
+
+const TRANSIENT_DRIVE_KINDS = new Set(["network", "rate_limited", "http_5xx"]);
+
+/** Retry acotado para operaciones idempotentes de Drive/Docs exclusivamente. */
+export async function retryTransientDrive<T>(
+  operation: () => Promise<T>,
+  opts: { attempts?: number; delayMs?: number } = {},
+): Promise<T> {
+  const attempts = Math.max(1, Math.min(opts.attempts ?? 3, 3));
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const retryable = error instanceof DriveApiError && TRANSIENT_DRIVE_KINDS.has(error.kind);
+      if (!retryable || attempt === attempts) throw error;
+      const delay = (opts.delayMs ?? 120) * attempt;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
 
 /**
  * Generación documental — separación estricta contenido / presentación / render.
@@ -42,6 +66,7 @@ export interface GenerationTemplateVariable {
   key: string;
   label: string;
   required: boolean;
+  placeholder?: string;
 }
 
 /** Resolvedor de contenido: recibe las variables de la plantilla y devuelve sus valores. */
@@ -109,6 +134,7 @@ export class DocumentGenerationService {
       key: v.key,
       label: v.label,
       required: v.required,
+      placeholder: v.placeholder,
       type: "text" as const,
     }));
 
@@ -159,10 +185,20 @@ export class DocumentGenerationService {
       // 1. Copiar la plantilla Google Docs a un doc nativo editable (el master).
       const nativeId = await drive.copyFile(template.sourceRef, `${baseName} (editable)`, generated);
       // 2. Poblar variables con Docs API batchUpdate.
-      await drive.docsReplaceText(nativeId, values);
+      // Repetir replaceAllText es idempotente: tras el primer éxito ya no quedan
+      // placeholders, por lo que una respuesta perdida no duplica contenido.
+      const replacements = Object.fromEntries(
+        variables.flatMap((variable) => {
+          const value = values[variable.key];
+          return value === undefined ? [] : [[variable.placeholder ?? variable.key, value]];
+        }),
+      );
+      await retryTransientDrive(() => drive.docsReplaceText(nativeId, replacements));
       // 3. Exportar y persistir DOCX + PDF (Google hace el render).
-      const docxBytes = await drive.exportFile(nativeId, EXPORT_MIME.docx);
-      const pdfBytes = await drive.exportFile(nativeId, EXPORT_MIME.pdf);
+      // Exportar es read-only e idempotente. Los uploads NO se reintentan aquí:
+      // hacerlo a ciegas podría crear dos entregables en Drive.
+      const docxBytes = await retryTransientDrive(() => drive.exportFile(nativeId, EXPORT_MIME.docx));
+      const pdfBytes = await retryTransientDrive(() => drive.exportFile(nativeId, EXPORT_MIME.pdf));
       docxMeta = await drive.uploadFile({
         name: `${baseName}.docx`,
         parentId: generated,

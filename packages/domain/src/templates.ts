@@ -20,6 +20,8 @@ export const TemplateVariable = z.object({
   key: z.string().regex(/^[a-z][a-z0-9_]*$/, "clave snake_case"),
   label: z.string().min(1),
   required: z.boolean().default(true),
+  /** Token literal en la plantilla oficial (p.ej. `[CLIENTE]`). Ausente ⇒ `{{key}}`. */
+  placeholder: z.string().min(1).optional(),
   /** Tipo lógico para validación de entrada. */
   type: z.enum(["text", "number", "date", "currency"]).default("text"),
 });

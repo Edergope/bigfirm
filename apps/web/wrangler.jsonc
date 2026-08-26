@@ -76,6 +76,10 @@
 
   "analytics_engine_datasets": [{ "binding": "USAGE_ANALYTICS", "dataset": "iusia_usage" }],
 
+  // Conversión nativa de PDF/DOCX/XLS/XLSX a Markdown. No se usa para imágenes:
+  // el pipeline omite visión para mantener costo variable fuera de la ingesta base.
+  "ai": { "binding": "AI" },
+
   // SEGURIDAD (fail-closed): la config base/deployable NUNCA declara IUSIA_ENV ni APP_URL.
   //  - `IUSIA_ENV` sólo se activa en desarrollo LOCAL vía `.dev.vars` (IUSIA_ENV=development);
   //    un `wrangler deploy` sin selección explícita de entorno deja IUSIA_ENV=undefined, y el
@@ -144,7 +148,8 @@
           }
         ]
       },
-      "ai_search": [{ "binding": "AI_SEARCH", "instance_name": "iusia-rag-e2e" }]
+      "ai_search": [{ "binding": "AI_SEARCH", "instance_name": "iusia-rag-e2e" }],
+      "ai": { "binding": "AI" }
       // NOTA: `analytics_engine_datasets` (USAGE_ANALYTICS) se omite en staging hasta
       // habilitar Analytics Engine en la cuenta (backlog/observabilidad). La escritura
       // en legal-worker.ts es opcional (`?.`) → no-op seguro sin el binding.

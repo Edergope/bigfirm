@@ -18,10 +18,12 @@ interface R2Binding {
 }
 
 interface WranglerConfig {
+  ai?: { binding?: string };
   vars?: Record<string, unknown>;
   r2_buckets?: R2Binding[];
   env?: {
     staging?: {
+      ai?: { binding?: string };
       vars?: Record<string, unknown>;
       d1_databases?: Array<{ binding: string; database_id?: string }>;
       ai_search?: Array<{ binding: string; instance_name?: string }>;
@@ -62,6 +64,10 @@ describe("deployment safety: wrangler.jsonc base config (fail-closed)", () => {
     expect(artifacts, "ARTIFACTS debe existir en r2_buckets base").toBeDefined();
     expect(artifacts?.remote).not.toBe(true);
   });
+
+  it("la conversión documental usa el binding nativo Workers AI", () => {
+    expect(config.ai?.binding).toBe("AI");
+  });
 });
 
 describe("environment staging (recursos remotos)", () => {
@@ -89,6 +95,10 @@ describe("environment staging (recursos remotos)", () => {
   it("staging incluye el binding AI_SEARCH (instancia iusia-rag-e2e)", () => {
     const ai = (staging?.ai_search ?? []).find((a) => a.binding === "AI_SEARCH");
     expect(ai?.instance_name).toBe("iusia-rag-e2e");
+  });
+
+  it("staging redeclara Workers AI para toMarkdown", () => {
+    expect(staging?.ai?.binding).toBe("AI");
   });
 });
 

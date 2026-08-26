@@ -9,6 +9,7 @@ export const ID_PREFIXES = {
   user: "usr",
   matter: "mtr",
   document: "doc",
+  documentVersion: "dvr",
   execution: "exe",
   event: "evt",
   workPackage: "wpk",

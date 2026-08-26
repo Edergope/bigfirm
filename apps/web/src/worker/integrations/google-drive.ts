@@ -207,6 +207,46 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
     };
   }
 
+  /**
+   * Conserva el DOCX original por separado e importa una copia operativa como
+   * Google Doc. Drive realiza la conversión y mantiene la diagramación soportada.
+   */
+  async importDocxAsGoogleDoc(input: {
+    name: string;
+    parentId: string;
+    content: ArrayBuffer | Uint8Array;
+  }): Promise<string> {
+    const token = this.requireToken();
+    const boundary = `iusia-${crypto.randomUUID()}`;
+    const metadata = JSON.stringify({
+      name: input.name,
+      parents: [input.parentId],
+      mimeType: "application/vnd.google-apps.document",
+    });
+    const bytes = input.content instanceof Uint8Array ? input.content : new Uint8Array(input.content);
+    const enc = new TextEncoder();
+    const pre = enc.encode(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n` +
+        `--${boundary}\r\nContent-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n`,
+    );
+    const post = enc.encode(`\r\n--${boundary}--\r\n`);
+    const body = new Uint8Array(pre.length + bytes.length + post.length);
+    body.set(pre, 0);
+    body.set(bytes, pre.length);
+    body.set(post, pre.length + bytes.length);
+    const res = await this.authRequest(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+      token,
+      "importDocxAsGoogleDoc",
+      {
+        method: "POST",
+        headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+        body,
+      },
+    );
+    return ((await res.json()) as { id: string }).id;
+  }
+
   /** Crea un Google Doc nativo vacío en una carpeta. Devuelve su id. */
   async createDoc(name: string, parentId: string): Promise<string> {
     const token = this.requireToken();
@@ -257,7 +297,10 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
   async docsReplaceText(documentId: string, replacements: Record<string, string>): Promise<void> {
     const requests = Object.entries(replacements).map(([key, value]) => ({
       replaceAllText: {
-        containsText: { text: `{{${key}}}`, matchCase: false },
+        containsText: {
+          text: key.startsWith("[") || key.startsWith("{{") ? key : `{{${key}}}`,
+          matchCase: false,
+        },
         replaceText: value,
       },
     }));

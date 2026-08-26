@@ -56,7 +56,25 @@ export interface DocumentEntry {
   status: string;
   classification: string;
   drive_file_id: string | null;
+  current_version: number;
+  size_bytes: number | null;
+  ingestion_status: string;
   updated_at: string;
+}
+
+export interface DocumentVersionEntry {
+  id: string;
+  version_number: number;
+  filename: string;
+  mime_type: string;
+  size_bytes: number | null;
+  checksum: string | null;
+  created_by: string;
+  created_at: string;
+  change_type: string;
+  change_summary: string;
+  ingestion_status: string;
+  is_current: boolean;
 }
 
 export interface MatterSummary {
@@ -339,6 +357,41 @@ export const api = {
     return body as { uploaded: Array<{ document_id: string; name: string; status: string }> };
   },
 
+  documentVersions: (matterId: string, documentId: string) =>
+    request<{ versions: DocumentVersionEntry[] }>(
+      `/api/matters/${matterId}/documents/${documentId}/versions`,
+    ),
+
+  documentContentUrl: (matterId: string, documentId: string, version?: number, download = false) => {
+    const params = new URLSearchParams();
+    if (version) params.set("version", String(version));
+    if (download) params.set("download", "1");
+    const query = params.size > 0 ? `?${params}` : "";
+    return `/api/matters/${matterId}/documents/${documentId}/content${query}`;
+  },
+
+  uploadDocumentVersion: async (
+    matterId: string,
+    documentId: string,
+    input: { file: File; changeType: string; changeSummary: string },
+  ) => {
+    const form = new FormData();
+    form.append("file", input.file);
+    form.append("change_type", input.changeType);
+    form.append("change_summary", input.changeSummary);
+    const res = await fetch(`/api/matters/${matterId}/documents/${documentId}/versions`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      const err = (body as { error?: { code: string; message: string } })?.error;
+      throw new ApiError(err?.code ?? "INTERNAL", err?.message ?? "No fue posible subir la versión", res.status);
+    }
+    return body as { version_number: number; ingestion_status: string };
+  },
+
   listTemplates: () =>
     request<{
       templates: Array<{
@@ -348,9 +401,63 @@ export const api = {
         version: number;
         status: string;
         scope: string;
-        variables: Array<{ key: string; label: string; required: boolean }>;
+        family_id: string;
+        category: string;
+        description: string | null;
+        mime_type: string;
+        original_filename: string | null;
+        variables: Array<{ key: string; label: string; required: boolean; placeholder?: string }>;
       }>;
     }>("/api/templates"),
+
+  templateContentUrl: (templateId: string, download = false) =>
+    `/api/templates/${templateId}/content${download ? "?download=1" : ""}`,
+
+  adminTemplates: () =>
+    request<{
+      templates: Array<{
+        id: string; family_id: string; name: string; document_type: string;
+        category: string; description: string | null; version: number; status: string;
+        scope: string; mime_type: string; checksum: string | null;
+        original_filename: string | null; variables: Array<{ key: string; label: string; required: boolean; placeholder?: string }>;
+        created_by: string | null; created_at: string; updated_at: string;
+      }>;
+    }>("/api/admin/templates"),
+
+  createTemplate: async (input: {
+    file: File; name: string; documentType: string; category: string;
+    description: string; familyId?: string; activate?: boolean;
+    variables?: Array<{ key: string; label: string; required: boolean; placeholder?: string }>;
+  }) => {
+    const form = new FormData();
+    form.append("file", input.file);
+    form.append("name", input.name);
+    form.append("document_type", input.documentType);
+    form.append("category", input.category);
+    form.append("description", input.description);
+    if (input.familyId) form.append("family_id", input.familyId);
+    form.append("activate", String(input.activate !== false));
+    form.append("variables", JSON.stringify(input.variables ?? []));
+    const res = await fetch("/api/admin/templates", { method: "POST", credentials: "include", body: form });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      const err = (body as { error?: { code: string; message: string } })?.error;
+      throw new ApiError(err?.code ?? "INTERNAL", err?.message ?? "No fue posible registrar la plantilla", res.status);
+    }
+    return body as { id: string; familyId: string; version: number };
+  },
+
+  importOfficialTemplates: () =>
+    request<{
+      imported: Array<{ id: string; name: string; version: number; checksum: string }>;
+      skipped: Array<{ name: string; checksum: string; reason: string }>;
+    }>("/api/admin/templates/import-official", { method: "POST" }),
+
+  setTemplateStatus: (templateId: string, status: "ACTIVE" | "INACTIVE" | "RETIRED") =>
+    request<{ ok: true; status: string }>(`/api/admin/templates/${templateId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
 
   generateDocument: (
     matterId: string,
