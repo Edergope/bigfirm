@@ -58,8 +58,10 @@ export class IngestionService {
       throw error;
     }
 
+    let stage: IngestionStage = "DRIVE_DOWNLOAD";
     try {
       const bytes = await storage.download(message.drive_file_id);
+      stage = "NORMALIZE";
       const text = await normalizeToText(bytes, doc.mimeType, doc.name, this.env.AI);
 
       const key = documentMirrorKey(
@@ -68,6 +70,7 @@ export class IngestionService {
         message.document_id,
       );
       // Metadata de R2 → la usa AI Search como folder/tenant para el filtrado.
+      stage = "R2_PUT";
       await this.env.ARTIFACTS.put(key, text, {
         httpMetadata: { contentType: "text/markdown; charset=utf-8" },
         customMetadata: {
@@ -80,6 +83,7 @@ export class IngestionService {
         },
       });
 
+      stage = "AI_SEARCH_UPLOAD";
       await uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
         organization_id: message.organization_id,
         matter_id: message.matter_id,
@@ -88,6 +92,7 @@ export class IngestionService {
         is_current: "true",
       });
 
+      stage = "D1_MARK_INDEXED";
       await documents.markIndexed(
         message.organization_id,
         message.document_id,
@@ -99,6 +104,13 @@ export class IngestionService {
       if (error instanceof StorageNotConfiguredError) {
         return { status: "STORAGE_NOT_CONFIGURED" };
       }
+      console.error("ingestion_stage_failed", {
+        organization_id: message.organization_id,
+        matter_id: message.matter_id,
+        document_id: message.document_id,
+        stage,
+        ...safeIngestionError(error),
+      });
       await documents.markIngestionFailed(message.organization_id, message.document_id);
       return {
         status: "ERROR",
@@ -107,6 +119,37 @@ export class IngestionService {
     }
   }
 }
+
+export type IngestionStage =
+  | "DRIVE_DOWNLOAD"
+  | "NORMALIZE"
+  | "R2_PUT"
+  | "AI_SEARCH_UPLOAD"
+  | "D1_MARK_INDEXED";
+
+function safeIngestionError(error: unknown) {
+  return {
+    error_name: error instanceof Error ? error.name : typeof error,
+    safe_message: error instanceof Error ? error.message.slice(0, 300) : "unknown",
+  };
+}
+
+export type AiSearchUploadStatus =
+  | "completed"
+  | "error"
+  | "skipped"
+  | "queued"
+  | "running"
+  | "outdated";
+
+export type AiSearchUploadInfo = {
+  id?: string;
+  key?: string;
+  status?: AiSearchUploadStatus;
+  error?: string;
+  chunks_count?: number | null;
+  file_size?: number | null;
+};
 
 type AiSearchIngestionBinding = {
   items?: {
@@ -118,7 +161,7 @@ type AiSearchIngestionBinding = {
         pollIntervalMs?: number;
         timeoutMs?: number;
       },
-    ) => Promise<unknown>;
+    ) => Promise<AiSearchUploadInfo>;
   };
 };
 
@@ -135,15 +178,21 @@ export async function uploadToAiSearch(
   key: string,
   text: string,
   metadata: Record<string, string>,
-): Promise<void> {
+): Promise<AiSearchUploadInfo> {
   if (!aiSearch?.items?.uploadAndPoll) {
     throw new Error("AI Search uploadAndPoll no está configurado");
   }
-  await aiSearch.items.uploadAndPoll(key, text, {
+  const item = await aiSearch.items.uploadAndPoll(key, text, {
     metadata,
     pollIntervalMs: 1000,
     timeoutMs: 30000,
   });
+  if (item.status !== "completed") {
+    throw new Error(
+      `AI Search uploadAndPoll finalizó con status=${item.status ?? "unknown"}${item.error ? `: ${item.error}` : ""}`,
+    );
+  }
+  return item;
 }
 
 /**

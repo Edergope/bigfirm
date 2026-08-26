@@ -9,6 +9,7 @@ import { ResendNotificationProvider } from "../integrations/notifications.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import { StripeBillingProvider } from "../integrations/stripe-billing.js";
 import { GoogleDocsTemplateAdapter, DocxtemplaterAdapter } from "../integrations/templates.js";
+import { uploadToAiSearch } from "../services/ingestion.js";
 
 /**
  * Administración de la firma. La identidad y membresía las gobierna Better Auth;
@@ -230,6 +231,67 @@ adminRoutes.get("/system/executions", async (c) => {
   );
   return c.json({ executions: rows });
 });
+
+/**
+ * Smoke técnico de ingestión AI Search reservado a SYSTEM_SUPERADMIN.
+ *
+ * Usa contenido sintético fijo, no acepta documentos del usuario y limpia el item
+ * al terminar si la API devuelve id. Sirve para validar el binding real de staging
+ * sin crear una segunda instancia ni exponer contenido jurídico.
+ */
+adminRoutes.post("/system/ingestion-smoke", async (c) => {
+  const { authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "system.ingestion.smoke", organizationId);
+
+  const key = "iusia-e2e-ingestion-smoke-20260826.md";
+  const content = "IUSIA_AI_SEARCH_BINDING_SMOKE_20260826";
+  const metadata = {
+    organization_id: "org_iusia_smoke_20260826",
+    matter_id: "mtr_iusia_smoke_20260826",
+    document_id: "doc_iusia_smoke_20260826",
+    document_version: "1",
+    is_current: "true",
+  };
+
+  let itemId: string | undefined;
+  try {
+    const item = await uploadToAiSearch(c.env.AI_SEARCH ?? null, key, content, metadata);
+    itemId = item.id;
+    return c.json({
+      ok: true,
+      key: item.key ?? key,
+      status: item.status,
+      chunks_count: item.chunks_count ?? null,
+      file_size: item.file_size ?? null,
+      cleaned_up: await cleanupAiSearchSmoke(c.env.AI_SEARCH ?? null, itemId),
+    });
+  } catch (error) {
+    return c.json(
+      {
+        ok: false,
+        key,
+        error_name: error instanceof Error ? error.name : typeof error,
+        safe_message: error instanceof Error ? error.message.slice(0, 300) : "unknown",
+        cleaned_up: await cleanupAiSearchSmoke(c.env.AI_SEARCH ?? null, itemId),
+      },
+      200,
+    );
+  }
+});
+
+async function cleanupAiSearchSmoke(
+  aiSearch: AppBindings["Bindings"]["AI_SEARCH"] | null,
+  itemId: string | undefined,
+) {
+  if (!aiSearch?.items?.delete || !itemId) return false;
+  try {
+    await aiSearch.items.delete(itemId);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const RemoveMemberInput = z.object({ user_id: z.string().min(1) });
 
