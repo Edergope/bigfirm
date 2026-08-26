@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { FirmRole, IusiaError, MatterRole } from "@iusia/domain";
@@ -239,12 +239,13 @@ adminRoutes.get("/system/executions", async (c) => {
  * al terminar si la API devuelve id. Sirve para validar el binding real de staging
  * sin crear una segunda instancia ni exponer contenido jurídico.
  */
-adminRoutes.post("/system/ingestion-smoke", async (c) => {
+async function runIngestionSmoke(c: Context<AppBindings>) {
   const { authz } = c.get("ctx");
   const { organizationId, userId } = c.get("session");
   await authz.requireSystemSuperadmin(userId, "system.ingestion.smoke", organizationId);
 
-  const key = "iusia-e2e-ingestion-smoke-20260826.md";
+  const key =
+    "org/org_iusia_smoke_20260826/matter/mtr_iusia_smoke_20260826/doc/doc_iusia_smoke_20260826.txt";
   const content = "IUSIA_AI_SEARCH_BINDING_SMOKE_20260826";
   const metadata = {
     organization_id: "org_iusia_smoke_20260826",
@@ -278,6 +279,22 @@ adminRoutes.post("/system/ingestion-smoke", async (c) => {
       200,
     );
   }
+}
+
+adminRoutes.post("/system/ingestion-smoke", runIngestionSmoke);
+adminRoutes.get("/system/ingestion-smoke", async (c) => {
+  const { authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "system.ingestion.smoke", organizationId);
+  return c.html(`<!doctype html>
+<html lang="es">
+  <head><meta charset="utf-8"><title>IUSIA ingestion smoke</title></head>
+  <body>
+    <form method="post" action="/api/admin/system/ingestion-smoke">
+      <button type="submit">Ejecutar smoke de ingestión AI Search</button>
+    </form>
+  </body>
+</html>`);
 });
 
 async function cleanupAiSearchSmoke(
