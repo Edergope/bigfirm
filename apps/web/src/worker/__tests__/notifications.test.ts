@@ -97,6 +97,23 @@ describe("ResendNotificationProvider (adapter, sin SDK)", () => {
     expect(r.provider_message_id).toBe("resend_123");
   });
 
+  it("incluye HTML sólo cuando se suministra y conserva texto", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "resend_html" }), { status: 200 }),
+    );
+    const p = new ResendNotificationProvider(cfg({ fetchImpl: fetchImpl as unknown as typeof fetch }));
+    await p.send({
+      to: "a@b.co",
+      subject: "s",
+      text: "fallback",
+      html: "<p>correo</p>",
+      tags: {},
+    });
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, string>;
+    expect(body.text).toBe("fallback");
+    expect(body.html).toBe("<p>correo</p>");
+  });
+
   it("normaliza un 4xx del proveedor como FAILED http_4xx", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("bad", { status: 422 }));
     const p = new ResendNotificationProvider(cfg({ fetchImpl: fetchImpl as unknown as typeof fetch }));

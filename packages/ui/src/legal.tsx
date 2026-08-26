@@ -1,4 +1,9 @@
-import type { ExecutionStatus, RiskLevel } from "@iusia/domain";
+import {
+  FIRM_ROLE_LABELS,
+  firmRoleLabel as domainFirmRoleLabel,
+  type ExecutionStatus,
+  type RiskLevel,
+} from "@iusia/domain";
 import { StatusChip } from "./primitives.js";
 import { analysisTerm, matterStatusTerm, riskTerm } from "./legal-terminology.js";
 import { colors } from "./tokens/index.js";
@@ -87,15 +92,15 @@ export function CreditBadge({ balance }: { balance: number }) {
  * persona, y eso no se adivina por el nombre.
  */
 export const FIRM_ROLE_PRESENTATION: Record<string, { label: string; hint: string }> = {
-  FIRM_DIRECTOR: { label: "Dirección", hint: "Administra la firma y supervisa toda la cartera." },
-  PARTNER: { label: "Socio", hint: "Administra la firma y supervisa toda la cartera." },
-  LAWYER: { label: "Abogado", hint: "Trabaja en los expedientes que se le asignen." },
-  EXTERNAL_LAWYER: { label: "Abogado externo", hint: "Colabora sólo en expedientes concretos." },
-  ASSISTANT: { label: "Asistente", hint: "Apoya la gestión de los expedientes asignados." },
-  PARALEGAL: { label: "Paralegal", hint: "Apoyo jurídico en los expedientes asignados." },
-  READ_ONLY: { label: "Sólo lectura", hint: "Consulta sin capacidad de modificar." },
+  FIRM_DIRECTOR: { label: FIRM_ROLE_LABELS.FIRM_DIRECTOR, hint: "Administra la firma y supervisa toda la cartera." },
+  PARTNER: { label: FIRM_ROLE_LABELS.PARTNER, hint: "Administra la firma y supervisa toda la cartera." },
+  LAWYER: { label: FIRM_ROLE_LABELS.LAWYER, hint: "Trabaja en los expedientes que se le asignen." },
+  EXTERNAL_LAWYER: { label: FIRM_ROLE_LABELS.EXTERNAL_LAWYER, hint: "Colabora sólo en expedientes concretos." },
+  ASSISTANT: { label: FIRM_ROLE_LABELS.ASSISTANT, hint: "Apoya la gestión de los expedientes asignados." },
+  PARALEGAL: { label: FIRM_ROLE_LABELS.PARALEGAL, hint: "Apoyo jurídico en los expedientes asignados." },
+  READ_ONLY: { label: FIRM_ROLE_LABELS.READ_ONLY, hint: "Consulta sin capacidad de modificar." },
 };
 
 export function firmRoleLabel(role: string): string {
-  return FIRM_ROLE_PRESENTATION[role]?.label ?? role;
+  return domainFirmRoleLabel(role);
 }

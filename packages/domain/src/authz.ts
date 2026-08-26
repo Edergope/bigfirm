@@ -36,6 +36,21 @@ export const FIRM_ROLES = [
 export const FirmRole = z.enum(FIRM_ROLES);
 export type FirmRole = z.infer<typeof FirmRole>;
 
+/** Etiquetas que pueden cruzar límites de servidor (correo, auditoría y UI). */
+export const FIRM_ROLE_LABELS: Record<FirmRole, string> = {
+  FIRM_DIRECTOR: "Dirección",
+  PARTNER: "Socio",
+  LAWYER: "Abogado",
+  EXTERNAL_LAWYER: "Abogado externo",
+  ASSISTANT: "Asistente",
+  PARALEGAL: "Paralegal",
+  READ_ONLY: "Sólo lectura",
+};
+
+export function firmRoleLabel(role: string): string {
+  return FIRM_ROLE_LABELS[role as FirmRole] ?? role;
+}
+
 export const MATTER_ROLES = [
   "OWNER",
   "COLLABORATOR",

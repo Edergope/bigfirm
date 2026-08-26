@@ -5,6 +5,7 @@ import { organization } from "better-auth/plugins/organization";
 import { AuditRepository, createDb, schema } from "@iusia/db";
 import { ResendNotificationProvider } from "../integrations/notifications.js";
 import { authorizeOnboarding } from "./invitation-guard.js";
+import { renderOrganizationInvitationEmail } from "./organization-invitation-email.js";
 import type { Env } from "../env.js";
 import { firmAccessControl, firmRoles } from "./roles.js";
 
@@ -212,16 +213,18 @@ export function createAuth(env: Env) {
               apiKey: env.RESEND_API_KEY ?? null,
               from: env.RESEND_FROM ?? DEFAULT_SENDER,
             });
-            const link = `${env.APP_URL}/invitacion?invitationId=${encodeURIComponent(data.id)}`;
-            const inviterName = data.inviter?.user?.name ?? "La dirección de tu firma";
-            const organizationName = data.organization?.name ?? "tu firma";
+            const rendered = renderOrganizationInvitationEmail({
+              inviteLink: `${env.APP_URL}/invitacion?invitationId=${encodeURIComponent(data.id)}`,
+              inviterName: data.inviter?.user?.name ?? "La dirección de tu firma",
+              organizationName: data.organization?.name ?? "tu firma",
+              role: data.role,
+              expiresAt: data.invitation.expiresAt,
+            });
             const result = await provider.send({
               to: data.email,
-              subject: `${organizationName} te invitó a IUSIA`,
-              text:
-                `${inviterName} te invitó a trabajar en ${organizationName}.\n\n` +
-                `Acepta la invitación aquí: ${link}\n\n` +
-                "El enlace caduca y sólo puede usarse una vez. Si no esperabas esta invitación, ignora este mensaje.",
+              subject: rendered.subject,
+              text: rendered.text,
+              html: rendered.html,
               tags: { flow: "organization_invitation" },
             });
             logDeliveryOutcome("organization_invitation", result);

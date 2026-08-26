@@ -34,6 +34,7 @@ export class ResendNotificationProvider implements NotificationProvider {
     to: string;
     subject: string;
     text: string;
+    html?: string;
     tags: Record<string, string>;
   }): Promise<ProviderSendResult> {
     if (!this.cfg.apiKey) {
@@ -57,6 +58,7 @@ export class ResendNotificationProvider implements NotificationProvider {
           to: input.to,
           subject: input.subject,
           text: input.text,
+          ...(input.html ? { html: input.html } : {}),
           // Metadata operativa para correlación; nunca contenido jurídico.
           tags: Object.entries(input.tags).map(([name, value]) => ({ name, value })),
         }),
@@ -101,7 +103,13 @@ export class ResendNotificationProvider implements NotificationProvider {
 /** Proveedor en memoria para tests. Registra los envíos y puede simular fallos. */
 export class FakeNotificationProvider implements NotificationProvider {
   readonly id = "fake";
-  readonly sent: Array<{ to: string; subject: string; text: string; tags: Record<string, string> }> = [];
+  readonly sent: Array<{
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+    tags: Record<string, string>;
+  }> = [];
   constructor(
     private readonly opts: {
       configured?: boolean;
@@ -117,6 +125,7 @@ export class FakeNotificationProvider implements NotificationProvider {
     to: string;
     subject: string;
     text: string;
+    html?: string;
     tags: Record<string, string>;
   }): Promise<ProviderSendResult> {
     if (this.opts.configured === false) {

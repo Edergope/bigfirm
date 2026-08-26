@@ -73,14 +73,17 @@ export function Team() {
 
   const invite = useMutation({
     mutationFn: async () => {
-      // API nativa del plugin organization: el servidor fija organización y token.
-      const res = await authClient.organization.inviteMember({ email, role: role as never });
-      if (res.error) throw new Error(res.error.message ?? "No fue posible invitar");
+      // El servidor fija y autoriza la firma; el navegador nunca elige el tenant.
+      return api.createFirmInvitation(email, role);
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       setEmail("");
       setError(null);
-      setNotice("Invitación creada. Si el envío de correo está configurado, ya está en camino.");
+      setNotice(
+        result.delivery_status === "SENT"
+          ? `Invitación enviada a ${result.invitation.email}.`
+          : `Invitación creada para ${result.invitation.email}. El correo no pudo entregarse.`,
+      );
       refresh();
     },
     onError: (e: unknown) => setError(e instanceof Error ? e.message : "No fue posible invitar"),

@@ -1,9 +1,10 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { FirmRole, IusiaError, MatterRole } from "@iusia/domain";
 import { schema } from "@iusia/db";
 import type { AppBindings } from "../context.js";
+import { createAuth } from "../auth/config.js";
 import { GoogleDriveAdapter } from "../integrations/google-drive.js";
 import { ResendNotificationProvider } from "../integrations/notifications.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
@@ -25,9 +26,31 @@ async function requireFirmAdmin(
   userId: string,
 ): Promise<void> {
   const role = await ctx.authz.firmRole(organizationId, userId);
+  assertInvitationAdminRole(role);
+}
+
+/** Verificación reutilizable de la matriz de administración de invitaciones. */
+export function assertInvitationAdminRole(role: string | null): void {
   if (role !== "FIRM_DIRECTOR" && role !== "PARTNER") {
     throw new IusiaError("FORBIDDEN", "Se requiere rol de dirección o socio");
   }
+}
+
+const CreateInvitationInput = z
+  .object({
+    email: z.string().trim().toLowerCase().email(),
+    role: FirmRole,
+  })
+  .strict();
+
+export type CreateInvitationInput = z.infer<typeof CreateInvitationInput>;
+
+/** El payload que llega a Better Auth nunca toma el tenant del navegador. */
+export function serverInvitationPayload(
+  organizationId: string,
+  input: CreateInvitationInput,
+): CreateInvitationInput & { organizationId: string } {
+  return { ...input, organizationId };
 }
 
 /** Miembros de la firma con su rol. */
@@ -370,6 +393,83 @@ adminRoutes.post("/members/remove", async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+/**
+ * Crea una invitación en la firma de la sesión. El cliente sólo aporta correo y
+ * rol; `organizationId` se resuelve y autoriza aquí, no desde el navegador.
+ */
+adminRoutes.post("/invitations", async (c) => {
+  const { db, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await requireFirmAdmin(c.get("ctx"), organizationId, userId);
+
+  const parsed = CreateInvitationInput.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw new IusiaError("VALIDATION_FAILED", "Correo o rol de invitación inválido");
+  }
+
+  let invitation: {
+    id: string;
+    email: string;
+    role: string;
+    organizationId: string;
+    expiresAt: Date;
+  };
+  try {
+    // Better Auth vuelve a verificar membresía/permisos con las cabeceras de sesión.
+    // El id de firma explícito elimina la dependencia de activeOrganizationId.
+    invitation = await createAuth(c.env).api.createInvitation({
+      body: serverInvitationPayload(organizationId, parsed.data),
+      headers: c.req.raw.headers,
+    });
+  } catch (error) {
+    console.warn("invitation_create_failed", {
+      organizationId,
+      actorUserId: userId,
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+    throw new IusiaError(
+      "VALIDATION_FAILED",
+      "No fue posible crear la invitación. Revisa el correo o las invitaciones pendientes.",
+    );
+  }
+
+  await audit.record({
+    organizationId,
+    actorUserId: userId,
+    action: "invitation.created",
+    resourceType: "invitation",
+    resourceId: invitation.id,
+    outcome: "SUCCESS",
+    detail: { role: invitation.role },
+  });
+
+  // Better Auth espera el callback de correo en esta configuración. Consultar su
+  // ledger permite que la UI distinga invitación creada de entrega fallida, sin
+  // revelar URL, token, HTML ni diagnóstico del proveedor.
+  const [delivery] = await db
+    .select({ outcome: schema.auditEvents.outcome })
+    .from(schema.auditEvents)
+    .where(
+      and(
+        eq(schema.auditEvents.organizationId, organizationId),
+        eq(schema.auditEvents.action, "invitation.email"),
+        eq(schema.auditEvents.resourceId, invitation.id),
+      ),
+    )
+    .orderBy(desc(schema.auditEvents.occurredAt))
+    .limit(1);
+
+  return c.json({
+    invitation: {
+      id: invitation.id,
+      email: invitation.email,
+      role: invitation.role,
+      expires_at: invitation.expiresAt.toISOString(),
+    },
+    delivery_status: delivery?.outcome === "SUCCESS" ? "SENT" : "FAILED",
+  });
 });
 
 /** Invitaciones de la firma con su estado real (Better Auth). Nunca expone tokens. */

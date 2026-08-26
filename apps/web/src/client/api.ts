@@ -288,6 +288,15 @@ export const api = {
       invitations: Array<{ id: string; email: string; role: string | null; status: string; expires_at: string; created_at: string }>;
     }>("/api/admin/invitations"),
 
+  createFirmInvitation: (email: string, role: string) =>
+    request<{
+      invitation: { id: string; email: string; role: string; expires_at: string };
+      delivery_status: "SENT" | "FAILED";
+    }>("/api/admin/invitations", {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    }),
+
   setMemberRole: (userId: string, role: string) =>
     request<{ ok: boolean }>("/api/admin/members/role", {
       method: "POST",

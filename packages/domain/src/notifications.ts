@@ -93,6 +93,8 @@ export interface NotificationProvider {
     to: string;
     subject: string;
     text: string;
+    /** HTML opcional: `text` siempre es el fallback universal. */
+    html?: string;
     tags: Record<string, string>;
   }): Promise<ProviderSendResult>;
 }
