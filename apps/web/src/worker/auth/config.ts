@@ -44,8 +44,24 @@ function logDeliveryOutcome(
   });
 }
 
-/** Scope de SÓLO LECTURA de Drive. Mínimo privilegio: nunca se pide escritura. */
+/**
+ * Scopes de Drive, SEPARADOS del login de identidad (IDENTITY_AUTH != DRIVE_AUTH).
+ *
+ * - `drive.readonly`: la mitad de lectura (Drive→Queue→R2→AI Search→RAG) ya validada.
+ * - `drive.file`: escritura acotada — IUSIA sólo ve y gestiona los archivos y
+ *   carpetas que ELLA crea. Es el mínimo privilegio para el workspace documental
+ *   (raíz administrada, carpetas de expediente, subida de aportados, generación de
+ *   entregables) y NO da acceso al resto del Drive del usuario. Google no exige para
+ *   `drive.file` la evaluación de seguridad que sí pide `drive.readonly`.
+ *
+ * Objetivo posterior: LEAST_PRIVILEGE_PRODUCTION = drive.file, si el flujo completo
+ * lo permite (ver DRIVE_READONLY_DEPENDENCY_AUDIT). Por ahora se piden AMBOS para no
+ * regresar la lectura ya validada antes de comprobar sus dependencias.
+ */
 export const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+/** Scopes que solicita la autorización incremental de Drive (nunca el login). */
+export const DRIVE_SCOPES = [DRIVE_READONLY_SCOPE, DRIVE_FILE_SCOPE] as const;
 
 /**
  * Config del social provider de Google: SÓLO IDENTIDAD.

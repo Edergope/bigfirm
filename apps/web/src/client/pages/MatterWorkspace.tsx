@@ -416,8 +416,15 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Scope de SÓLO LECTURA de Drive. Se solicita aparte del inicio de sesión. */
-const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+/**
+ * Scopes de Drive, separados del inicio de sesión. `drive.readonly` conserva la
+ * lectura ya validada; `drive.file` habilita la escritura acotada (sólo lo que
+ * IUSIA crea) del workspace documental.
+ */
+const DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+];
 
 function Documentos({ data }: { data: MatterDetail }) {
   const integrations = useQuery({ queryKey: ["integrations"], queryFn: api.integrationsStatus });
@@ -432,7 +439,7 @@ function Documentos({ data }: { data: MatterDetail }) {
   async function connectDrive() {
     await authClient.linkSocial({
       provider: "google",
-      scopes: [DRIVE_READONLY_SCOPE],
+      scopes: DRIVE_SCOPES,
       callbackURL: window.location.pathname,
     });
   }

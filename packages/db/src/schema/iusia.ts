@@ -398,3 +398,67 @@ export const notifications = sqliteTable(
     index("notifications_matter_idx").on(t.matterId),
   ],
 );
+
+// ──────────────────────── Workspace documental (Drive) ────────────────────────
+
+/**
+ * Carpetas de Drive gestionadas por IUSIA, con su id persistido para idempotencia.
+ *
+ * No se busca por nombre en cada operación: una vez creada la carpeta, su id vive
+ * aquí y se reutiliza. La clave única (org, kind, scopeId) evita duplicados en
+ * reintentos —`scopeId` es el matterId para carpetas de expediente, o "" para las
+ * de firma (ROOT/FIRM/MATTERS/TEMPLATES), únicas por organización—.
+ */
+export const driveFolders = sqliteTable(
+  "drive_folders",
+  {
+    id: text("id").primaryKey(),
+    organizationId: orgId(),
+    /** ROOT | FIRM | MATTERS | TEMPLATES | MATTER | UPLOADED | GENERATED */
+    kind: text("kind").notNull(),
+    /** matterId para carpetas de expediente; "" para las de firma. */
+    scopeId: text("scope_id").notNull().default(""),
+    driveFolderId: text("drive_folder_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("drive_folders_uq").on(t.organizationId, t.kind, t.scopeId),
+    index("drive_folders_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * Plantillas documentales. La fuente de verdad del CONTENIDO/versión es esta tabla
+ * más el repo (definición canónica); el archivo operativo de Google Docs vive en
+ * Drive y se referencia por `sourceRef`. Un archivo generado NUNCA es source of
+ * truth de la plantilla.
+ */
+export const templates = sqliteTable(
+  "templates",
+  {
+    id: text("id").primaryKey(),
+    /** SYSTEM (institucional, visible a todas) | ORGANIZATION (propia de la firma). */
+    scope: text("scope").notNull().default("SYSTEM"),
+    organizationId: text("organization_id"),
+    name: text("name").notNull(),
+    /** Tipo documental: OPINION | CONTRATO | DEMANDA | MEMORANDO | ... */
+    documentType: text("document_type").notNull(),
+    version: integer("version").notNull().default(1),
+    /** DRAFT | ACTIVE | ARCHIVED */
+    status: text("status").notNull().default("ACTIVE"),
+    /** GOOGLE_DOCS | DOCXTEMPLATER */
+    engine: text("engine").notNull().default("GOOGLE_DOCS"),
+    /** Id del Google Doc plantilla en Drive (para files.copy), o clave R2. */
+    sourceRef: text("source_ref"),
+    /** Variables requeridas: [{ key, label, required }]. */
+    variables: text("variables", { mode: "json" }).$type<
+      Array<{ key: string; label: string; required: boolean }>
+    >(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("templates_scope_type_idx").on(t.scope, t.documentType),
+    index("templates_org_idx").on(t.organizationId),
+  ],
+);

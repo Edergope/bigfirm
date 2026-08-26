@@ -6,6 +6,7 @@ import { requireSession, withContext, type AppBindings } from "./context.js";
 import { mattersRoutes } from "./routes/matters.js";
 import { orchestrationRoutes } from "./routes/orchestration.js";
 import { documentsRoutes } from "./routes/documents.js";
+import { documentWorkspaceRoutes } from "./routes/document-workspace.js";
 import { practiceRoutes } from "./routes/practice.js";
 import { adminRoutes } from "./routes/admin.js";
 import { devRoutes } from "./routes/dev.js";
@@ -68,6 +69,7 @@ protectedApi.get("/me", async (c) => {
 protectedApi.route("/matters", mattersRoutes);
 protectedApi.route("/", orchestrationRoutes);
 protectedApi.route("/", documentsRoutes);
+protectedApi.route("/", documentWorkspaceRoutes);
 protectedApi.route("/", practiceRoutes);
 protectedApi.route("/admin", adminRoutes);
 

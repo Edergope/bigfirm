@@ -17,6 +17,8 @@ export const ID_PREFIXES = {
   task: "tsk",
   audit: "aud",
   creditTx: "ctx",
+  driveFolder: "dfd",
+  template: "tpl",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

@@ -23,10 +23,12 @@ import { GoogleDriveAdapter } from "../integrations/google-drive.js";
  */
 
 export const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
 export type DriveConnectionErrorCode =
   | "DRIVE_NOT_CONNECTED"
   | "DRIVE_SCOPE_MISSING"
+  | "DRIVE_WRITE_SCOPE_MISSING"
   | "DRIVE_REAUTH_REQUIRED";
 
 /** Error de conexión de Drive. El mensaje jamás contiene valores de token. */
@@ -65,12 +67,15 @@ export type GetAccessTokenFn = (
 ) => Promise<{ accessToken: string; accessTokenExpiresAt?: Date | null }>;
 
 /** El scope persistido puede venir separado por espacios o comas. */
-export function scopeIncludesDriveReadonly(scope: string | null): boolean {
+function scopeIncludes(scope: string | null, needle: string): boolean {
   if (!scope) return false;
-  return scope
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .includes(DRIVE_READONLY_SCOPE);
+  return scope.split(/[\s,]+/).filter(Boolean).includes(needle);
+}
+export function scopeIncludesDriveReadonly(scope: string | null): boolean {
+  return scopeIncludes(scope, DRIVE_READONLY_SCOPE);
+}
+export function scopeIncludesDriveFile(scope: string | null): boolean {
+  return scopeIncludes(scope, DRIVE_FILE_SCOPE);
 }
 
 function isExpired(at?: Date | null): boolean {
@@ -122,7 +127,10 @@ export class DriveCredentialResolver {
    * Devuelve un `GoogleDriveAdapter` con credenciales válidas para el usuario, o
    * lanza `DriveConnectionError` normalizado. No expone tokens.
    */
-  async resolveAdapter(userId: string): Promise<GoogleDriveAdapter> {
+  async resolveAdapter(
+    userId: string,
+    opts: { requireWrite?: boolean } = {},
+  ): Promise<GoogleDriveAdapter> {
     const account = await this.findGoogleAccount(userId);
     if (!account) {
       throw new DriveConnectionError(
@@ -130,10 +138,22 @@ export class DriveCredentialResolver {
         "El usuario no ha conectado Google Drive.",
       );
     }
-    if (!scopeIncludesDriveReadonly(account.scope)) {
+    // Escritura exige `drive.file`; lectura basta con cualquiera de los dos scopes,
+    // porque `drive.file` también permite leer los archivos que IUSIA gestiona.
+    if (opts.requireWrite) {
+      if (!scopeIncludesDriveFile(account.scope)) {
+        throw new DriveConnectionError(
+          "DRIVE_WRITE_SCOPE_MISSING",
+          "La conexión de Google no permite que IUSIA cree o guarde documentos en Drive; reconecta otorgando el acceso.",
+        );
+      }
+    } else if (
+      !scopeIncludesDriveReadonly(account.scope) &&
+      !scopeIncludesDriveFile(account.scope)
+    ) {
       throw new DriveConnectionError(
         "DRIVE_SCOPE_MISSING",
-        "La conexión de Google no incluye el permiso de sólo lectura de Drive; reconecta otorgando el acceso.",
+        "La conexión de Google no incluye acceso a Drive; reconecta otorgando el acceso.",
       );
     }
 

@@ -8,3 +8,5 @@ export * from "./repositories/documents.js";
 export * from "./repositories/ledgers.js";
 export * from "./repositories/tasks.js";
 export * from "./repositories/notifications.js";
+export * from "./repositories/drive-folders.js";
+export * from "./repositories/templates.js";
