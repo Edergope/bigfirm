@@ -21,12 +21,21 @@ interface WranglerConfig {
   ai?: { binding?: string };
   vars?: Record<string, unknown>;
   r2_buckets?: R2Binding[];
+  queues?: {
+    consumers?: Array<{
+      queue?: string;
+      max_batch_size?: number;
+      max_retries?: number;
+      dead_letter_queue?: string;
+    }>;
+  };
   env?: {
     staging?: {
       ai?: { binding?: string };
       vars?: Record<string, unknown>;
       d1_databases?: Array<{ binding: string; database_id?: string }>;
       ai_search?: Array<{ binding: string; instance_name?: string }>;
+      queues?: WranglerConfig["queues"];
     };
   };
 }
@@ -68,6 +77,15 @@ describe("deployment safety: wrangler.jsonc base config (fail-closed)", () => {
   it("la conversión documental usa el binding nativo Workers AI", () => {
     expect(config.ai?.binding).toBe("AI");
   });
+
+  it("consumer documental base usa batch seguro con DLQ", () => {
+    const consumer = (config.queues?.consumers ?? []).find(
+      (c) => c.queue === "iusia-document-ingestion",
+    );
+    expect(consumer?.max_batch_size).toBe(4);
+    expect(consumer?.max_retries).toBe(3);
+    expect(consumer?.dead_letter_queue).toBe("iusia-document-ingestion-dlq");
+  });
 });
 
 describe("environment staging (recursos remotos)", () => {
@@ -99,6 +117,15 @@ describe("environment staging (recursos remotos)", () => {
 
   it("staging redeclara Workers AI para toMarkdown", () => {
     expect(staging?.ai?.binding).toBe("AI");
+  });
+
+  it("staging mantiene batch documental seguro con DLQ", () => {
+    const consumer = (staging?.queues?.consumers ?? []).find(
+      (c) => c.queue === "iusia-document-ingestion",
+    );
+    expect(consumer?.max_batch_size).toBe(4);
+    expect(consumer?.max_retries).toBe(3);
+    expect(consumer?.dead_letter_queue).toBe("iusia-document-ingestion-dlq");
   });
 });
 

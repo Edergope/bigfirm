@@ -10,8 +10,7 @@ import { documentWorkspaceRoutes } from "./routes/document-workspace.js";
 import { practiceRoutes } from "./routes/practice.js";
 import { adminRoutes } from "./routes/admin.js";
 import { devRoutes } from "./routes/dev.js";
-import { IngestionService } from "./services/ingestion.js";
-import { DocumentIngestionMessage } from "@iusia/domain";
+import { handleIngestionQueue } from "./queue-consumer.js";
 
 const app = new Hono<AppBindings>();
 
@@ -76,34 +75,6 @@ protectedApi.route("/admin", adminRoutes);
 app.route("/api", protectedApi);
 app.route("/api/dev", devRoutes);
 
-/**
- * Consumidor de la cola de ingestión documental.
- *
- * Idempotente: reprocesar un mensaje reescribe el mismo espejo R2. Los mensajes
- * que fallan por causa transitoria se reintentan (retry); los que fallan por
- * configuración externa (Drive sin OAuth) se ACK-ean para no llenar la DLQ con un
- * fallo que ningún reintento resolverá — el documento queda PENDIENTE de indexar.
- */
-async function handleIngestionQueue(
-  batch: MessageBatch<unknown>,
-  env: Env,
-): Promise<void> {
-  const service = IngestionService.forEnv(env);
-  for (const message of batch.messages) {
-    const parsed = DocumentIngestionMessage.safeParse(message.body);
-    if (!parsed.success) {
-      message.ack(); // mensaje malformado: no se reintenta
-      continue;
-    }
-    const outcome = await service.ingest(parsed.data);
-    if (outcome.status === "ERROR") {
-      message.retry(); // fallo transitorio: reintentar (o a la DLQ tras max_retries)
-    } else {
-      message.ack();
-    }
-  }
-}
-
 // El módulo del Worker expone `fetch` (Hono) y `queue` (ingestión).
 export default {
   fetch: app.fetch,
@@ -114,4 +85,5 @@ export default {
 // wrangler.jsonc y sobrevivir al bundling (ver vite.config.ts, keepNames).
 export { LegalWorker } from "./agents/legal-worker.js";
 export { MatterOrchestrationWorkflow } from "./workflows/matter-orchestration.js";
+export { handleIngestionQueue };
 export type { Env };

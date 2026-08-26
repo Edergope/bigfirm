@@ -67,7 +67,7 @@
     "consumers": [
       {
         "queue": "iusia-document-ingestion",
-        "max_batch_size": 10,
+        "max_batch_size": 4,
         "max_retries": 3,
         "dead_letter_queue": "iusia-document-ingestion-dlq"
       }
@@ -142,7 +142,7 @@
         "consumers": [
           {
             "queue": "iusia-document-ingestion",
-            "max_batch_size": 10,
+            "max_batch_size": 4,
             "max_retries": 3,
             "dead_letter_queue": "iusia-document-ingestion-dlq"
           }
