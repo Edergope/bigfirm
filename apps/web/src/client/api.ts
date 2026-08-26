@@ -352,13 +352,24 @@ export const api = {
       }>;
     }>("/api/templates"),
 
-  generateDocument: (matterId: string, documentType: string, values: Record<string, string>) =>
+  generateDocument: (
+    matterId: string,
+    documentType: string,
+    // Sin `values` → IUSIA redacta el contenido con el agente 08; `instructions` lo orienta.
+    opts: { values?: Record<string, string>; instructions?: string } = {},
+  ) =>
     request<{
       docx: { name: string; document_id: string };
       pdf: { name: string; document_id: string };
+      content_source: "AGENT" | "MANUAL";
+      drafted_by?: string;
     }>(`/api/matters/${matterId}/generate`, {
       method: "POST",
-      body: JSON.stringify({ document_type: documentType, values }),
+      body: JSON.stringify({
+        document_type: documentType,
+        ...(opts.values ? { values: opts.values } : {}),
+        ...(opts.instructions ? { instructions: opts.instructions } : {}),
+      }),
     }),
 
   intelligence: {

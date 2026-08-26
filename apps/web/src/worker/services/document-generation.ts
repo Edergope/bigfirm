@@ -22,12 +22,32 @@ import { DriveCredentialResolver } from "./drive-credentials.js";
  * partir de la plantilla y los valores. Google hace el render; IUSIA no construye
  * infraestructura de render dentro de Workers.
  */
+export interface DraftProvenance {
+  agent_id: string;
+  provider: string;
+  model: string;
+  prompt_sha256: string;
+}
+
 export interface GenerationResult {
   docx: { drive_file_id: string; name: string; document_id: string };
   pdf: { drive_file_id: string; name: string; document_id: string };
   template_id: string;
   template_version: number;
+  /** Presente cuando el contenido lo redactó un agente (no valores del cliente). */
+  draft?: DraftProvenance;
 }
+
+export interface GenerationTemplateVariable {
+  key: string;
+  label: string;
+  required: boolean;
+}
+
+/** Resolvedor de contenido: recibe las variables de la plantilla y devuelve sus valores. */
+export type ValueResolver = (
+  variables: GenerationTemplateVariable[],
+) => Promise<{ values: Record<string, string>; provenance?: DraftProvenance }>;
 
 export class DocumentGenerationError extends Error {
   constructor(
@@ -64,7 +84,10 @@ export class DocumentGenerationService {
     organizationId: string;
     matter: { id: string; reference: string; title: string };
     documentType: string;
-    values: Record<string, string>;
+    /** Valores provistos por el cliente (redacción manual). Prioridad sobre `resolveValues`. */
+    values?: Record<string, string>;
+    /** Cuando no hay `values`, IUSIA redacta el contenido con este resolvedor (agente 08). */
+    resolveValues?: ValueResolver;
     executionId?: string;
   }): Promise<GenerationResult> {
     const db = createDb(this.env.DB);
@@ -88,9 +111,25 @@ export class DocumentGenerationService {
       required: v.required,
       type: "text" as const,
     }));
+
+    // Origen del contenido: valores explícitos del cliente, o redacción del agente 08.
+    let rawValues: Record<string, string>;
+    let draftProvenance: DraftProvenance | undefined;
+    if (input.values && Object.keys(input.values).length > 0) {
+      rawValues = input.values;
+    } else if (input.resolveValues) {
+      const resolved = await input.resolveValues(
+        variables.map((v) => ({ key: v.key, label: v.label, required: v.required })),
+      );
+      rawValues = resolved.values;
+      draftProvenance = resolved.provenance;
+    } else {
+      throw new DocumentGenerationError("TEMPLATE_VALIDATION_FAILED", "No hay contenido para el documento.");
+    }
+
     let values: Record<string, string>;
     try {
-      values = resolveTemplateValues({ variables }, input.values);
+      values = resolveTemplateValues({ variables }, rawValues);
     } catch (error) {
       if (error instanceof TemplateValidationError) {
         throw new DocumentGenerationError("TEMPLATE_VALIDATION_FAILED", error.message);
@@ -168,6 +207,7 @@ export class DocumentGenerationService {
       pdf: { drive_file_id: pdfMeta.provider_file_id, name: pdfMeta.name, document_id: pdfDocId },
       template_id: template.id,
       template_version: template.version,
+      draft: draftProvenance,
     };
   }
 }

@@ -2,10 +2,45 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, FolderTree, Paperclip, Plus, X } from "lucide-react";
-import { Button, Select, SpecialistNetwork, Textarea, useCanAnimate } from "@iusia/ui";
+import { ArrowRight, FolderTree, Paperclip, X } from "lucide-react";
+import {
+  Button,
+  Input,
+  Select,
+  SpecialistNetwork,
+  Textarea,
+  materialityTerm,
+  practiceAreaLabel,
+  useCanAnimate,
+} from "@iusia/ui";
 import { api, ApiError } from "../api.js";
 import { HERO_SPECIALISTS } from "./IusiaHero.js";
+
+/** Centinela del selector: crear un expediente nuevo en el mismo flujo. */
+const NEW_MATTER = "__new__";
+const PRACTICE_AREAS = [
+  "CIVIL", "COMERCIAL_CONTRACTUAL", "SOCIETARIO_MA", "LABORAL", "TRIBUTARIO",
+  "PENAL_ECONOMICO", "ADMINISTRATIVO", "CONSTITUCIONAL", "FAMILIA", "INMOBILIARIO",
+  "PROPIEDAD_INTELECTUAL", "INSOLVENCIA", "MIGRATORIO", "FINANCIERO", "COMPLIANCE", "OTRO",
+];
+const MATERIALITIES = ["SIMPLE", "MATERIAL", "HIGH_STAKES"];
+
+/**
+ * Espera determinista a que los documentos aportados estén disponibles para el
+ * análisis: mientras alguno siga PENDIENTE/PROCESSING, el RAG no los vería. Se
+ * consulta el workspace real (no sleeps) con un tope de intentos; si al cabo del
+ * tope siguen sin indexar, se continúa —el análisis usa lo que ya esté disponible—.
+ */
+async function waitForIngestion(matterId: string, expected: number): Promise<void> {
+  const NOT_READY = new Set(["PENDIENTE", "PROCESSING"]);
+  for (let i = 0; i < 12; i++) {
+    const ws = await api.matterWorkspace(matterId).catch(() => null);
+    const uploaded = ws?.uploaded ?? [];
+    const ready = uploaded.filter((d) => !NOT_READY.has(d.status)).length;
+    if (uploaded.length >= expected && ready >= expected) return;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
 
 /**
  * Convocatoria de IUSIA.
@@ -30,32 +65,53 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
   const [objective, setObjective] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Campos del expediente nuevo (sólo se muestran en modo NEW_MATTER).
+  const [title, setTitle] = useState("");
+  const [clientName, setClientName] = useState("");
+  const [jurisdiction, setJurisdiction] = useState("Colombia");
+  const [area, setArea] = useState("COMERCIAL_CONTRACTUAL");
+  const [materiality, setMateriality] = useState("MATERIAL");
 
   const rows = useMemo(() => matters.data?.matters ?? [], [matters.data]);
-  const hasMatters = rows.length > 0;
+  const isNew = matterId === NEW_MATTER;
 
-  // Con un solo expediente no hay nada que elegir: se preselecciona.
+  // Con un solo expediente se preselecciona; sin ninguno, se arranca en modo nuevo.
   useEffect(() => {
-    if (!matterId && rows.length > 0) setMatterId(rows[0]!.id);
-  }, [rows, matterId]);
+    if (matterId) return;
+    if (rows.length > 0) setMatterId(rows[0]!.id);
+    else if (matters.isSuccess) setMatterId(NEW_MATTER);
+  }, [rows, matterId, matters.isSuccess]);
 
   const start = useMutation({
     mutationFn: async () => {
-      // Los adjuntos se incorporan ANTES de convocar: se suben a "01 Documentos
-      // aportados" y quedan encolados para ingestión. El análisis trabaja sobre lo
-      // que ya está en el expediente; los recién subidos se procesan en paralelo.
-      if (files.length > 0) {
-        await api.uploadDocuments(matterId, files);
+      // Modo nuevo: crear el expediente ANTES de nada. El resto del flujo se liga
+      // inequívocamente a ese matterId, nunca a otro seleccionado.
+      let targetId = matterId;
+      if (isNew) {
+        const created = await api.createMatter({
+          title: title.trim(),
+          client_name: clientName.trim(),
+          materiality,
+          practice_areas: [area],
+          jurisdiction: jurisdiction.trim(),
+          objective: objective.trim() || undefined,
+        });
+        targetId = created.matter.id;
       }
-      return api.startOrchestration(matterId, objective.trim());
+
+      // Adjuntos → "01 Documentos aportados" → cola de ingestión.
+      if (files.length > 0) {
+        await api.uploadDocuments(targetId, files);
+        // No analizar antes de que los documentos estén disponibles para el RAG.
+        await waitForIngestion(targetId, files.length);
+      }
+      const res = await api.startOrchestration(targetId, objective.trim());
+      return { targetId, root: res.root_execution_id };
     },
-    onSuccess: (res) => {
-      // Se entrega a la experiencia de análisis existente, que ya sabe continuar en
-      // segundo plano y reabrirse. Un respiro antes de navegar para que la red
-      // termine de encenderse y el cambio no se sienta como un corte.
+    onSuccess: ({ targetId, root }) => {
       const go = () => {
         onClose();
-        navigate(`/casos/${matterId}?analisis=${res.root_execution_id}`);
+        navigate(`/casos/${targetId}?analisis=${root}`);
       };
       if (still) go();
       else setTimeout(go, 900);
@@ -96,6 +152,8 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
   }, [open, onClose, convoking]);
 
   const tooShort = objective.trim().length < 10;
+  const newMatterIncomplete = isNew && (title.trim().length < 3 || clientName.trim().length < 2);
+  const canStart = !convoking && !tooShort && !!matterId && !newMatterIncomplete;
 
   return (
     <AnimatePresence>
@@ -156,28 +214,7 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
-              {!hasMatters && !matters.isLoading ? (
-                // Sin expedientes no hay nada que analizar: salida, no callejón.
-                <div>
-                  <p className="text-[14.5px] text-iusia-carbon">
-                    IUSIA trabaja sobre un expediente concreto, y todavía no tienes ninguno.
-                  </p>
-                  <p className="mt-1 text-[13px] text-iusia-mist-text">
-                    Abre uno y podrás convocar al equipo sobre él.
-                  </p>
-                  <div className="mt-4">
-                    <Button
-                      onClick={() => {
-                        onClose();
-                        navigate("/casos");
-                      }}
-                    >
-                      <Plus size={15} aria-hidden />
-                      Crear expediente primero
-                    </Button>
-                  </div>
-                </div>
-              ) : (
+              {matters.isLoading ? null : (
                 <>
                   <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,240px)_1fr]">
                     <label className="block">
@@ -191,14 +228,23 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                         aria-label="Expediente sobre el que trabajará IUSIA"
                         className="h-10 w-full min-w-0 truncate rounded-[10px] text-[13.5px]"
                       >
-                        {rows.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.title}
-                          </option>
-                        ))}
+                        {/* Un caso nuevo nunca se cuela en un expediente existente:
+                            la opción está separada y arriba. */}
+                        <option value={NEW_MATTER}>+ Nuevo expediente</option>
+                        {rows.length > 0 ? (
+                          <optgroup label="Expedientes existentes">
+                            {rows.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.title}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
                       </Select>
                       <p className="mt-1.5 text-[12px] leading-snug text-iusia-mist-text">
-                        IUSIA trabajará sobre los documentos y hechos de este expediente.
+                        {isNew
+                          ? "Se creará el expediente y su carpeta en Drive antes de analizar."
+                          : "IUSIA trabajará sobre los documentos y hechos de este expediente."}
                       </p>
                     </label>
 
@@ -216,6 +262,76 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                       />
                     </label>
                   </div>
+
+                  {/* Campos mínimos del expediente nuevo, reutilizando el modelo de
+                      "Nuevo expediente". No se inventa ningún campo. */}
+                  {isNew ? (
+                    <div className="mt-4 grid grid-cols-1 gap-3 rounded-[var(--radius-md)] bg-iusia-ice/50 p-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-1 block text-[12px] font-medium text-iusia-carbon">Asunto</span>
+                        <Input
+                          value={title}
+                          onChange={(e) => setTitle(e.target.value)}
+                          disabled={convoking}
+                          className="h-9 rounded-[10px] text-[13.5px]"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[12px] font-medium text-iusia-carbon">Cliente</span>
+                        <Input
+                          value={clientName}
+                          onChange={(e) => setClientName(e.target.value)}
+                          disabled={convoking}
+                          className="h-9 rounded-[10px] text-[13.5px]"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[12px] font-medium text-iusia-carbon">
+                          Jurisdicción
+                        </span>
+                        <Input
+                          value={jurisdiction}
+                          onChange={(e) => setJurisdiction(e.target.value)}
+                          disabled={convoking}
+                          className="h-9 rounded-[10px] text-[13.5px]"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[12px] font-medium text-iusia-carbon">
+                          Área de práctica
+                        </span>
+                        <Select
+                          value={area}
+                          onChange={(e) => setArea(e.target.value)}
+                          disabled={convoking}
+                          className="h-9 w-full rounded-[10px] text-[13px]"
+                        >
+                          {PRACTICE_AREAS.map((a) => (
+                            <option key={a} value={a}>
+                              {practiceAreaLabel(a)}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                      <label className="block sm:col-span-2">
+                        <span className="mb-1 block text-[12px] font-medium text-iusia-carbon">
+                          Criticidad del encargo
+                        </span>
+                        <Select
+                          value={materiality}
+                          onChange={(e) => setMateriality(e.target.value)}
+                          disabled={convoking}
+                          className="h-9 w-full rounded-[10px] text-[13px]"
+                        >
+                          {MATERIALITIES.map((mt) => (
+                            <option key={mt} value={mt}>
+                              {materialityTerm(mt).label}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                    </div>
+                  ) : null}
 
                   {/*
                     Adjuntos. La UI está lista y el contrato es explícito, pero el
@@ -312,18 +428,25 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
               )}
             </div>
 
-            {hasMatters ? (
+            {!matters.isLoading ? (
               <footer className="flex items-center justify-between gap-3 border-t border-iusia-line bg-iusia-surface/50 px-6 py-4">
                 <p className="text-[12.5px] text-iusia-mist-text">
                   {convoking
-                    ? "Puedes cerrar en cuanto empiece: seguirá trabajando."
+                    ? isNew
+                      ? "Creando el expediente e incorporando documentos…"
+                      : "Puedes cerrar en cuanto empiece: seguirá trabajando."
                     : "IUSIA elegirá por sí misma qué especialistas intervienen."}
                 </p>
-                <Button
-                  onClick={() => start.mutate()}
-                  disabled={convoking || tooShort || !matterId}
-                >
-                  {start.isPending ? "Convocando…" : start.isSuccess ? "En marcha" : "Iniciar análisis"}
+                <Button onClick={() => start.mutate()} disabled={!canStart}>
+                  {start.isPending
+                    ? isNew
+                      ? "Creando…"
+                      : "Convocando…"
+                    : start.isSuccess
+                      ? "En marcha"
+                      : isNew
+                        ? "Crear expediente y convocar IUSIA"
+                        : "Iniciar análisis"}
                   {!convoking ? <ArrowRight size={15} aria-hidden /> : null}
                 </Button>
               </footer>

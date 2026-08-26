@@ -9,6 +9,7 @@ import {
   DocumentGenerationError,
   DocumentGenerationService,
 } from "../services/document-generation.js";
+import { DocumentDraftError, DocumentDraftService } from "../services/document-draft.js";
 import { seedOpinionTemplate } from "../services/template-seed.js";
 
 export const documentWorkspaceRoutes = new Hono<AppBindings>();
@@ -153,12 +154,16 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
 
 const GenerateInput = z.object({
   document_type: z.string().min(1),
-  values: z.record(z.string(), z.string()),
+  // Redacción manual: valores explícitos del abogado. Si se omiten, IUSIA redacta.
+  values: z.record(z.string(), z.string()).optional(),
+  // Indicaciones opcionales del abogado para la redacción del agente.
+  instructions: z.string().max(4000).optional(),
 });
 
 /** Genera un entregable oficial con plantilla → DOCX/PDF → Drive. */
 documentWorkspaceRoutes.post("/matters/:matterId/generate", async (c) => {
-  const { matters, authz, audit } = c.get("ctx");
+  const ctx = c.get("ctx");
+  const { matters, authz, audit } = ctx;
   const { organizationId, userId } = c.get("session");
   const matterId = c.req.param("matterId");
 
@@ -174,6 +179,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/generate", async (c) => {
   }
 
   const service = DocumentGenerationService.forEnv(c.env);
+  const drafter = DocumentDraftService.forEnv(c.env);
   try {
     const result = await service.generate({
       userId,
@@ -181,6 +187,26 @@ documentWorkspaceRoutes.post("/matters/:matterId/generate", async (c) => {
       matter: { id: matter.id, reference: matter.reference, title: matter.title },
       documentType: parsed.data.document_type,
       values: parsed.data.values,
+      // Sin valores manuales → el agente 08 redacta el contenido desde el expediente.
+      resolveValues: async (variables) => {
+        const draft = await drafter.draft({
+          ctx,
+          organizationId,
+          matterId,
+          documentType: parsed.data.document_type,
+          variables,
+          instructions: parsed.data.instructions,
+        });
+        return {
+          values: draft.values,
+          provenance: {
+            agent_id: draft.agent_id,
+            provider: draft.provider,
+            model: draft.model,
+            prompt_sha256: draft.prompt_sha256,
+          },
+        };
+      },
     });
     // Provenance: matter, plantilla+versión, ids de Drive y formatos. Un solo ledger.
     await audit.record({
@@ -197,15 +223,30 @@ documentWorkspaceRoutes.post("/matters/:matterId/generate", async (c) => {
         docx_drive_file_id: result.docx.drive_file_id,
         pdf_drive_file_id: result.pdf.drive_file_id,
         formats: "DOCX,PDF",
+        // Provenance de la redacción: agente, modelo y hash del prompt canónico.
+        content_source: result.draft ? "AGENT" : "MANUAL",
+        ...(result.draft
+          ? {
+              draft_agent_id: result.draft.agent_id,
+              draft_provider: result.draft.provider,
+              draft_model: result.draft.model,
+              draft_prompt_sha256: result.draft.prompt_sha256,
+            }
+          : {}),
       },
     });
     return c.json({
       docx: { name: result.docx.name, document_id: result.docx.document_id },
       pdf: { name: result.pdf.name, document_id: result.pdf.document_id },
+      content_source: result.draft ? "AGENT" : "MANUAL",
+      ...(result.draft ? { drafted_by: result.draft.agent_id } : {}),
     });
   } catch (error) {
     if (error instanceof DocumentGenerationError) {
       throw new IusiaError("CONFLICT", documentErrorMessage(error.code), { code: error.code });
+    }
+    if (error instanceof DocumentDraftError) {
+      throw new IusiaError("CONFLICT", error.message, { code: error.code });
     }
     if (error instanceof DriveConnectionError) {
       const code = driveErrorToCode(error);

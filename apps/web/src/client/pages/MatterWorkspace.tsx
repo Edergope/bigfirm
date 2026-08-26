@@ -636,22 +636,36 @@ function GenerateDrawer({
   const templates = useQuery({ queryKey: ["templates"], queryFn: api.listTemplates, enabled: open });
   const [templateId, setTemplateId] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
+  // Redacción: por defecto la hace IUSIA (agente 08) desde el expediente.
+  const [mode, setMode] = useState<"ai" | "manual">("ai");
+  const [instructions, setInstructions] = useState("");
 
   const rows = templates.data?.templates ?? [];
   const selected = rows.find((t) => t.id === templateId) ?? rows[0];
 
   const generate = useMutation({
-    mutationFn: () => api.generateDocument(matterId, selected!.document_type, values),
+    mutationFn: () =>
+      api.generateDocument(
+        matterId,
+        selected!.document_type,
+        mode === "manual"
+          ? { values }
+          : { instructions: instructions.trim() || undefined },
+      ),
     onSuccess: () => {
       onGenerated();
       onClose();
       setValues({});
+      setInstructions("");
     },
   });
 
   const missing =
-    selected?.variables.filter((v) => v.required && !values[v.key]?.trim()).map((v) => v.label) ??
-    [];
+    mode === "manual"
+      ? (selected?.variables
+          .filter((v) => v.required && !values[v.key]?.trim())
+          .map((v) => v.label) ?? [])
+      : [];
 
   return (
     <Drawer open={open} onClose={onClose} title="Generar documento" width={560}>
@@ -685,20 +699,55 @@ function GenerateDrawer({
             </Select>
           </label>
 
-          {selected?.variables.map((v) => (
-            <label key={v.key} className="block">
+          {/* Origen del contenido: IUSIA redacta (agente 08) o redacción manual. */}
+          <div className="flex gap-2">
+            <ModeChip
+              active={mode === "ai"}
+              onClick={() => setMode("ai")}
+              title="IUSIA redacta"
+              hint="Contenido jurídico desde el expediente"
+            />
+            <ModeChip
+              active={mode === "manual"}
+              onClick={() => setMode("manual")}
+              title="Redacción manual"
+              hint="Tú escribes cada campo"
+            />
+          </div>
+
+          {mode === "ai" ? (
+            <label className="block">
               <span className="mb-1 block text-[12.5px] font-medium text-iusia-carbon">
-                {v.label}
-                {v.required ? <span className="text-iusia-critical"> *</span> : null}
+                Instrucciones para IUSIA <span className="text-iusia-mist-text">(opcional)</span>
               </span>
               <Textarea
-                value={values[v.key] ?? ""}
-                onChange={(e) => setValues((c) => ({ ...c, [v.key]: e.target.value }))}
-                rows={v.key === "analisis" || v.key === "antecedentes" ? 3 : 1}
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                rows={3}
+                placeholder="Ej.: énfasis en la excepción de prescripción; tono conservador."
                 className="rounded-[10px] text-[13.5px]"
               />
+              <span className="mt-1.5 block text-[12px] leading-snug text-iusia-mist-text">
+                IUSIA redactará {selected?.variables.length ?? 0} campos desde los hechos,
+                autoridades y análisis verificados del expediente.
+              </span>
             </label>
-          ))}
+          ) : (
+            selected?.variables.map((v) => (
+              <label key={v.key} className="block">
+                <span className="mb-1 block text-[12.5px] font-medium text-iusia-carbon">
+                  {v.label}
+                  {v.required ? <span className="text-iusia-critical"> *</span> : null}
+                </span>
+                <Textarea
+                  value={values[v.key] ?? ""}
+                  onChange={(e) => setValues((c) => ({ ...c, [v.key]: e.target.value }))}
+                  rows={v.key === "analisis" || v.key === "antecedentes" ? 3 : 1}
+                  className="rounded-[10px] text-[13.5px]"
+                />
+              </label>
+            ))
+          )}
 
           {generate.error ? (
             <p role="alert" className="text-[13px] text-iusia-critical">
@@ -710,18 +759,56 @@ function GenerateDrawer({
 
           <div className="flex items-center justify-between gap-3">
             <span className="text-[12px] text-iusia-mist-text">
-              {missing.length > 0 ? `Faltan: ${missing.join(", ")}` : "IUSIA generará DOCX y PDF."}
+              {missing.length > 0
+                ? `Faltan: ${missing.join(", ")}`
+                : mode === "ai"
+                  ? "IUSIA redactará y producirá DOCX y PDF."
+                  : "IUSIA generará DOCX y PDF."}
             </span>
             <Button
               onClick={() => generate.mutate()}
               disabled={generate.isPending || missing.length > 0 || !selected}
             >
-              {generate.isPending ? "Generando…" : "Generar DOCX y PDF"}
+              {generate.isPending
+                ? mode === "ai"
+                  ? "Redactando…"
+                  : "Generando…"
+                : mode === "ai"
+                  ? "Redactar y generar"
+                  : "Generar DOCX y PDF"}
             </Button>
           </div>
         </div>
       )}
     </Drawer>
+  );
+}
+
+function ModeChip({
+  active,
+  onClick,
+  title,
+  hint,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex-1 rounded-[10px] border px-3 py-2 text-left transition-colors ${
+        active
+          ? "border-iusia-navy bg-iusia-navy/5"
+          : "border-iusia-hairline bg-transparent hover:border-iusia-navy/40"
+      }`}
+    >
+      <span className="block text-[13px] font-semibold text-iusia-navy">{title}</span>
+      <span className="mt-0.5 block text-[11.5px] leading-snug text-iusia-mist-text">{hint}</span>
+    </button>
   );
 }
 

@@ -35,8 +35,18 @@ const definitions = JSON.parse(
   readFileSync(join(repoRoot, "packages/agents/src/full-agents.json"), "utf8"),
 );
 
+// Pipeline documental determinista (fuera del planner): estos agentes se despachan
+// directamente por el Document Engine, nunca los elige el planner. Siguen con
+// `enabled:false` en el registry (el planner no los ve), pero su prompt canónico
+// debe existir en R2 para poder ejecutarlos. Se suben VERBATIM y verificados por SHA,
+// igual que los demás; no altera el árbol canónico ni los límites del planner.
+const DOCUMENT_PIPELINE_IDS = new Set([
+  "08-redactor-senior-juridico",
+  "02-compilador-y-entrega-final",
+]);
+
 let uploaded = 0;
-for (const def of definitions.filter((d) => d.enabled)) {
+for (const def of definitions.filter((d) => d.enabled || DOCUMENT_PIPELINE_IDS.has(d.agent_id))) {
   const sourcePath = join(repoRoot, def.prompt_source_path);
   const bytes = readFileSync(sourcePath);
   const actual = createHash("sha256").update(bytes).digest("hex");
