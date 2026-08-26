@@ -427,9 +427,10 @@ const DRIVE_SCOPES = [
 ];
 
 function Documentos({ data }: { data: MatterDetail }) {
-  const integrations = useQuery({ queryKey: ["integrations"], queryFn: api.integrationsStatus });
   const driveStatus = useQuery({ queryKey: ["drive-status"], queryFn: api.driveStatus });
   const connected = driveStatus.data?.connected === true;
+  // Escritura = drive.file. Sin ella IUSIA no puede crear la carpeta ni guardar.
+  const canWrite = driveStatus.data?.write === true;
 
   /**
    * Autorización INCREMENTAL de Google Drive, separada del login: reutiliza
@@ -450,15 +451,15 @@ function Documentos({ data }: { data: MatterDetail }) {
       eyebrow={`${data.documents.length} ${data.documents.length === 1 ? "documento" : "documentos"}`}
       padded={false}
       action={
-        driveStatus.isSuccess && !connected ? (
+        driveStatus.isSuccess && (!connected || !canWrite) ? (
           <button
             type="button"
             onClick={() => void connectDrive()}
             className="text-[12.5px] font-medium text-iusia-action transition-colors hover:underline"
           >
-            Autorizar acceso a Drive
+            {!connected ? "Autorizar acceso a Drive" : "Reconectar Drive"}
           </button>
-        ) : integrations.data ? (
+        ) : canWrite ? (
           <StatusChip label="Drive autorizado" tone="success" dot />
         ) : null
       }

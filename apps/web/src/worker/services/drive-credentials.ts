@@ -124,6 +124,21 @@ export class DriveCredentialResolver {
   }
 
   /**
+   * Describe la conexión de Drive del usuario SIN exponer tokens: si está conectado
+   * y qué capacidades (lectura / escritura) tiene según los scopes concedidos. La UI
+   * lo usa para decidir si mostrar "Autorizar" o "Reconectar para escribir".
+   */
+  async describeConnection(
+    userId: string,
+  ): Promise<{ connected: boolean; readonly: boolean; write: boolean; reason?: string }> {
+    const account = await this.findGoogleAccount(userId);
+    if (!account) return { connected: false, readonly: false, write: false, reason: "DRIVE_NOT_CONNECTED" };
+    const readonly = scopeIncludesDriveReadonly(account.scope);
+    const write = scopeIncludesDriveFile(account.scope);
+    return { connected: readonly || write, readonly, write };
+  }
+
+  /**
    * Devuelve un `GoogleDriveAdapter` con credenciales válidas para el usuario, o
    * lanza `DriveConnectionError` normalizado. No expone tokens.
    */

@@ -6,7 +6,6 @@ import {
   type RetrievalScope,
 } from "@iusia/domain";
 import type { AppBindings } from "../context.js";
-import { GoogleDriveAdapter } from "../integrations/google-drive.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import { DriveConnectionError, DriveCredentialResolver } from "../services/drive-credentials.js";
 
@@ -38,10 +37,15 @@ documentsRoutes.get("/integrations/drive/status", async (c) => {
     throw error;
   }
 
+  // Capacidades concedidas (lectura / escritura), para que la UI sepa si falta
+  // reconectar para habilitar la escritura (drive.file).
+  const caps = await resolver.describeConnection(userId);
+
   const body: {
     connected: true;
+    write: boolean;
     self_test?: { accessible: boolean; mime: string | null };
-  } = { connected: true };
+  } = { connected: true, write: caps.write };
 
   if (c.req.query("self_test") === "1") {
     try {
@@ -59,15 +63,20 @@ documentsRoutes.get("/integrations/drive/status", async (c) => {
  * NOT_CONFIGURED en vez de fingir que Drive/AI Search están activos.
  */
 documentsRoutes.get("/integrations/status", (c) => {
-  const storage = new GoogleDriveAdapter(null);
-  // Estado real del binding AI Search: CONNECTED si la instancia está aprovisionada.
+  // Capacidad de FIRMA (no autorización personal): el repositorio documental está
+  // habilitado cuando el OAuth de Google está aprovisionado en el Worker. Antes se
+  // devolvía NOT_CONFIGURED fijo (adapter con `null`), lo que mostraba el repositorio
+  // como no habilitado aunque los secrets estuvieran presentes.
+  const driveProvisioned = Boolean(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET);
   const retrieval = new AiSearchRetrievalProvider(c.env.AI_SEARCH ?? null);
   return c.json({
-    storage: { id: storage.id, status: storage.status() },
+    storage: { id: "google-drive", status: driveProvisioned ? "CONNECTED" : "NOT_CONFIGURED" },
     retrieval: { id: retrieval.id, status: retrieval.status() },
     notes: {
-      storage: "Requiere OAuth de Google (GOOGLE_CLIENT_ID/SECRET). Ver docs/PENDIENTES.md.",
-      retrieval: "AI Search es un POC pendiente de validación de aislamiento.",
+      storage: driveProvisioned
+        ? "Repositorio documental habilitado para la firma."
+        : "Pendiente de configurar el acceso a Google en la plataforma.",
+      retrieval: "Indexación para búsqueda de IUSIA.",
     },
   });
 });

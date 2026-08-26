@@ -1,8 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { FolderOpen, Search } from "lucide-react";
-import { Module, ScreenTitle, Skeleton, StatusChip, capabilityTerm } from "@iusia/ui";
+import { Button, Module, ScreenTitle, Skeleton, StatusChip, capabilityTerm } from "@iusia/ui";
 import { api } from "../api.js";
+import { authClient } from "../auth-client.js";
+
+/**
+ * Scopes de Drive: lectura ya validada + escritura acotada (drive.file). Separados
+ * del login de identidad.
+ */
+const DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+];
+
+/**
+ * Autorización incremental de Google Drive, separada del login. Reutiliza
+ * `linkSocial` de Better Auth; el navegador va a Google y vuelve, y el frontend
+ * nunca ve tokens.
+ */
+async function connectDrive() {
+  await authClient.linkSocial({
+    provider: "google",
+    scopes: DRIVE_SCOPES,
+    callbackURL: window.location.pathname,
+  });
+}
 
 /**
  * Documentos — la capacidad documental de la firma contada al abogado.
@@ -27,6 +50,7 @@ export function Documents() {
   const repository = capabilityTerm(integrations.data?.storage.status);
   const indexing = capabilityTerm(integrations.data?.retrieval.status);
   const myAccess = drive.data?.connected === true;
+  const canWrite = drive.data?.write === true;
 
   return (
     <div className="pb-2">
@@ -56,16 +80,30 @@ export function Documents() {
             <Skeleton className="h-10" />
           ) : (
             <>
+              {/* Tres estados reales: sin autorizar, autorizado sólo lectura (falta
+                  reconectar para que IUSIA pueda crear/guardar), y autorizado con
+                  escritura. La acción se muestra siempre que falte algo. */}
               <StatusChip
-                label={myAccess ? "Autorizado" : "Sin autorizar"}
-                tone={myAccess ? "success" : "neutral"}
+                label={
+                  !myAccess ? "Sin autorizar" : canWrite ? "Autorizado" : "Sólo lectura"
+                }
+                tone={!myAccess ? "neutral" : canWrite ? "success" : "warning"}
                 dot
               />
               <p className="mt-2.5 text-[13px] leading-relaxed text-iusia-mist-text">
-                {myAccess
-                  ? "Puedes vincular documentos de tu Drive a los expedientes en los que trabajas."
-                  : "La autorización es personal y se concede desde cada expediente, al vincular el primer documento."}
+                {!myAccess
+                  ? "Autoriza el acceso para que IUSIA guarde y lea los documentos de tus expedientes en Drive."
+                  : canWrite
+                    ? "IUSIA puede crear la carpeta del expediente, guardar tus documentos y los que genere."
+                    : "IUSIA puede leer, pero aún no crear ni guardar documentos. Reconecta para habilitar la escritura."}
               </p>
+              {!myAccess || !canWrite ? (
+                <div className="mt-3">
+                  <Button size="sm" onClick={() => void connectDrive()}>
+                    {!myAccess ? "Autorizar acceso a Drive" : "Reconectar Drive"}
+                  </Button>
+                </div>
+              ) : null}
             </>
           )}
         </Module>

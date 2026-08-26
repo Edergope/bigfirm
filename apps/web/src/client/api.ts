@@ -295,7 +295,9 @@ export const api = {
     request<Record<string, unknown>>("/api/admin/integrations"),
 
   driveStatus: () =>
-    request<{ connected: boolean; reason?: string }>("/api/integrations/drive/status"),
+    request<{ connected: boolean; write?: boolean; reason?: string }>(
+      "/api/integrations/drive/status",
+    ),
 
   integrationsStatus: () =>
     request<{
