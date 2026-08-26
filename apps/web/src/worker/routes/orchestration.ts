@@ -21,6 +21,13 @@ const StartInput = z.object({
   objective: z.string().min(10).max(4000),
 });
 
+type DocumentReadiness = { name: string; ingestionStatus: string };
+const BLOCKING_DOCUMENT_STATUSES = new Set(["PENDIENTE", "PROCESSING"]);
+
+export function blockingDocumentsForAnalysis(docs: DocumentReadiness[]) {
+  return docs.filter((doc) => BLOCKING_DOCUMENT_STATUSES.has(doc.ingestionStatus));
+}
+
 /** Estimación conservadora de créditos por ejecución del DAG piloto. */
 const ESTIMATED_CREDITS_PER_RUN = 300;
 
@@ -29,7 +36,7 @@ const ESTIMATED_CREDITS_PER_RUN = 300;
  * Devuelve el `root_execution_id`: es la identidad del grafo en la Strategy Room.
  */
 orchestrationRoutes.post("/matters/:matterId/executions", async (c) => {
-  const { authz, executions, credits, audit } = c.get("ctx");
+  const { authz, executions, credits, audit, documents } = c.get("ctx");
   const { organizationId, userId } = c.get("session");
   const matterId = c.req.param("matterId");
 
@@ -40,6 +47,17 @@ orchestrationRoutes.post("/matters/:matterId/executions", async (c) => {
     throw new IusiaError("VALIDATION_FAILED", "Objetivo de la orquestación inválido", {
       issues: parsed.error.issues,
     });
+  }
+
+  const pendingDocs = blockingDocumentsForAnalysis(
+    await documents.listForMatter(organizationId, matterId),
+  );
+  if (pendingDocs.length > 0) {
+    throw new IusiaError(
+      "CONFLICT",
+      "Hay documentos del expediente que aún no están listos para recuperación RAG",
+      { reason: "INGESTION_PENDING", documents: pendingDocs.map((doc) => doc.name) },
+    );
   }
 
   // Guard de saldo ANTES de despachar. El cobro real ocurre por ejecución.

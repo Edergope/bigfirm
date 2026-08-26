@@ -29,7 +29,7 @@ const MATERIALITIES = ["SIMPLE", "MATERIAL", "HIGH_STAKES"];
  * Espera determinista a que los documentos aportados estén disponibles para el
  * análisis: mientras alguno siga PENDIENTE/PROCESSING, el RAG no los vería. Se
  * consulta el workspace real (no sleeps) con un tope de intentos; si al cabo del
- * tope siguen sin indexar, se continúa —el análisis usa lo que ya esté disponible—.
+ * tope siguen sin indexar, falla cerrado y no arranca la orquestación.
  */
 async function waitForIngestion(matterId: string, expected: number): Promise<void> {
   const NOT_READY = new Set(["PENDIENTE", "PROCESSING"]);
@@ -40,6 +40,7 @@ async function waitForIngestion(matterId: string, expected: number): Promise<voi
     if (uploaded.length >= expected && ready >= expected) return;
     await new Promise((r) => setTimeout(r, 2000));
   }
+  throw new Error("INGESTION_PENDING");
 }
 
 /**
