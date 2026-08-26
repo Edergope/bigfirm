@@ -1,6 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Skeleton, StatusChip } from "@iusia/ui";
+import { AnimatePresence, motion } from "motion/react";
+import { ArrowRight, X } from "lucide-react";
+import { OrchestrationNetwork, Skeleton, useCanAnimate } from "@iusia/ui";
 import {
   deriveConstellation,
   deriveProgressStages,
@@ -9,29 +11,22 @@ import {
   type ProgressStage,
   type StageState,
 } from "@iusia/domain";
-import { X } from "lucide-react";
 import { api } from "../api.js";
 
 /**
- * Experiencia de análisis de IUSIA.
+ * IUSIA trabajando.
  *
- * DOS ACCIONES DISTINTAS, deliberadamente separadas:
- *  - Cerrar (✕): oculta la experiencia. El análisis SIGUE trabajando en el servidor.
- *  - Detener análisis: cancela de verdad, con el circuit breaker del servidor.
- * Confundirlas costaría trabajo jurídico ya pagado, así que ni el copy ni el layout
- * las acercan.
+ * Antes era una caja blanca con una lista de pasos: al pulsar "Iniciar análisis"
+ * el producto pasaba del universo navy de la convocatoria a algo que parecía otra
+ * aplicación. Convocar y trabajar son dos momentos del MISMO gesto, así que
+ * comparten materia: navy profundo, atmósfera fría, la red al centro y la misma
+ * tipografía. Lo único que cambia es que ahora la red tiene datos reales dentro.
  *
- * La visualización se carga de forma diferida: es acompañamiento, no requisito para
- * entender el progreso, que se lee igual en la lista de fases.
+ * DOS ACCIONES DELIBERADAMENTE SEPARADAS, sin cambios respecto a lo ya validado:
+ *  · Cerrar (✕, Escape, fondo): oculta. El análisis SIGUE en el servidor.
+ *  · Detener análisis: cancela de verdad.
+ * Confundirlas costaría trabajo jurídico ya pagado.
  */
-
-// Se importa por su subruta y no por el barril de @iusia/ui: el barril ya viaja
-// en el bundle principal, así que importarlo aquí no separaría nada.
-const Constellation = lazy(() =>
-  import("@iusia/ui/analysis-constellation").then((m) => ({
-    default: m.AnalysisConstellation,
-  })),
-);
 
 const STAGE_LABEL: Record<string, string> = {
   received: "Entendiendo el encargo",
@@ -50,13 +45,6 @@ const AGENT_STAGE_LABEL: Record<string, string> = {
   "especialista-contractual-y-negocios": "Interpretando el régimen contractual",
 };
 
-const DOT: Record<StageState, string> = {
-  done: "bg-iusia-success",
-  active: "bg-iusia-intel",
-  failed: "bg-iusia-critical",
-  pending: "bg-iusia-mist",
-};
-
 export function AnalysisModal({
   rootExecutionId,
   matterId,
@@ -70,6 +58,7 @@ export function AnalysisModal({
 }) {
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const canAnimate = useCanAnimate();
 
   const events = useQuery({
     queryKey: ["execution-events", rootExecutionId],
@@ -79,9 +68,8 @@ export function AnalysisModal({
       const root = rows.find((e) => e.id === rootExecutionId);
       return shouldKeepPolling(root?.status) ? 2500 : false;
     },
-    // Igual que el indicador global: si el abogado se va a otra pestaña, al volver
-    // debe encontrar el análisis donde está de verdad, no una foto congelada que
-    // luego salta. Sólo sondea mientras la ejecución sigue viva.
+    // Si el abogado se va a otra pestaña, al volver debe encontrar el análisis
+    // donde está de verdad, no una foto congelada que luego salta.
     refetchIntervalInBackground: true,
   });
   const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents });
@@ -89,8 +77,6 @@ export function AnalysisModal({
   const rootStatus =
     events.data?.executions.find((e) => e.id === rootExecutionId)?.status ?? "RUNNING";
   const finished = !shouldKeepPolling(rootStatus);
-  // Terminar no es lo mismo que concluir. Un análisis detenido a mano o caído no
-  // puede anunciarse como completado: el abogado creería que tiene un dictamen.
   const ending = terminalCopy(rootStatus);
 
   const agentNames = useMemo(
@@ -108,7 +94,7 @@ export function AnalysisModal({
     });
   }, [events.data, rootStatus, rootExecutionId]);
 
-  const constellation = useMemo(() => {
+  const network = useMemo(() => {
     if (!events.data) return { nodes: [], links: [], integrating: false };
     return deriveConstellation({
       executions: events.data.executions,
@@ -118,7 +104,6 @@ export function AnalysisModal({
     });
   }, [events.data, rootExecutionId, agentNames]);
 
-  // Al terminar, el historial y el resultado del expediente dejan de estar al día.
   const prevStatus = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (shouldRefreshHistory(prevStatus.current, rootStatus)) {
@@ -129,13 +114,10 @@ export function AnalysisModal({
     prevStatus.current = rootStatus;
   }, [rootStatus, matterId, rootExecutionId, queryClient]);
 
-  // Escape cierra la vista, nunca cancela el trabajo. El foco queda atrapado en el
-  // diálogo mientras está abierto y vuelve a donde estaba al cerrarlo: si no, el
-  // teclado se pierde en la página de detrás, que está oculta tras el velo.
+  // Escape cierra la vista, nunca cancela el trabajo. Foco atrapado y devuelto.
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
-
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
@@ -144,22 +126,20 @@ export function AnalysisModal({
       if (e.key !== "Tab") return;
       const dialog = dialogRef.current;
       if (!dialog) return;
-      const focusables = dialog.querySelectorAll<HTMLElement>(
+      const f = dialog.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
-      if (focusables.length === 0) return;
-      const first = focusables[0]!;
-      const last = focusables[focusables.length - 1]!;
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || active === dialog)) {
+      if (f.length === 0) return;
+      const first = f[0]!;
+      const last = f[f.length - 1]!;
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
         e.preventDefault();
         last.focus();
-      } else if (!e.shiftKey && active === last) {
+      } else if (!e.shiftKey && document.activeElement === last) {
         e.preventDefault();
         first.focus();
       }
     };
-
     document.addEventListener("keydown", onKey);
     dialogRef.current?.focus();
     return () => {
@@ -176,116 +156,219 @@ export function AnalysisModal({
     },
   });
 
-  if (!open) return null;
-
   const cbEvent = (events.data?.events ?? []).find((e) => e.detail?.circuit_breaker_reason);
+  const doneCount = stages.filter((s) => s.state === "done").length;
+  const progress = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-iusia-navy/40 p-4 backdrop-blur-sm"
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={finished ? ending.title : "Análisis de IUSIA en curso"}
-        tabIndex={-1}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[14px] bg-iusia-paper shadow-[0_24px_64px_-12px_rgba(11,29,58,0.45)] focus:outline-none"
-      >
-        <header className="flex items-start justify-between gap-4 px-6 py-4">
-          <div>
-            <p className="text-[15.5px] font-semibold text-iusia-navy">
-              {finished ? ending.title : "IUSIA está analizando el expediente"}
-            </p>
-            <p className="mt-0.5 text-[13px] text-iusia-mist-text">
-              {finished ? ending.hint : "Puedes cerrar esta ventana: el análisis continúa."}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Cerrar. El análisis continúa en segundo plano."
-            title="Cerrar — el análisis continúa"
-            className="rounded-[8px] p-1.5 text-iusia-mist-text transition-colors hover:bg-iusia-mist/15 hover:text-iusia-carbon"
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-iusia-navy/45 p-4 backdrop-blur-sm"
+          initial={canAnimate ? { opacity: 0 } : false}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
+        >
+          <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={finished ? ending.title : "IUSIA está analizando el expediente"}
+            tabIndex={-1}
+            initial={canAnimate ? { opacity: 0, scale: 0.985, y: 8 } : false}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={canAnimate ? { opacity: 0, scale: 0.99 } : { opacity: 0 }}
+            transition={{ type: "spring", stiffness: 380, damping: 34 }}
+            className="on-navy flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[var(--radius-xl)] bg-iusia-navy-deep shadow-[var(--shadow-floating)] focus:outline-none"
           >
-            <X size={18} aria-hidden />
-          </button>
-        </header>
+            {/* Misma atmósfera que la convocatoria: el sistema no cambia de universo
+                al pasar de convocar a trabajar. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(58%_70%_at_50%_28%,rgba(34,199,232,0.15),transparent_66%)]"
+            />
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="border-b border-iusia-line bg-[radial-gradient(120%_90%_at_50%_0%,#F6F8FC_0%,#EDF1F7_100%)] px-6 py-5">
-            <Suspense fallback={<Skeleton className="h-[240px]" />}>
-              <Constellation
-                nodes={constellation.nodes}
-                links={constellation.links}
-                integrating={constellation.integrating && !finished}
-                height={240}
+            <header className="relative flex items-start justify-between gap-4 px-6 pt-5">
+              <div className="min-w-0">
+                <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-iusia-intel">
+                  {finished ? "Resultado" : "Equipo jurídico en trabajo"}
+                </p>
+                <h2 className="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-white">
+                  {finished ? ending.title : "IUSIA está analizando el expediente"}
+                </h2>
+                <p className="mt-1 text-[13px] text-white/55">{finished ? ending.hint : ending.live}</p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Cerrar. El análisis continúa en segundo plano."
+                title="Cerrar — el análisis continúa"
+                className="shrink-0 rounded-[8px] p-1.5 text-white/50 transition-colors duration-[var(--motion-fast)] hover:bg-white/10 hover:text-white"
+              >
+                <X size={17} aria-hidden />
+              </button>
+            </header>
+
+            <div className="relative flex-1 overflow-y-auto">
+              {/* La red con datos reales: quién trabaja y hacia dónde va el trabajo. */}
+              <OrchestrationNetwork
+                nodes={network.nodes}
+                links={network.links}
+                integrating={network.integrating && !finished}
+                className="w-full"
               />
-            </Suspense>
-          </div>
 
-          <ol className="flex min-h-[168px] flex-col gap-2 px-6 py-4">
-            {events.isLoading && stages.length === 0 ? (
-              <Skeleton className="h-24" />
-            ) : (
-              stages.map((s) => (
-                <li key={s.key} className="flex items-start gap-3">
-                  <span
-                    className={
-                      "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full " +
-                      DOT[s.state] +
-                      (s.state === "active" ? " animate-pulse motion-reduce:animate-none" : "")
-                    }
-                  />
-                  <span
-                    className={
-                      "text-[14px] " +
-                      (s.state === "pending" ? "text-iusia-mist-text" : "text-iusia-carbon") +
-                      (s.state === "done" ? " font-medium" : "")
-                    }
-                  >
-                    {stageLabel(s, agentNames)}
+              <div className="px-6 pb-5">
+                {/* Progreso real, no un porcentaje inventado: fases cerradas sobre
+                    fases conocidas. */}
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
+                    <motion.span
+                      className="block h-full origin-left rounded-full bg-iusia-intel"
+                      style={{ width: `${progress}%` }}
+                      initial={canAnimate ? { scaleX: 0 } : false}
+                      animate={{ scaleX: 1 }}
+                      transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}
+                    />
                   </span>
-                  {s.state === "failed" ? <StatusChip label="Falló" tone="critical" /> : null}
-                </li>
-              ))
-            )}
-          </ol>
+                  <span className="shrink-0 text-[11.5px] tnum text-white/45">
+                    {doneCount} de {stages.length || "—"}
+                  </span>
+                </div>
 
-          {cbEvent ? (
-            <div className="mx-6 mb-5 rounded-[10px] border border-iusia-warning/40 bg-iusia-warning/10 px-4 py-3">
-              <p className="text-[13.5px] font-medium text-iusia-warning-text">
-                IUSIA detuvo automáticamente el análisis para evitar una ejecución anómala.
-              </p>
+                {events.isLoading && stages.length === 0 ? (
+                  <Skeleton className="h-20 bg-white/5" />
+                ) : (
+                  <ol className="flex flex-col gap-1">
+                    {stages.map((s, i) => (
+                      <StageRow
+                        key={s.key}
+                        stage={s}
+                        label={stageLabel(s, agentNames)}
+                        index={i}
+                        animate={canAnimate}
+                      />
+                    ))}
+                  </ol>
+                )}
+
+                {cbEvent ? (
+                  <div className="mt-4 rounded-[var(--radius-md)] bg-iusia-warning/12 px-4 py-3">
+                    <p className="text-[13px] font-medium text-[#F3C879]">
+                      IUSIA detuvo automáticamente el análisis para evitar una ejecución
+                      anómala.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
             </div>
-          ) : null}
-        </div>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-iusia-line bg-iusia-surface/50 px-6 py-3.5">
-          {/* Acción destructiva a la izquierda y con nombre explícito: no se confunde
-              con cerrar la ventana, que está arriba y no interrumpe nada. */}
-          {!finished ? (
-            <button
-              type="button"
-              onClick={() => cancel.mutate()}
-              disabled={cancel.isPending}
-              className="text-[13.5px] font-medium text-iusia-critical hover:underline disabled:opacity-50"
-            >
-              {cancel.isPending ? "Deteniendo…" : "Detener análisis"}
-            </button>
-          ) : (
-            <span className="text-[13px] text-iusia-mist-text">{ending.footer}</span>
-          )}
-          <Button type="button" onClick={onClose} className="shrink-0 whitespace-nowrap">
-            {finished ? ending.action : "Seguir trabajando"}
-          </Button>
-        </footer>
-      </div>
-    </div>
+            <footer className="relative flex items-center justify-between gap-3 border-t border-white/[0.08] bg-black/20 px-6 py-3.5">
+              {!finished ? (
+                <button
+                  type="button"
+                  onClick={() => cancel.mutate()}
+                  disabled={cancel.isPending}
+                  className="rounded-[8px] px-2 py-1 text-[12.5px] font-medium text-[#FCA5A5] transition-colors duration-[var(--motion-fast)] hover:bg-white/[0.06] hover:text-[#FECACA] disabled:opacity-50"
+                >
+                  {cancel.isPending ? "Deteniendo…" : "Detener análisis"}
+                </button>
+              ) : (
+                <span className="text-[12.5px] text-white/45">{ending.footer}</span>
+              )}
+
+              <motion.button
+                type="button"
+                onClick={onClose}
+                initial={false}
+                animate={{ y: 0, scale: 1, boxShadow: "0 4px 14px -4px rgba(37,99,235,0.55)" }}
+                whileHover={
+                  canAnimate ? { y: -2, boxShadow: "0 14px 30px -8px rgba(37,99,235,0.7)" } : undefined
+                }
+                whileTap={canAnimate ? { y: 0, scale: 0.985 } : undefined}
+                transition={{ type: "spring", stiffness: 480, damping: 34, mass: 0.7 }}
+                className="group inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-[var(--radius-md)] bg-iusia-action px-4 py-2.5 text-[13.5px] font-semibold text-white transition-colors duration-[var(--motion-fast)] hover:bg-[#1d4fd0]"
+              >
+                {finished ? ending.action : "Seguir trabajando"}
+                <ArrowRight
+                  size={14}
+                  aria-hidden
+                  className="transition-transform duration-[var(--motion-fast)] group-hover:translate-x-1 motion-reduce:transition-none"
+                />
+              </motion.button>
+            </footer>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+/** Una fase del encargo. El estado activo se distingue por materia, no por un punto. */
+function StageRow({
+  stage,
+  label,
+  index,
+  animate,
+}: {
+  stage: ProgressStage;
+  label: string;
+  index: number;
+  animate: boolean;
+}) {
+  const tone: Record<StageState, string> = {
+    done: "text-white/75",
+    active: "text-white",
+    failed: "text-[#FCA5A5]",
+    pending: "text-white/35",
+  };
+  return (
+    <motion.li
+      initial={animate ? { opacity: 0, y: 4 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.22, delay: Math.min(index * 0.04, 0.24) }}
+      className={
+        "flex items-center gap-3 rounded-[10px] px-2.5 py-1.5 text-[13.5px] " +
+        (stage.state === "active" ? "bg-white/[0.06] font-medium" : "") +
+        " " +
+        tone[stage.state]
+      }
+    >
+      <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+        {stage.state === "done" ? (
+          <svg viewBox="0 0 16 16" className="h-4 w-4" aria-hidden>
+            <circle cx="8" cy="8" r="7" fill="none" stroke="#34D399" strokeOpacity="0.5" />
+            <path
+              d="M5 8.2 l2 2 l4 -4.4"
+              fill="none"
+              stroke="#34D399"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : stage.state === "failed" ? (
+          <span className="h-2 w-2 rounded-full bg-[#F87171]" />
+        ) : stage.state === "active" ? (
+          <>
+            <motion.span
+              className="absolute h-4 w-4 rounded-full bg-iusia-intel"
+              animate={animate ? { opacity: [0.35, 0, 0.35], scale: [0.8, 1.6, 0.8] } : { opacity: 0.25 }}
+              transition={animate ? { duration: 1.8, repeat: Infinity } : { duration: 0 }}
+            />
+            <span className="relative h-2 w-2 rounded-full bg-iusia-intel" />
+          </>
+        ) : (
+          <span className="h-1.5 w-1.5 rounded-full bg-white/25" />
+        )}
+      </span>
+      {label}
+    </motion.li>
   );
 }
 
@@ -293,13 +376,16 @@ export function AnalysisModal({
 function terminalCopy(status: string): {
   title: string;
   hint: string;
+  live: string;
   footer: string;
   action: string;
 } {
+  const live = "Puedes cerrar esta ventana: el análisis continúa.";
   if (status === "CANCELLED") {
     return {
       title: "Análisis detenido",
       hint: "Lo detuviste antes de que IUSIA concluyera. No hay dictamen para este intento.",
+      live,
       footer: "El expediente conserva el registro de lo que alcanzó a ejecutarse.",
       action: "Volver al expediente",
     };
@@ -308,6 +394,7 @@ function terminalCopy(status: string): {
     return {
       title: "El análisis no pudo completarse",
       hint: "IUSIA se detuvo antes de emitir una conclusión. Puedes intentarlo de nuevo.",
+      live,
       footer: "El expediente conserva la trazabilidad de lo ocurrido.",
       action: "Ver detalle",
     };
@@ -315,6 +402,7 @@ function terminalCopy(status: string): {
   return {
     title: "Análisis completado",
     hint: "El resultado ya está disponible en el expediente.",
+    live,
     footer: "El expediente conserva el resultado y su trazabilidad.",
     action: "Ver resultado",
   };
@@ -322,9 +410,7 @@ function terminalCopy(status: string): {
 
 function stageLabel(stage: ProgressStage, agentNames: Map<string, string>): string {
   if (stage.agentId) {
-    return (
-      AGENT_STAGE_LABEL[stage.agentId] ?? agentNames.get(stage.agentId) ?? stage.agentId
-    );
+    return AGENT_STAGE_LABEL[stage.agentId] ?? agentNames.get(stage.agentId) ?? stage.agentId;
   }
   return STAGE_LABEL[stage.key] ?? stage.key;
 }

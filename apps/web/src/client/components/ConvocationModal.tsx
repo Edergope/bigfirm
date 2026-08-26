@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Plus, X } from "lucide-react";
+import { ArrowRight, FolderTree, Paperclip, Plus, X } from "lucide-react";
 import { Button, Select, SpecialistNetwork, Textarea, useCanAnimate } from "@iusia/ui";
 import { api, ApiError } from "../api.js";
 import { HERO_SPECIALISTS } from "./IusiaHero.js";
@@ -28,6 +28,8 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
   const matters = useQuery({ queryKey: ["matters"], queryFn: api.listMatters, enabled: open });
   const [matterId, setMatterId] = useState("");
   const [objective, setObjective] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => matters.data?.matters ?? [], [matters.data]);
   const hasMatters = rows.length > 0;
@@ -205,6 +207,95 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                         placeholder="Ej.: Determina qué plazo de preaviso sostiene la contraparte y cita la evidencia del expediente."
                       />
                     </label>
+                  </div>
+
+                  {/*
+                    Adjuntos. La UI está lista y el contrato es explícito, pero el
+                    envío todavía NO existe: el Document Pipeline —carpeta del
+                    expediente en Drive, subcarpeta de documentos aportados,
+                    subcarpeta de documentos generados por IUSIA, cola, R2 e
+                    indexación— es el sprint siguiente. Se dice aquí, en la
+                    interfaz, en lugar de aceptar archivos que se perderían.
+                  */}
+                  <div className="mt-4">
+                    <span className="mb-1.5 block text-[12px] font-semibold uppercase tracking-[0.07em] text-iusia-mist-text">
+                      Documentos del caso
+                    </span>
+
+                    <div
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (convoking) return;
+                        setFiles((f) => [...f, ...Array.from(e.dataTransfer.files)].slice(0, 10));
+                      }}
+                      className="rounded-[var(--radius-md)] border border-dashed border-iusia-line-strong bg-iusia-ice/50 px-4 py-3.5"
+                    >
+                      <div className="flex flex-wrap items-center gap-3">
+                        {/* Arrastrar no puede ser la única vía: siempre hay botón. */}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => fileInput.current?.click()}
+                          disabled={convoking}
+                        >
+                          <Paperclip size={14} aria-hidden />
+                          Adjuntar documentos
+                        </Button>
+                        <span className="text-[12.5px] text-iusia-mist-text">
+                          o arrástralos aquí
+                        </span>
+                      </div>
+                      <input
+                        ref={fileInput}
+                        type="file"
+                        multiple
+                        className="sr-only"
+                        aria-label="Adjuntar documentos al expediente"
+                        onChange={(e) =>
+                          setFiles((f) =>
+                            [...f, ...Array.from(e.target.files ?? [])].slice(0, 10),
+                          )
+                        }
+                      />
+
+                      {files.length > 0 ? (
+                        <ul className="mt-3 flex flex-col gap-1">
+                          {files.map((f, i) => (
+                            <li
+                              key={`${f.name}-${i}`}
+                              className="flex items-center justify-between gap-3 rounded-[8px] bg-iusia-paper px-2.5 py-1.5"
+                            >
+                              <span className="min-w-0 truncate text-[12.5px] text-iusia-carbon">
+                                {f.name}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
+                                className="shrink-0 text-[11.5px] font-medium text-iusia-mist-text transition-colors hover:text-iusia-critical"
+                              >
+                                Quitar
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+
+                      {/* El destino de esos archivos, dicho antes de adjuntarlos. */}
+                      <p className="mt-3 flex items-start gap-2 text-[12px] leading-snug text-iusia-mist-text">
+                        <FolderTree size={13} className="mt-0.5 shrink-0" aria-hidden />
+                        <span>
+                          Se guardarán en la carpeta del expediente en Drive, separando lo
+                          que aportas tú de lo que genere IUSIA.
+                          {files.length > 0 ? (
+                            <strong className="ml-1 font-medium text-iusia-warning-text">
+                              La incorporación se habilita en el siguiente bloque: por ahora
+                              el análisis usará los documentos ya cargados en el expediente.
+                            </strong>
+                          ) : null}
+                        </span>
+                      </p>
+                    </div>
                   </div>
 
                   {start.error ? (
