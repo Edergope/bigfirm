@@ -9,6 +9,7 @@ import {
   DocumentGenerationError,
   DocumentGenerationService,
 } from "../services/document-generation.js";
+import { seedOpinionTemplate } from "../services/template-seed.js";
 
 export const documentWorkspaceRoutes = new Hono<AppBindings>();
 
@@ -284,6 +285,23 @@ documentWorkspaceRoutes.get("/drive/smoke", async (c) => {
       },
       200,
     );
+  }
+});
+
+/** Siembra/actualiza la plantilla institucional de Opinión Legal. Sólo superadmin. */
+documentWorkspaceRoutes.post("/templates/seed", async (c) => {
+  const { authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  await authz.requireSystemSuperadmin(userId, "templates.seed", organizationId);
+  try {
+    const result = await seedOpinionTemplate(c.env, userId, organizationId);
+    return c.json(result);
+  } catch (error) {
+    if (error instanceof DriveConnectionError) {
+      const code = driveErrorToCode(error);
+      throw new IusiaError("CONFLICT", documentErrorMessage(code), { code });
+    }
+    throw error;
   }
 });
 

@@ -1,9 +1,10 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams, Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Card,
+  Drawer,
   Select,
   Input,
   MatterStatusChip,
@@ -11,6 +12,7 @@ import {
   Skeleton,
   StateBlock,
   StatusChip,
+  Textarea,
 } from "@iusia/ui";
 import {
   Module,
@@ -426,65 +428,159 @@ const DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
+/**
+ * Workspace documental del expediente: las dos carpetas reales de Drive —lo que
+ * aporta el abogado y lo que genera IUSIA—, con subida y generación. Los archivos
+ * viven en Drive; IUSIA es la capa jurídica y enlaza a cada uno.
+ */
 function Documentos({ data }: { data: MatterDetail }) {
+  const matterId = data.matter.id;
+  const queryClient = useQueryClient();
   const driveStatus = useQuery({ queryKey: ["drive-status"], queryFn: api.driveStatus });
-  const connected = driveStatus.data?.connected === true;
-  // Escritura = drive.file. Sin ella IUSIA no puede crear la carpeta ni guardar.
+  const workspace = useQuery({
+    queryKey: ["workspace", matterId],
+    queryFn: () => api.matterWorkspace(matterId),
+  });
   const canWrite = driveStatus.data?.write === true;
+  const connected = driveStatus.data?.connected === true;
 
-  /**
-   * Autorización INCREMENTAL de Google Drive, separada del login: reutiliza
-   * `linkSocial` de Better Auth pidiendo el scope adicional. El navegador va a
-   * Google y vuelve; el frontend nunca ve tokens.
-   */
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const upload = useMutation({
+    mutationFn: (files: File[]) => api.uploadDocuments(matterId, files),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workspace", matterId] });
+      void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
+    },
+  });
+
   async function connectDrive() {
     await authClient.linkSocial({
       provider: "google",
       scopes: DRIVE_SCOPES,
       callbackURL: window.location.pathname,
+      additionalParams: { prompt: "consent" },
     });
   }
 
+  const uploaded = workspace.data?.uploaded ?? [];
+  const generated = workspace.data?.generated ?? [];
+
+  if (driveStatus.isSuccess && (!connected || !canWrite)) {
+    return (
+      <Module title="Documentos del expediente" eyebrow="Repositorio en Drive">
+        <p className="text-[13.5px] text-iusia-carbon">
+          {!connected
+            ? "Autoriza Google Drive para guardar y leer los documentos de este expediente."
+            : "IUSIA puede leer pero aún no crear ni guardar documentos. Reconecta para habilitar la escritura."}
+        </p>
+        <div className="mt-3">
+          <Button size="sm" onClick={() => void connectDrive()}>
+            {!connected ? "Autorizar acceso a Drive" : "Reconectar Drive"}
+          </Button>
+        </div>
+      </Module>
+    );
+  }
+
   return (
-    <Module
-      title="Documentos del expediente"
-      eyebrow={`${data.documents.length} ${data.documents.length === 1 ? "documento" : "documentos"}`}
-      padded={false}
-      action={
-        driveStatus.isSuccess && (!connected || !canWrite) ? (
+    <div className="flex flex-col gap-4">
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        className="sr-only"
+        aria-label="Adjuntar documentos"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length > 0) upload.mutate(files);
+          e.target.value = "";
+        }}
+      />
+
+      <DocFolder
+        title="Documentos aportados"
+        subtitle="Lo que incorporas tú al expediente"
+        docs={uploaded}
+        loading={workspace.isLoading}
+        empty="Aún no has aportado documentos. IUSIA sólo cita lo que esté en el expediente."
+        action={
           <button
             type="button"
-            onClick={() => void connectDrive()}
+            onClick={() => fileInput.current?.click()}
+            disabled={upload.isPending}
+            className="text-[12.5px] font-medium text-iusia-action transition-colors hover:underline disabled:opacity-50"
+          >
+            {upload.isPending ? "Subiendo…" : "Adjuntar documentos"}
+          </button>
+        }
+      />
+
+      <DocFolder
+        title="Documentos generados por IUSIA"
+        subtitle="Entregables oficiales producidos desde el expediente"
+        docs={generated}
+        loading={workspace.isLoading}
+        empty="Todavía no has generado ningún documento con plantilla oficial."
+        action={
+          <button
+            type="button"
+            onClick={() => setGenerating(true)}
             className="text-[12.5px] font-medium text-iusia-action transition-colors hover:underline"
           >
-            {!connected ? "Autorizar acceso a Drive" : "Reconectar Drive"}
+            Generar documento
           </button>
-        ) : canWrite ? (
-          <StatusChip label="Drive autorizado" tone="success" dot />
-        ) : null
-      }
-    >
-      {data.documents.length === 0 ? (
+        }
+      />
+
+      <GenerateDrawer
+        open={generating}
+        onClose={() => setGenerating(false)}
+        matterId={matterId}
+        onGenerated={() => {
+          void queryClient.invalidateQueries({ queryKey: ["workspace", matterId] });
+          void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
+        }}
+      />
+    </div>
+  );
+}
+
+/** Una de las dos carpetas del expediente, con enlace a Drive por documento. */
+function DocFolder({
+  title,
+  subtitle,
+  docs,
+  loading,
+  empty,
+  action,
+}: {
+  title: string;
+  subtitle: string;
+  docs: import("../api.js").DocumentEntry[];
+  loading: boolean;
+  empty: string;
+  action: ReactNode;
+}) {
+  return (
+    <Module title={title} eyebrow={subtitle} padded={false} action={action}>
+      {loading ? (
         <div className="px-5 pb-5">
-          <p className="text-[13.5px] text-iusia-carbon">
-            Este expediente aún no tiene documentos.
-          </p>
-          <p className="mt-1 text-[12.5px] text-iusia-mist-text">
-            IUSIA sólo cita como evidencia lo que esté incorporado al expediente.
-          </p>
+          <Skeleton className="h-12" />
         </div>
+      ) : docs.length === 0 ? (
+        <p className="px-5 pb-5 text-[13px] text-iusia-mist-text">{empty}</p>
       ) : (
         <ul className="divide-y divide-iusia-line/70">
-          {data.documents.map((d) => {
+          {docs.map((d) => {
             const st = documentStatusTerm(d.status);
-            const Icon = documentIcon(d.mimeType, d.name);
+            const Icon = documentIcon(d.mime_type, d.name);
             return (
               <li
                 key={d.id}
                 className="flex items-center gap-3.5 px-5 py-3 transition-colors hover:bg-iusia-ice/60"
               >
-                {/* Icono por tipo real de archivo: el mismo glifo para todo obliga a
-                    leer la extensión para saber qué se está mirando. */}
                 <span
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-iusia-navy/8 text-iusia-navy"
                   aria-hidden
@@ -498,16 +594,134 @@ function Documentos({ data }: { data: MatterDetail }) {
                   <span className="mt-0.5 block truncate text-[12px] text-iusia-mist-text">
                     {documentClassLabel(d.classification)}
                     <span aria-hidden className="px-1.5 text-iusia-mist">·</span>
-                    Actualizado {new Date(d.updatedAt).toLocaleDateString("es-CO")}
+                    Actualizado {new Date(d.updated_at).toLocaleDateString("es-CO")}
                   </span>
                 </span>
                 <StatusChip label={st.label} tone={st.tone} title={st.hint} />
+                {d.drive_file_id ? (
+                  <a
+                    href={`https://drive.google.com/file/d/${d.drive_file_id}/view`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-[12px] font-medium text-iusia-action hover:underline"
+                  >
+                    Abrir en Drive
+                  </a>
+                ) : null}
               </li>
             );
           })}
         </ul>
       )}
     </Module>
+  );
+}
+
+/**
+ * Generación de un entregable oficial: elige plantilla, IUSIA propone el contenido
+ * desde el análisis del expediente, y produce DOCX + PDF en Drive. El abogado no
+ * maqueta: revisa el contenido y genera.
+ */
+function GenerateDrawer({
+  open,
+  onClose,
+  matterId,
+  onGenerated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  matterId: string;
+  onGenerated: () => void;
+}) {
+  const templates = useQuery({ queryKey: ["templates"], queryFn: api.listTemplates, enabled: open });
+  const [templateId, setTemplateId] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const rows = templates.data?.templates ?? [];
+  const selected = rows.find((t) => t.id === templateId) ?? rows[0];
+
+  const generate = useMutation({
+    mutationFn: () => api.generateDocument(matterId, selected!.document_type, values),
+    onSuccess: () => {
+      onGenerated();
+      onClose();
+      setValues({});
+    },
+  });
+
+  const missing =
+    selected?.variables.filter((v) => v.required && !values[v.key]?.trim()).map((v) => v.label) ??
+    [];
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Generar documento" width={560}>
+      {templates.isLoading ? (
+        <Skeleton className="h-40" />
+      ) : rows.length === 0 ? (
+        <StateBlock
+          kind="empty"
+          title="Sin plantillas disponibles"
+          hint="La dirección de la firma aún no ha habilitado plantillas oficiales."
+        />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <label className="block">
+            <span className="mb-1.5 block text-[12px] font-semibold uppercase tracking-[0.07em] text-iusia-mist-text">
+              Plantilla oficial
+            </span>
+            <Select
+              value={selected?.id ?? ""}
+              onChange={(e) => {
+                setTemplateId(e.target.value);
+                setValues({});
+              }}
+              className="h-10 w-full rounded-[10px] text-[13.5px]"
+            >
+              {rows.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} · v{t.version}
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          {selected?.variables.map((v) => (
+            <label key={v.key} className="block">
+              <span className="mb-1 block text-[12.5px] font-medium text-iusia-carbon">
+                {v.label}
+                {v.required ? <span className="text-iusia-critical"> *</span> : null}
+              </span>
+              <Textarea
+                value={values[v.key] ?? ""}
+                onChange={(e) => setValues((c) => ({ ...c, [v.key]: e.target.value }))}
+                rows={v.key === "analisis" || v.key === "antecedentes" ? 3 : 1}
+                className="rounded-[10px] text-[13.5px]"
+              />
+            </label>
+          ))}
+
+          {generate.error ? (
+            <p role="alert" className="text-[13px] text-iusia-critical">
+              {generate.error instanceof ApiError
+                ? generate.error.message
+                : "No fue posible generar el documento."}
+            </p>
+          ) : null}
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[12px] text-iusia-mist-text">
+              {missing.length > 0 ? `Faltan: ${missing.join(", ")}` : "IUSIA generará DOCX y PDF."}
+            </span>
+            <Button
+              onClick={() => generate.mutate()}
+              disabled={generate.isPending || missing.length > 0 || !selected}
+            >
+              {generate.isPending ? "Generando…" : "Generar DOCX y PDF"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Drawer>
   );
 }
 

@@ -40,7 +40,15 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
   }, [rows, matterId]);
 
   const start = useMutation({
-    mutationFn: () => api.startOrchestration(matterId, objective.trim()),
+    mutationFn: async () => {
+      // Los adjuntos se incorporan ANTES de convocar: se suben a "01 Documentos
+      // aportados" y quedan encolados para ingestión. El análisis trabaja sobre lo
+      // que ya está en el expediente; los recién subidos se procesan en paralelo.
+      if (files.length > 0) {
+        await api.uploadDocuments(matterId, files);
+      }
+      return api.startOrchestration(matterId, objective.trim());
+    },
     onSuccess: (res) => {
       // Se entrega a la experiencia de análisis existente, que ya sabe continuar en
       // segundo plano y reabrirse. Un respiro antes de navegar para que la red
@@ -286,13 +294,8 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                         <FolderTree size={13} className="mt-0.5 shrink-0" aria-hidden />
                         <span>
                           Se guardarán en la carpeta del expediente en Drive, separando lo
-                          que aportas tú de lo que genere IUSIA.
-                          {files.length > 0 ? (
-                            <strong className="ml-1 font-medium text-iusia-warning-text">
-                              La incorporación se habilita en el siguiente bloque: por ahora
-                              el análisis usará los documentos ya cargados en el expediente.
-                            </strong>
-                          ) : null}
+                          que aportas tú de lo que genere IUSIA, y quedarán disponibles para
+                          el análisis.
                         </span>
                       </p>
                     </div>

@@ -49,6 +49,16 @@ export interface MeResponse {
   is_system_superadmin: boolean;
 }
 
+export interface DocumentEntry {
+  id: string;
+  name: string;
+  mime_type: string;
+  status: string;
+  classification: string;
+  drive_file_id: string | null;
+  updated_at: string;
+}
+
 export interface MatterSummary {
   id: string;
   reference: string;
@@ -305,6 +315,51 @@ export const api = {
       retrieval: { id: string; status: string };
       notes: Record<string, string>;
     }>("/api/integrations/status"),
+
+  matterWorkspace: (matterId: string) =>
+    request<{
+      uploaded: DocumentEntry[];
+      generated: DocumentEntry[];
+    }>(`/api/matters/${matterId}/workspace`),
+
+  /** Sube documentos aportados a Drive vía multipart. No usa el helper JSON. */
+  uploadDocuments: async (matterId: string, files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f);
+    const res = await fetch(`/api/matters/${matterId}/documents/upload`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      const err = (body as { error?: { code: string; message: string } })?.error;
+      throw new ApiError(err?.code ?? "INTERNAL", err?.message ?? "No fue posible subir", res.status);
+    }
+    return body as { uploaded: Array<{ document_id: string; name: string; status: string }> };
+  },
+
+  listTemplates: () =>
+    request<{
+      templates: Array<{
+        id: string;
+        name: string;
+        document_type: string;
+        version: number;
+        status: string;
+        scope: string;
+        variables: Array<{ key: string; label: string; required: boolean }>;
+      }>;
+    }>("/api/templates"),
+
+  generateDocument: (matterId: string, documentType: string, values: Record<string, string>) =>
+    request<{
+      docx: { name: string; document_id: string };
+      pdf: { name: string; document_id: string };
+    }>(`/api/matters/${matterId}/generate`, {
+      method: "POST",
+      body: JSON.stringify({ document_type: documentType, values }),
+    }),
 
   intelligence: {
     caseHealth: (firm: boolean) =>

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -349,17 +349,27 @@ function NewMatterForm({ onCreated }: { onCreated: () => void }) {
   const [materiality, setMateriality] = useState("MATERIAL");
   const [area, setArea] = useState("COMERCIAL_CONTRACTUAL");
   const [objective, setObjective] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const create = useMutation({
-    mutationFn: () =>
-      api.createMatter({
+    mutationFn: async () => {
+      const res = await api.createMatter({
         title,
         client_name: clientName,
         materiality,
         practice_areas: [area],
         jurisdiction,
         objective: objective || undefined,
-      }),
+      });
+      // Los documentos aportados en la creación se suben al expediente recién
+      // creado: crea su carpeta en Drive y quedan encolados para ingestión. Un fallo
+      // de subida no deshace el expediente —ya existe y es utilizable—; se informa.
+      if (files.length > 0) {
+        await api.uploadDocuments(res.matter.id, files);
+      }
+      return res;
+    },
     onSuccess: onCreated,
   });
 
@@ -403,6 +413,46 @@ function NewMatterForm({ onCreated }: { onCreated: () => void }) {
       </Field>
       <Field label="Objetivo del cliente (opcional)">
         <Textarea rows={3} value={objective} onChange={(e) => setObjective(e.target.value)} />
+      </Field>
+
+      {/* Documentos aportados: opcionales al crear. Se suben al expediente y quedan
+          disponibles para el análisis. Arrastrar no es la única vía. */}
+      <Field label="Documentos del caso (opcional)">
+        <div className="rounded-[var(--radius-md)] border border-dashed border-iusia-line-strong bg-iusia-ice/50 px-4 py-3">
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="sr-only"
+            aria-label="Adjuntar documentos al nuevo expediente"
+            onChange={(e) => {
+              setFiles((f) => [...f, ...Array.from(e.target.files ?? [])].slice(0, 10));
+              e.target.value = "";
+            }}
+          />
+          <Button type="button" variant="secondary" size="sm" onClick={() => fileInput.current?.click()}>
+            Adjuntar documentos
+          </Button>
+          {files.length > 0 ? (
+            <ul className="mt-2.5 flex flex-col gap-1">
+              {files.map((f, i) => (
+                <li
+                  key={`${f.name}-${i}`}
+                  className="flex items-center justify-between gap-3 rounded-[8px] bg-iusia-paper px-2.5 py-1.5"
+                >
+                  <span className="min-w-0 truncate text-[12.5px] text-iusia-carbon">{f.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
+                    className="shrink-0 text-[11.5px] font-medium text-iusia-mist-text hover:text-iusia-critical"
+                  >
+                    Quitar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </Field>
 
       {create.error ? (

@@ -24,6 +24,11 @@ async function connectDrive() {
     provider: "google",
     scopes: DRIVE_SCOPES,
     callbackURL: window.location.pathname,
+    // `prompt: "consent"` fuerza a Google a reemitir el grant incluyendo el scope
+    // nuevo (drive.file). Sin él, un re-consentimiento sobre una cuenta que ya tenía
+    // drive.readonly devolvía sólo readonly y la escritura nunca quedaba habilitada.
+    // No afecta al login de identidad, que no usa linkSocial.
+    additionalParams: { prompt: "consent" },
   });
 }
 

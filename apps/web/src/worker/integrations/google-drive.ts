@@ -255,7 +255,6 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
 
   /** Aplica reemplazos de texto sobre un Google Doc (Docs API batchUpdate). */
   async docsReplaceText(documentId: string, replacements: Record<string, string>): Promise<void> {
-    const token = this.requireToken();
     const requests = Object.entries(replacements).map(([key, value]) => ({
       replaceAllText: {
         containsText: { text: `{{${key}}}`, matchCase: false },
@@ -263,10 +262,17 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
       },
     }));
     if (requests.length === 0) return;
+    await this.docsBatchUpdate(documentId, requests);
+  }
+
+  /** batchUpdate genérico de Docs API (para construir plantillas editoriales). */
+  async docsBatchUpdate(documentId: string, requests: unknown[]): Promise<void> {
+    if (requests.length === 0) return;
+    const token = this.requireToken();
     await this.authRequest(
       `https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
       token,
-      "docsReplaceText",
+      "docsBatchUpdate",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
