@@ -39,6 +39,7 @@ export class IngestionService {
 
     const doc = await documents.findById(message.organization_id, message.document_id);
     if (!doc) return { status: "SKIPPED", detail: "documento no encontrado en el registro" };
+    if (doc.retiredAt) return { status: "SKIPPED", detail: "documento retirado" };
     // Una cola retrasada de v1 nunca puede sobrescribir el espejo RAG de v2.
     if (doc.driveFileId !== message.drive_file_id) {
       return { status: "SKIPPED", detail: "versión no vigente" };
@@ -79,6 +80,7 @@ export class IngestionService {
           document_id: message.document_id,
           document_version: String(doc.currentVersion),
           is_current: "true",
+          is_active: "true",
           source_mime_type: doc.mimeType,
         },
       });
@@ -90,6 +92,7 @@ export class IngestionService {
         document_id: message.document_id,
         document_version: String(doc.currentVersion),
         is_current: "true",
+        is_active: "true",
       });
 
       stage = "D1_MARK_INDEXED";

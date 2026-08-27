@@ -293,6 +293,18 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
     return res.arrayBuffer();
   }
 
+  /** Mueve un archivo gestionado sin duplicarlo ni alterar su id o historial. */
+  async moveFile(fileId: string, parentId: string): Promise<void> {
+    const token = this.requireToken();
+    const metadataUrl = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}`);
+    metadataUrl.searchParams.set("fields", "parents");
+    const metadata = (await (await this.call(metadataUrl, token, "getParents")).json()) as { parents?: string[] };
+    const url = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}`);
+    url.searchParams.set("addParents", parentId);
+    if (metadata.parents?.length) url.searchParams.set("removeParents", metadata.parents.join(","));
+    await this.authRequest(url.toString(), token, "moveFile", { method: "PATCH" });
+  }
+
   /** Aplica reemplazos de texto sobre un Google Doc (Docs API batchUpdate). */
   async docsReplaceText(documentId: string, replacements: Record<string, string>): Promise<void> {
     const requests = Object.entries(replacements).map(([key, value]) => ({
@@ -306,6 +318,14 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
     }));
     if (requests.length === 0) return;
     await this.docsBatchUpdate(documentId, requests);
+  }
+
+  /** Texto nativo posterior al reemplazo, para el gate editorial antes de exportar. */
+  async docsText(documentId: string): Promise<string> {
+    const token = this.requireToken();
+    const res = await this.call(`https://docs.googleapis.com/v1/documents/${documentId}`, token, "docsText");
+    const body = await res.json() as { body?: { content?: Array<{ paragraph?: { elements?: Array<{ textRun?: { content?: string } }> } }> } };
+    return (body.body?.content ?? []).flatMap((block) => block.paragraph?.elements ?? []).map((element) => element.textRun?.content ?? "").join("");
   }
 
   /** batchUpdate genérico de Docs API (para construir plantillas editoriales). */

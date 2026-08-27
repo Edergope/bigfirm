@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { newId } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { documents, documentVersions } from "../schema/iusia.js";
@@ -95,7 +95,7 @@ export class DocumentRepository {
     return this.db
       .select()
       .from(documents)
-      .where(and(eq(documents.organizationId, organizationId), eq(documents.matterId, matterId)))
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.matterId, matterId), isNull(documents.retiredAt)))
       .orderBy(desc(documents.updatedAt));
   }
 
@@ -153,7 +153,7 @@ export class DocumentRepository {
     ingestionStatus?: string;
   }) {
     const document = await this.findById(input.organizationId, input.documentId);
-    if (!document || document.matterId !== input.matterId) return null;
+    if (!document || document.matterId !== input.matterId || document.retiredAt) return null;
 
     const nextVersion = document.currentVersion + 1;
     const now = new Date().toISOString();
@@ -214,6 +214,19 @@ export class DocumentRepository {
       .update(documents)
       .set({ status, updatedAt: new Date().toISOString() })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /** Retiro lógico durable. No borra el binario, espejo ni versiones auditables. */
+  async retire(input: { organizationId: string; documentId: string; retiredBy: string; reason?: string }) {
+    const now = new Date().toISOString();
+    const result = await this.db.update(documents).set({
+      status: "RETIRADO",
+      retiredAt: now,
+      retiredBy: input.retiredBy,
+      retiredReason: input.reason?.trim() || null,
+      updatedAt: now,
+    }).where(and(eq(documents.organizationId, input.organizationId), eq(documents.id, input.documentId), isNull(documents.retiredAt))).returning({ id: documents.id });
+    return result[0] ?? null;
   }
 
   /** Marca un documento como indexado tras escribir su espejo normalizado en R2. */

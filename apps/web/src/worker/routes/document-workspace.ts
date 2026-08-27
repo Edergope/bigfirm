@@ -243,7 +243,7 @@ documentWorkspaceRoutes.get("/matters/:matterId/documents/:documentId/content", 
   const documentId = c.req.param("documentId");
   await authz.authorizeMatter(organizationId, userId, matterId, "document:read");
   const document = await documents.findById(organizationId, documentId);
-  if (!document || document.matterId !== matterId) {
+  if (!document || document.matterId !== matterId || document.retiredAt) {
     throw new IusiaError("NOT_FOUND", "Documento no encontrado");
   }
   const rawVersion = c.req.query("version");
@@ -290,7 +290,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/versions"
     documents.findById(organizationId, documentId),
     matters.findById(organizationId, matterId),
   ]);
-  if (!document || document.matterId !== matterId || !matter) {
+  if (!document || document.matterId !== matterId || document.retiredAt || !matter) {
     throw new IusiaError("NOT_FOUND", "Documento no encontrado");
   }
 
@@ -356,6 +356,28 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/versions"
     detail: { version: added.versionNumber, change_type: changeType },
   });
   return c.json({ version_number: added.versionNumber, ingestion_status: ingestionStatus }, 201);
+});
+
+const RetireDocumentInput = z.object({ reason: z.string().max(500).optional() });
+
+/** Retiro seguro: mueve todas las versiones a Drive, conserva R2/auditoría y oculta el lógico. */
+documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retire", async (c) => {
+  const { documents, matters, authz, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const documentId = c.req.param("documentId");
+  await authz.authorizeMatter(organizationId, userId, matterId, "document:link");
+  const [document, matter] = await Promise.all([documents.findById(organizationId, documentId), matters.findById(organizationId, matterId)]);
+  if (!document || document.matterId !== matterId || document.retiredAt || !matter) throw new IusiaError("NOT_FOUND", "Documento no encontrado");
+  const parsed = RetireDocumentInput.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Datos de retiro inválidos");
+  const folders = await DriveWorkspaceService.forEnv(c.env).ensureMatterFolders(userId, organizationId, matter);
+  const versions = await documents.listVersions(organizationId, documentId);
+  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  for (const version of versions) await drive.moveFile(version.driveFileId, folders.retired);
+  if (!await documents.retire({ organizationId, documentId, retiredBy: userId, reason: parsed.data.reason })) throw new IusiaError("CONFLICT", "El documento ya fue retirado");
+  await audit.record({ organizationId, matterId, actorUserId: userId, action: "document.retired", resourceType: "document", resourceId: documentId, outcome: "SUCCESS", detail: { reason: parsed.data.reason ?? null, versions: versions.length } });
+  return c.json({ ok: true });
 });
 
 const GenerateInput = z.object({
@@ -669,6 +691,7 @@ documentWorkspaceRoutes.post("/admin/templates", async (c) => {
   const normalizedTemplate = await normalizeToText(bytes, DOCX_MIME, file.name, c.env.AI);
   const detectedVariables = discoverTemplateVariables(normalizedTemplate);
   const variables = detectedVariables.length > 0 ? detectedVariables : variablesParsed.data;
+  if (variables.length === 0) throw new IusiaError("VALIDATION_FAILED", "La plantilla debe contener campos renderizables.");
   const workspace = DriveWorkspaceService.forEnv(c.env);
   const { templates: templatesFolder } = await workspace.ensureFirmStructure(userId, organizationId);
   const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
@@ -725,7 +748,6 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
   const repo = new TemplateRepository(createDb(c.env.DB));
   await repo.setSystemStatus(SEED_TEMPLATE_IDS.opinion, "RETIRED");
   const existing = await repo.listSystemHistory();
-  const existingChecksums = new Set(existing.map((row) => row.checksum).filter(Boolean));
   const workspace = DriveWorkspaceService.forEnv(c.env);
   const { templates: templatesFolder } = await workspace.ensureFirmStructure(userId, organizationId);
   const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
@@ -735,10 +757,6 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
   const skipped: Array<{ name: string; checksum: string; reason: string }> = [];
 
   for (const item of manifest.data.templates) {
-    if (existingChecksums.has(item.sha256)) {
-      skipped.push({ name: item.name, checksum: item.sha256, reason: "already_registered" });
-      continue;
-    }
     const object = await c.env.ARTIFACTS.get(`${OFFICIAL_TEMPLATE_PREFIX}${item.file}`);
     if (!object) throw new IusiaError("NOT_FOUND", `Plantilla oficial no encontrada: ${item.file}`);
     const bytes = await object.arrayBuffer();
@@ -748,6 +766,15 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
     }
     const normalizedTemplate = await normalizeToText(bytes, DOCX_MIME, item.file, c.env.AI);
     const variables = discoverTemplateVariables(normalizedTemplate);
+    if (variables.length === 0) {
+      skipped.push({ name: item.name, checksum: item.sha256, reason: "not_renderable" });
+      continue;
+    }
+    const matching = existing.find((row) => row.checksum === item.sha256 && row.documentType === item.document_type.toUpperCase());
+    if (matching && JSON.stringify(matching.variables ?? []) === JSON.stringify(variables)) {
+      skipped.push({ name: item.name, checksum: item.sha256, reason: "already_registered" });
+      continue;
+    }
     const filename = item.file.split("/").pop() ?? `${item.name}.docx`;
     const original = await drive.uploadFile({
       name: filename,
@@ -761,6 +788,7 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
       content: bytes,
     });
     const created = await repo.createSystemVersion({
+      familyId: matching?.familyId,
       name: item.name,
       documentType: item.document_type.toUpperCase(),
       category: item.category,
@@ -774,7 +802,6 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
       createdBy: userId,
       activate: true,
     });
-    existingChecksums.add(actualChecksum);
     imported.push({ id: created.id, name: item.name, version: created.version, checksum: actualChecksum });
   }
 

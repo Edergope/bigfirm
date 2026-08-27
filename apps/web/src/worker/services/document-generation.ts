@@ -124,9 +124,9 @@ export class DocumentGenerationService {
       input.documentType,
     );
     if (!template) throw new DocumentGenerationError("TEMPLATE_NOT_FOUND");
-    if (template.engine !== "GOOGLE_DOCS" || !template.sourceRef) {
+    if (template.engine !== "GOOGLE_DOCS" || !template.sourceRef || (template.variables ?? []).length === 0) {
       // El MVP renderiza con Google Docs; una plantilla sin doc fuente no es usable.
-      throw new DocumentGenerationError("TEMPLATE_NOT_FOUND");
+      throw new DocumentGenerationError("TEMPLATE_NOT_RENDERABLE");
     }
 
     // Valida y resuelve las variables requeridas contra los valores del agente.
@@ -194,6 +194,8 @@ export class DocumentGenerationService {
         }),
       );
       await retryTransientDrive(() => drive.docsReplaceText(nativeId, replacements));
+      const renderedText = await retryTransientDrive(() => drive.docsText(nativeId));
+      assertRenderedTemplate(renderedText, variables);
       // 3. Exportar y persistir DOCX + PDF (Google hace el render).
       // Exportar es read-only e idempotente. Los uploads NO se reintentan aquí:
       // hacerlo a ciegas podría crear dos entregables en Drive.
@@ -245,5 +247,14 @@ export class DocumentGenerationService {
       template_version: template.version,
       draft: draftProvenance,
     };
+  }
+}
+
+/** Falla cerrada: nunca se exporta un borrador con tokens o instrucciones editoriales. */
+export function assertRenderedTemplate(text: string, variables: readonly GenerationTemplateVariable[]): void {
+  const residualKnown = variables.map((v) => v.placeholder ?? `{{${v.key}}}`).filter((token) => text.includes(token));
+  const residualGeneric = text.match(/\{\{[^}]+\}\}|\$\{[^}]+\}|\[[^\]\r\n]{2,240}\]/g) ?? [];
+  if (residualKnown.length || residualGeneric.length) {
+    throw new DocumentGenerationError("TEMPLATE_VALIDATION_FAILED", "La plantilla conserva campos o instrucciones sin completar.");
   }
 }

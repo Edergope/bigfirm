@@ -103,6 +103,7 @@ export function buildMetadataFilter(scope: RetrievalScope): MetadataFilter {
   return {
     organization_id: scope.organization_id,
     matter_id: { $in: [...scope.authorized_matter_ids] },
+    is_active: "true",
   };
 }
 

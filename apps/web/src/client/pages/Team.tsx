@@ -501,7 +501,7 @@ function MatterAccess() {
   );
 }
 
-function MatterTeamDrawer({ matterId, onClose }: { matterId: string; onClose: () => void }) {
+export function MatterTeamDrawer({ matterId, onClose }: { matterId: string; onClose: () => void }) {
   const queryClient = useQueryClient();
   const team = useQuery({ queryKey: ["matter-team", matterId], queryFn: () => api.matterTeam(matterId) });
   const [leadId, setLeadId] = useState("");
@@ -519,7 +519,7 @@ function MatterTeamDrawer({ matterId, onClose }: { matterId: string; onClose: ()
   return <Drawer open onClose={onClose} title="Equipo del expediente" width={560}>
     {team.isLoading ? <Skeleton className="h-48" /> : <div className="flex flex-col gap-5">
       <section><h3 className="text-[13px] font-semibold text-iusia-navy">Abogado líder</h3><p className="mt-1 text-[12px] text-iusia-mist-text">Sólo una persona lidera el expediente. El líder anterior queda como colaborador.</p>
-        <div className="mt-3 flex gap-2"><Select value={leadId} onChange={(e) => setLeadId(e.target.value)} className="min-w-0 flex-1"><option value="">Seleccionar abogado…</option>{leadCandidates.map((p) => <option key={p.userId} value={p.userId}>{p.name} · {p.email}</option>)}</Select><Button size="sm" disabled={!leadId || lead.isPending} onClick={() => lead.mutate()}>Asignar líder</Button></div>
+        <div className="mt-3 flex gap-2"><Select value={leadId} onChange={(e) => setLeadId(e.target.value)} className="min-w-0 flex-1"><option value="">Seleccionar abogado…</option>{leadCandidates.map((p) => <option key={p.userId} value={p.userId}>{p.name} · {p.email}</option>)}</Select><ConfirmAction label="Asignar líder" confirmLabel="Sí, reemplazar líder" pending={lead.isPending} disabled={!leadId} onConfirm={() => lead.mutate()} /></div>
       </section>
       <section><h3 className="text-[13px] font-semibold text-iusia-navy">Agregar miembro</h3><div className="mt-3 grid gap-2 sm:grid-cols-[1fr_150px_auto]"><Select value={memberId} onChange={(e) => setMemberId(e.target.value)}><option value="">Seleccionar persona…</option>{people.map((p) => <option key={p.userId} value={p.userId}>{p.name}</option>)}</Select><Select value={memberRole} onChange={(e) => setMemberRole(e.target.value)}>{MATTER_ROLES.filter((r) => r !== "OWNER").map((r) => <option key={r} value={r}>{matterRoleTerm(r).label}</option>)}</Select><Button size="sm" disabled={!memberId || add.isPending} onClick={() => add.mutate()}>Agregar</Button></div></section>
       <section><h3 className="text-[13px] font-semibold text-iusia-navy">Miembros con acceso</h3><ul className="mt-2 divide-y divide-iusia-line rounded-[10px] border border-iusia-line">{(team.data?.members ?? []).map((p) => <li key={p.userId} className="flex items-center gap-3 px-3 py-2.5"><span className="min-w-0 flex-1"><span className="block truncate text-[13px] text-iusia-carbon">{p.name}</span><span className="block text-[11.5px] text-iusia-mist-text">{matterRoleTerm(p.role).label}</span></span>{p.role === "OWNER" ? <span className="text-[11.5px] text-iusia-mist-text">Líder</span> : <ConfirmAction label="Retirar" confirmLabel="Sí, retirar" pending={revoke.isPending} onConfirm={() => revoke.mutate(p.userId)} />}</li>)}</ul></section>

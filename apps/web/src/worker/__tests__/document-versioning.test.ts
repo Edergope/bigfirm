@@ -113,6 +113,25 @@ describe("versionamiento documental", () => {
     expect((await t.documents.findById(organizationId, documentId))?.ingestionStatus).toBe("ERROR");
     expect((await t.documents.findVersion(organizationId, documentId))?.ingestionStatus).toBe("ERROR");
   });
+
+  it("retira de la lista vigente sin borrar versiones ni permitir una nueva versión", async () => {
+    const t = createTestDb();
+    const { organizationId, directorUserId } = await seedFirm(t, {
+      orgName: "Firma Retiro", directorEmail: "retiro@iusia.test",
+    });
+    const matterId = await t.matters.create(organizationId, directorUserId, matterInput, "RET-001");
+    const documentId = await t.documents.link({
+      organizationId, matterId, driveFileId: "drive-retired", name: "Archivo.pdf",
+      mimeType: "application/pdf", linkedBy: directorUserId,
+    });
+    expect(await t.documents.retire({ organizationId, documentId, retiredBy: directorUserId, reason: "Duplicado" })).not.toBeNull();
+    expect(await t.documents.listForMatter(organizationId, matterId)).toHaveLength(0);
+    expect(await t.documents.listVersions(organizationId, documentId)).toHaveLength(1);
+    await expect(t.documents.addVersion({
+      organizationId, matterId, documentId, driveFileId: "drive-new", filename: "Nueva.pdf",
+      mimeType: "application/pdf", createdBy: directorUserId, changeType: "Otro", changeSummary: "No debe crear",
+    })).resolves.toBeNull();
+  });
 });
 
 describe("Template Bank versionado", () => {

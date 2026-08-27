@@ -99,7 +99,7 @@ export class DriveWorkspaceService {
     userId: string,
     organizationId: string,
     matter: { id: string; reference: string; title: string },
-  ): Promise<{ matter: string; uploaded: string; generated: string }> {
+  ): Promise<{ matter: string; uploaded: string; generated: string; retired: string }> {
     const drive = await this.adapterFor(userId);
     const { matters } = await this.ensureFirmStructure(userId, organizationId);
     const folderName = matterFolderName(matter.reference, matter.title);
@@ -127,6 +127,9 @@ export class DriveWorkspaceService {
       matterFolder,
       matter.id,
     );
-    return { matter: matterFolder, uploaded, generated };
+    const retired = await this.ensure(
+      drive, organizationId, "RETIRED", DRIVE_FOLDER_NAMES.retired, matterFolder, matter.id,
+    );
+    return { matter: matterFolder, uploaded, generated, retired };
   }
 }

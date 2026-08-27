@@ -19,6 +19,7 @@ export const DRIVE_FOLDER_NAMES = {
   templates: "Plantillas",
   uploaded: "01 Documentos aportados",
   generated: "02 Documentos generados por IUSIA",
+  retired: "99 Documentos retirados",
 } as const;
 
 /** Rol de una carpeta gestionada por IUSIA. Su combinación identifica la carpeta. */
@@ -30,6 +31,7 @@ export const DRIVE_FOLDER_KINDS = [
   "MATTER", // .../ [Referencia] - [Asunto]
   "UPLOADED", // .../ 01 Documentos aportados
   "GENERATED", // .../ 02 Documentos generados por IUSIA
+  "RETIRED", // .../ 99 Documentos retirados
 ] as const;
 export const DriveFolderKind = z.enum(DRIVE_FOLDER_KINDS);
 export type DriveFolderKind = z.infer<typeof DriveFolderKind>;
@@ -85,6 +87,7 @@ export const DOCUMENT_ERROR_CODES = [
   "INGESTION_FAILED",
   "INDEXING_FAILED",
   "TEMPLATE_NOT_FOUND",
+  "TEMPLATE_NOT_RENDERABLE",
   "TEMPLATE_VALIDATION_FAILED",
   "DOCUMENT_GENERATION_FAILED",
   "DRIVE_PERSIST_FAILED",
@@ -99,6 +102,7 @@ export const DOCUMENT_ERROR_MESSAGES: Record<DocumentErrorCode, string> = {
   INGESTION_FAILED: "El documento se subió pero no pudo procesarse. Lo reintentaremos.",
   INDEXING_FAILED: "El documento se procesó pero aún no está disponible para análisis.",
   TEMPLATE_NOT_FOUND: "No hay una plantilla oficial para este tipo de documento.",
+  TEMPLATE_NOT_RENDERABLE: "La plantilla oficial no tiene campos renderizables y no puede publicarse.",
   TEMPLATE_VALIDATION_FAILED: "Faltan datos necesarios para completar la plantilla.",
   DOCUMENT_GENERATION_FAILED: "No fue posible generar el documento. Inténtalo de nuevo.",
   DRIVE_PERSIST_FAILED: "El documento se generó pero no pudo guardarse en Drive.",

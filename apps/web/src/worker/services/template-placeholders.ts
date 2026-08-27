@@ -9,7 +9,9 @@ export function discoverTemplateVariables(markdown: string): Array<{
   required: boolean;
   placeholder: string;
 }> {
-  const tokens = markdown.match(/\{\{[a-z][a-z0-9_]*\}\}|\\?\[[A-ZÁÉÍÓÚÜÑ0-9][A-ZÁÉÍÓÚÜÑ0-9 _/-]{1,80}\\?\]/g) ?? [];
+  // Incluye instrucciones editoriales entre corchetes. También son campos que deben
+  // desaparecer antes de publicar; tratarlas como texto fijo dejaba drafts visibles.
+  const tokens = markdown.match(/\{\{[a-z][a-z0-9_]*\}\}|\\?\[[^\]\r\n]{2,240}\\?\]/g) ?? [];
   const seenTokens = new Set<string>();
   const usedKeys = new Set<string>();
   return tokens.flatMap((token) => {

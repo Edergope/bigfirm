@@ -79,7 +79,7 @@ describe("buildMetadataFilter (pre-retrieval)", () => {
       organization_id: ORG_A,
       authorized_matter_ids: [MATTER_A],
     });
-    expect(filter).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] } });
+    expect(filter).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] }, is_active: "true" });
   });
 });
 
@@ -102,7 +102,7 @@ describe("request en formato actual de AI Search", () => {
     // El filtro ACL viaja ANTES del retrieval.
     expect(arg.ai_search_options.retrieval.filters).toEqual({
       organization_id: ORG_A,
-      matter_id: { $in: [MATTER_A] },
+      matter_id: { $in: [MATTER_A] }, is_active: "true",
     });
   });
 });
@@ -116,7 +116,7 @@ describe("refiltro post-retrieval por metadata (aunque el índice fugue)", () =>
       query: "contrato confidencial",
     });
     // El pre-filtro viajó al índice.
-    expect(index.lastFilters).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] } });
+    expect(index.lastFilters).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] }, is_active: "true" });
     expect(results).toHaveLength(1);
     expect(results[0]?.document_id).toBe("doc_secretoA");
     expect(results[0]?.matter_id).toBe(MATTER_A);

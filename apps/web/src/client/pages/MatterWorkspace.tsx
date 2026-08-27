@@ -47,6 +47,7 @@ import {
 } from "../api.js";
 import { authClient } from "../auth-client.js";
 import { MatterOrchestration } from "./MatterOrchestration.js";
+import { MatterTeamDrawer } from "./Team.js";
 
 const TABS = [
   { id: "resumen", label: "Resumen" },
@@ -296,6 +297,7 @@ export function MatterWorkspace() {
 }
 
 function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
+  const [teamManagerOpen, setTeamManagerOpen] = useState(false);
   const brief = useQuery({
     queryKey: ["brief", matterId],
     queryFn: () => api.caseBrief(matterId),
@@ -403,8 +405,12 @@ function Resumen({ matterId, data }: { matterId: string; data: MatterDetail }) {
               ))}
             </ul>
           )}
+          <div className="border-t border-iusia-line/70 px-5 py-3">
+            <Button size="sm" variant="secondary" onClick={() => setTeamManagerOpen(true)}>Gestionar equipo</Button>
+          </div>
         </Module>
       </div>
+      {teamManagerOpen ? <MatterTeamDrawer matterId={matterId} onClose={() => setTeamManagerOpen(false)} /> : null}
     </div>
   );
 }

@@ -1,23 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { discoverTemplateVariables } from "./template-placeholders.js";
+import { assertRenderedTemplate } from "./document-generation.js";
 
 describe("campos de plantillas oficiales", () => {
-  it("preserva el token literal y deriva una clave lógica estable", () => {
-    expect(
-      discoverTemplateVariables("[CLIENTE]\n\\[PREGUNTA JURÍDICA\\]\n[CLIENTE]\n{{firmante}}"),
-    ).toEqual([
-      { key: "cliente", label: "CLIENTE", required: true, placeholder: "[CLIENTE]" },
-      {
-        key: "pregunta_juridica",
-        label: "PREGUNTA JURÍDICA",
-        required: true,
-        placeholder: "[PREGUNTA JURÍDICA]",
-      },
-      { key: "firmante", label: "firmante", required: true, placeholder: "{{firmante}}" },
+  it("detecta tanto campos como instrucciones editoriales entre corchetes", () => {
+    const fields = discoverTemplateVariables("[CLIENTE] [Formule el problema jurídico principal.] {{asunto}}");
+    expect(fields.map((field) => field.placeholder)).toEqual([
+      "[CLIENTE]", "[Formule el problema jurídico principal.]", "{{asunto}}",
     ]);
   });
 
-  it("ignora texto entre corchetes que no es un campo editorial", () => {
-    expect(discoverTemplateVariables("[texto libre]\n[CLIENTE]")).toHaveLength(1);
+  it("bloquea la exportación si queda una instrucción o token", () => {
+    expect(() => assertRenderedTemplate("Resultado [Describa el hecho]", [])).toThrow("campos o instrucciones");
+    expect(() => assertRenderedTemplate("Resultado final", [])).not.toThrow();
   });
 });

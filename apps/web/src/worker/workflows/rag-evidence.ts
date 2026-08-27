@@ -32,7 +32,7 @@ export async function collectMatterEvidence(args: {
     max_results: args.maxResults ?? 5,
   });
 
-  return chunks.map((chunk, i) => ({
+  return chunks.filter((chunk) => args.documentNames.has(chunk.document_id)).map((chunk, i) => ({
     // Conserva el document_id: trazabilidad chunk → documento → matter → output.
     ref_id: `${chunk.document_id}#${i + 1}`,
     document_name: args.documentNames.get(chunk.document_id) ?? chunk.document_id,

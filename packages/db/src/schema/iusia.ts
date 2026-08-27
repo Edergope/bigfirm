@@ -112,6 +112,10 @@ export const documents = sqliteTable(
     /** Espejo normalizado en R2 para indexación; null si aún no se ha generado. */
     r2MirrorKey: text("r2_mirror_key"),
     indexedAt: text("indexed_at"),
+    /** Retiro lógico: conserva Drive/R2 e historial, pero lo excluye del workspace y RAG. */
+    retiredAt: text("retired_at"),
+    retiredBy: text("retired_by").references(() => user.id),
+    retiredReason: text("retired_reason"),
     /** Versión vigente del documento lógico. El binario permanece en Drive. */
     currentVersion: integer("current_version").notNull().default(1),
     sizeBytes: integer("size_bytes"),
