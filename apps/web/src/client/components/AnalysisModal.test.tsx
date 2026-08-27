@@ -97,6 +97,22 @@ describe("AI_MODAL_CLOSE_DOES_NOT_CANCEL", () => {
     expect(await screen.findByText("Analizando los hechos del caso")).toBeDefined();
     expect(screen.queryByText("Analizando documentos y evidencia")).toBeNull();
   });
+
+  it("si el expediente tiene cero documentos, el primer render del modal no espera al ledger para ocultar la fase documental", async () => {
+    render(
+      wrap(
+        <AnalysisModal
+          rootExecutionId="exe_root"
+          matterId="mtr_1"
+          documentCount={0}
+          open
+          onClose={vi.fn()}
+        />,
+      ),
+    );
+    expect(await screen.findByText("Analizando los hechos del caso")).toBeDefined();
+    expect(screen.queryByText("Analizando documentos y evidencia")).toBeNull();
+  });
 });
 
 describe("AI_CANCEL_ACTION_REQUESTS_CANCEL", () => {

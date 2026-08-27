@@ -49,11 +49,13 @@ const AGENT_STAGE_LABEL: Record<string, string> = {
 export function AnalysisModal({
   rootExecutionId,
   matterId,
+  documentCount,
   open,
   onClose,
 }: {
   rootExecutionId: string;
   matterId: string;
+  documentCount?: number;
   open: boolean;
   onClose: () => void;
 }) {
@@ -92,8 +94,9 @@ export function AnalysisModal({
       events: events.data.events,
       executions: events.data.executions,
       rootExecutionId,
+      documentCount,
     });
-  }, [events.data, rootStatus, rootExecutionId]);
+  }, [events.data, rootStatus, rootExecutionId, documentCount]);
 
   const network = useMemo(() => {
     if (!events.data) return { nodes: [], links: [], integrating: false };

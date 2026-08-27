@@ -133,7 +133,12 @@ export function deriveProgressStages(args: {
     (e) => e.type === "agent.tool.called" && e.detail?.tool === "ai_search.retrieval",
   );
   const eventDocumentCount = events
-    .map((e) => e.detail?.document_count)
+    .map((e) => {
+      const count = e.detail?.document_count;
+      if (typeof count === "number") return count;
+      if (typeof count === "string" && /^\d+$/.test(count)) return Number(count);
+      return undefined;
+    })
     .find((count): count is number => typeof count === "number");
   const hasNoDocuments = (documentCount ?? eventDocumentCount) === 0;
   const rootTerminal = isTerminalStatus(rootStatus);

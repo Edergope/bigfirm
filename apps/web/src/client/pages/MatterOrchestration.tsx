@@ -178,6 +178,7 @@ export function MatterOrchestration({
         <AnalysisModal
           rootExecutionId={liveRoot}
           matterId={matterId}
+          documentCount={data.documents.length}
           open
           onClose={() => setLiveRoot(null)}
         />

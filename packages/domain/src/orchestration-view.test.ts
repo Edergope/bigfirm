@@ -136,6 +136,16 @@ describe("deriveProgressStages", () => {
     });
     expect(stages.map((s) => s.key)).toEqual(["received", "facts", "done"]);
   });
+
+  it("[H4] acepta document_count serializado como string numérico desde el ledger", () => {
+    const stages = deriveProgressStages({
+      rootStatus: "RUNNING",
+      events: [{ type: "agent.milestone", detail: { milestone: "PLAN_START", document_count: "0" } }],
+      executions: [],
+      rootExecutionId: ROOT,
+    });
+    expect(stages.map((s) => s.key)).toEqual(["received", "facts", "done"]);
+  });
 });
 
 describe("evidencia y polling", () => {
