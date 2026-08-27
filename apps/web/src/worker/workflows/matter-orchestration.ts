@@ -466,7 +466,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
 
     // ── FASE 00 PLAN ──
     const orchestratorDef = getAgentDefinition(ORCHESTRATOR_AGENT_ID);
-    await timing(TIMING_MILESTONES.PLAN_START);
+    await timing(TIMING_MILESTONES.PLAN_START, { document_count: ctx.document_count });
     const planExecutionId = await step.do("dyn-create-plan-exec", async () =>
       executions.create({
         organizationId: params.organization_id,

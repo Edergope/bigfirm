@@ -126,6 +126,16 @@ describe("deriveProgressStages", () => {
     expect(stages.map((s) => s.key)).toEqual(["received", "facts", "done"]);
     expect(stages.map((s) => s.key)).not.toContain("evidence");
   });
+
+  it("[H3] puede inferir cero documentos desde eventos del ledger", () => {
+    const stages = deriveProgressStages({
+      rootStatus: "RUNNING",
+      events: [{ type: "agent.milestone", detail: { milestone: "PLAN_START", document_count: 0 } }],
+      executions: [],
+      rootExecutionId: ROOT,
+    });
+    expect(stages.map((s) => s.key)).toEqual(["received", "facts", "done"]);
+  });
 });
 
 describe("evidencia y polling", () => {

@@ -30,6 +30,7 @@ import { api } from "../api.js";
 
 const STAGE_LABEL: Record<string, string> = {
   received: "Entendiendo el encargo",
+  facts: "Analizando los hechos del caso",
   evidence: "Analizando documentos y evidencia",
   done: "Análisis completado",
   stopped: "Análisis detenido",

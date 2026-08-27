@@ -85,6 +85,18 @@ describe("AI_MODAL_CLOSE_DOES_NOT_CANCEL", () => {
     );
     expect(await screen.findByRole("button", { name: "Seguir trabajando" })).toBeDefined();
   });
+
+  it("si el ledger indica cero documentos, no anuncia análisis documental", async () => {
+    vi.mocked(api.executionEvents).mockResolvedValue({
+      ...RUNNING_EVENTS,
+      events: [{ type: "agent.milestone", detail: { milestone: "PLAN_START", document_count: 0 } }],
+    } as never);
+    render(
+      wrap(<AnalysisModal rootExecutionId="exe_root" matterId="mtr_1" open onClose={vi.fn()} />),
+    );
+    expect(await screen.findByText("Analizando los hechos del caso")).toBeDefined();
+    expect(screen.queryByText("Analizando documentos y evidencia")).toBeNull();
+  });
 });
 
 describe("AI_CANCEL_ACTION_REQUESTS_CANCEL", () => {
