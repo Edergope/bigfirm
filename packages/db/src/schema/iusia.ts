@@ -6,7 +6,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { organization, user } from "./auth.js";
+import { account, organization, user } from "./auth.js";
 
 /**
  * Esquema de dominio de IUSIA.
@@ -447,6 +447,40 @@ export const notifications = sqliteTable(
 );
 
 // ──────────────────────── Workspace documental (Drive) ────────────────────────
+
+/**
+ * Credencial de almacenamiento de la firma. Sólo referencia la cuenta cifrada de
+ * Better Auth: IUSIA nunca copia ni expone access/refresh tokens.
+ */
+export const organizationStorageConnections = sqliteTable(
+  "organization_storage_connections",
+  {
+    id: text("id").primaryKey(),
+    organizationId: orgId(),
+    provider: text("provider").notNull().default("GOOGLE_DRIVE"),
+    accountId: text("account_id").notNull().references(() => account.id),
+    storageOwnerUserId: text("storage_owner_user_id").notNull().references(() => user.id),
+    status: text("status").notNull().default("ACTIVE"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("org_storage_connection_uq").on(t.organizationId, t.provider)],
+);
+
+/** Conexión técnica global del Template Bank; separada del storage de cada Matter. */
+export const platformStorageConnections = sqliteTable(
+  "platform_storage_connections",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull().default("GOOGLE_DRIVE"),
+    accountId: text("account_id").notNull().references(() => account.id),
+    storageOwnerUserId: text("storage_owner_user_id").notNull().references(() => user.id),
+    status: text("status").notNull().default("ACTIVE"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("platform_storage_provider_uq").on(t.provider)],
+);
 
 /**
  * Carpetas de Drive gestionadas por IUSIA, con su id persistido para idempotencia.

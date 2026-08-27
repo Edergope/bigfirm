@@ -45,7 +45,6 @@ import {
   type MatterDetail,
   type TaskRow as TaskRow_,
 } from "../api.js";
-import { authClient } from "../auth-client.js";
 import { MatterOrchestration } from "./MatterOrchestration.js";
 import { MatterTeamDrawer } from "./Team.js";
 
@@ -424,31 +423,14 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * Scopes de Drive, separados del inicio de sesión. `drive.readonly` conserva la
- * lectura ya validada; `drive.file` habilita la escritura acotada (sólo lo que
- * IUSIA crea) del workspace documental.
- */
-const DRIVE_SCOPES = [
-  "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/drive.file",
-];
-
-/**
- * Workspace documental del expediente: las dos carpetas reales de Drive —lo que
- * aporta el abogado y lo que genera IUSIA—, con subida y generación. Los archivos
- * viven en Drive; IUSIA es la capa jurídica y enlaza a cada uno.
- */
+/** Workspace documental operado por IUSIA; el proveedor físico nunca se expone. */
 function Documentos({ data }: { data: MatterDetail }) {
   const matterId = data.matter.id;
   const queryClient = useQueryClient();
-  const driveStatus = useQuery({ queryKey: ["drive-status"], queryFn: api.driveStatus });
   const workspace = useQuery({
     queryKey: ["workspace", matterId],
     queryFn: () => api.matterWorkspace(matterId),
   });
-  const canWrite = driveStatus.data?.write === true;
-  const connected = driveStatus.data?.connected === true;
 
   const fileInput = useRef<HTMLInputElement>(null);
   const [generating, setGenerating] = useState(false);
@@ -461,34 +443,8 @@ function Documentos({ data }: { data: MatterDetail }) {
     },
   });
 
-  async function connectDrive() {
-    await authClient.linkSocial({
-      provider: "google",
-      scopes: DRIVE_SCOPES,
-      callbackURL: window.location.pathname,
-      additionalParams: { prompt: "consent" },
-    });
-  }
-
   const uploaded = workspace.data?.uploaded ?? [];
   const generated = workspace.data?.generated ?? [];
-
-  if (driveStatus.isSuccess && (!connected || !canWrite)) {
-    return (
-      <Module title="Documentos del expediente" eyebrow="Repositorio en Drive">
-        <p className="text-[13.5px] text-iusia-carbon">
-          {!connected
-            ? "Autoriza Google Drive para guardar y leer los documentos de este expediente."
-            : "IUSIA puede leer pero aún no crear ni guardar documentos. Reconecta para habilitar la escritura."}
-        </p>
-        <div className="mt-3">
-          <Button size="sm" onClick={() => void connectDrive()}>
-            {!connected ? "Autorizar acceso a Drive" : "Reconectar Drive"}
-          </Button>
-        </div>
-      </Module>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4">

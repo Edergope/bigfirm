@@ -48,7 +48,7 @@ describe("generatedFileName", () => {
 describe("documentErrorMessage", () => {
   it("traduce los códigos conocidos, nunca muestra el enum", () => {
     expect(documentErrorMessage("TEMPLATE_NOT_FOUND")).not.toContain("TEMPLATE_NOT_FOUND");
-    expect(documentErrorMessage("DRIVE_PERMISSION_REQUIRED")).toContain("permiso");
+    expect(documentErrorMessage("DRIVE_PERMISSION_REQUIRED")).toContain("almacenamiento documental");
   });
   it("tiene un mensaje de reserva para códigos desconocidos", () => {
     expect(documentErrorMessage("ZZZ")).not.toContain("ZZZ");

@@ -44,9 +44,9 @@ describe("botón Continuar con Google (SignIn)", () => {
 });
 
 describe("endpoint GET /integrations/drive/status", () => {
-  it("resuelve credenciales server-side (DriveCredentialResolver)", () => {
-    expect(DOCS_ROUTE).toMatch(/DriveCredentialResolver\.forEnv/);
-    expect(DOCS_ROUTE).toMatch(/resolveAdapter\(userId\)/);
+  it("resuelve el almacenamiento server-side por organización, no por abogado", () => {
+    expect(DOCS_ROUTE).toMatch(/OrganizationStorageResolver\.forEnv/);
+    expect(DOCS_ROUTE).toMatch(/resolveAdapter\(organizationId/);
   });
 
   it("nunca devuelve tokens: sólo connected/reason/self_test", () => {

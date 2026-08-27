@@ -6,7 +6,7 @@ import {
 } from "@iusia/domain";
 import { DriveFolderRepository, createDb, schema } from "@iusia/db";
 import type { Env } from "../env.js";
-import { DriveCredentialResolver } from "./drive-credentials.js";
+import { OrganizationStorageResolver } from "./drive-credentials.js";
 import type { GoogleDriveAdapter } from "../integrations/google-drive.js";
 
 /**
@@ -24,20 +24,20 @@ export class DriveWorkspaceService {
   constructor(
     private readonly env: Env,
     private readonly folders: DriveFolderRepository,
-    private readonly driveCredentials: DriveCredentialResolver,
+    private readonly storage: OrganizationStorageResolver,
   ) {}
 
   static forEnv(env: Env): DriveWorkspaceService {
     return new DriveWorkspaceService(
       env,
       new DriveFolderRepository(createDb(env.DB)),
-      DriveCredentialResolver.forEnv(env),
+      OrganizationStorageResolver.forEnv(env),
     );
   }
 
-  /** Adapter con escritura (drive.file) para el usuario que opera. */
-  private adapterFor(userId: string): Promise<GoogleDriveAdapter> {
-    return this.driveCredentials.resolveAdapter(userId, { requireWrite: true });
+  /** El actor autoriza la acción; la firma aporta la credencial física. */
+  private adapterFor(organizationId: string): Promise<GoogleDriveAdapter> {
+    return this.storage.resolveAdapter(organizationId, { requireWrite: true });
   }
 
   private async firmName(organizationId: string): Promise<string> {
@@ -70,7 +70,7 @@ export class DriveWorkspaceService {
     userId: string,
     organizationId: string,
   ): Promise<{ root: string; firm: string; matters: string; templates: string }> {
-    const drive = await this.adapterFor(userId);
+    const drive = await this.adapterFor(organizationId);
     const firm = await this.firmName(organizationId);
     const root = await this.ensure(drive, organizationId, "ROOT", DRIVE_FOLDER_NAMES.root, undefined);
     const firmFolder = await this.ensure(drive, organizationId, "FIRM", firm, root);
@@ -100,7 +100,7 @@ export class DriveWorkspaceService {
     organizationId: string,
     matter: { id: string; reference: string; title: string },
   ): Promise<{ matter: string; uploaded: string; generated: string; retired: string }> {
-    const drive = await this.adapterFor(userId);
+    const drive = await this.adapterFor(organizationId);
     const { matters } = await this.ensureFirmStructure(userId, organizationId);
     const folderName = matterFolderName(matter.reference, matter.title);
     const matterFolder = await this.ensure(

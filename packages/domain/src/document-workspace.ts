@@ -95,9 +95,9 @@ export const DOCUMENT_ERROR_CODES = [
 export type DocumentErrorCode = (typeof DOCUMENT_ERROR_CODES)[number];
 
 export const DOCUMENT_ERROR_MESSAGES: Record<DocumentErrorCode, string> = {
-  DRIVE_NOT_CONNECTED: "Google Drive no está conectado. Autorízalo para trabajar con documentos.",
+  DRIVE_NOT_CONNECTED: "No fue posible acceder al almacenamiento documental. Intenta nuevamente o contacta a Dirección.",
   DRIVE_PERMISSION_REQUIRED:
-    "IUSIA aún no tiene permiso para crear o guardar documentos en tu Drive. Vuelve a autorizar el acceso.",
+    "No fue posible acceder al almacenamiento documental. Intenta nuevamente o contacta a Dirección.",
   UPLOAD_FAILED: "No fue posible subir el documento. Inténtalo de nuevo.",
   INGESTION_FAILED: "El documento se subió pero no pudo procesarse. Lo reintentaremos.",
   INDEXING_FAILED: "El documento se procesó pero aún no está disponible para análisis.",

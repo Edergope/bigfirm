@@ -7,7 +7,7 @@ import {
 } from "@iusia/domain";
 import type { AppBindings } from "../context.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
-import { DriveConnectionError, DriveCredentialResolver } from "../services/drive-credentials.js";
+import { DriveConnectionError, OrganizationStorageResolver } from "../services/drive-credentials.js";
 
 export const documentsRoutes = new Hono<AppBindings>();
 
@@ -24,12 +24,12 @@ const DRIVE_SELF_TEST_FIXTURE_ID = "1hbaKh6KwQGeoNx2It_ED1dyuBxL935NB";
  * para probar que el token funciona contra la API de Drive. No descarga contenido.
  */
 documentsRoutes.get("/integrations/drive/status", async (c) => {
-  const { userId } = c.get("session");
-  const resolver = DriveCredentialResolver.forEnv(c.env);
+  const { organizationId } = c.get("session");
+  const resolver = OrganizationStorageResolver.forEnv(c.env);
 
   let adapter;
   try {
-    adapter = await resolver.resolveAdapter(userId);
+    adapter = await resolver.resolveAdapter(organizationId, { requireWrite: true });
   } catch (error) {
     if (error instanceof DriveConnectionError) {
       return c.json({ connected: false, reason: error.code });
@@ -39,13 +39,11 @@ documentsRoutes.get("/integrations/drive/status", async (c) => {
 
   // Capacidades concedidas (lectura / escritura), para que la UI sepa si falta
   // reconectar para habilitar la escritura (drive.file).
-  const caps = await resolver.describeConnection(userId);
-
   const body: {
     connected: true;
     write: boolean;
     self_test?: { accessible: boolean; mime: string | null };
-  } = { connected: true, write: caps.write };
+  } = { connected: true, write: true };
 
   if (c.req.query("self_test") === "1") {
     try {
@@ -70,12 +68,12 @@ documentsRoutes.get("/integrations/status", (c) => {
   const driveProvisioned = Boolean(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET);
   const retrieval = new AiSearchRetrievalProvider(c.env.AI_SEARCH ?? null);
   return c.json({
-    storage: { id: "google-drive", status: driveProvisioned ? "CONNECTED" : "NOT_CONFIGURED" },
+    storage: { id: "document-storage", status: driveProvisioned ? "CONNECTED" : "NOT_CONFIGURED" },
     retrieval: { id: retrieval.id, status: retrieval.status() },
     notes: {
       storage: driveProvisioned
-        ? "Repositorio documental habilitado para la firma."
-        : "Pendiente de configurar el acceso a Google en la plataforma.",
+        ? "Almacenamiento documental habilitado para la firma."
+        : "Pendiente de configurar el almacenamiento documental en la plataforma.",
       retrieval: "Indexación para búsqueda de IUSIA.",
     },
   });
@@ -95,7 +93,7 @@ documentsRoutes.post("/matters/:matterId/documents/:documentId/reindex", async (
     throw new IusiaError("NOT_FOUND", "Documento no encontrado");
   }
   if (!doc.driveFileId) {
-    throw new IusiaError("VALIDATION_FAILED", "El documento no tiene origen en Drive");
+    throw new IusiaError("VALIDATION_FAILED", "El documento no tiene origen de almacenamiento");
   }
 
   await c.env.DOCUMENT_INGESTION.send({

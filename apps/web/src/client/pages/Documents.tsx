@@ -70,7 +70,7 @@ export function Documents() {
   return (
     <div className="flex min-h-0 flex-col pb-2">
       <ScreenTitle eyebrow="Expediente digital" title="Documentos" description="Consulta, previsualiza y versiona los archivos de los expedientes a los que tienes acceso." />
-      <div className="grid min-h-[calc(100vh-185px)] overflow-hidden rounded-[var(--radius-lg)] bg-iusia-paper shadow-[var(--shadow-surface)] lg:grid-cols-[190px_minmax(250px,0.48fr)_minmax(0,1.35fr)]">
+      <div className="grid min-h-[calc(100vh-185px)] overflow-hidden rounded-[var(--radius-lg)] bg-iusia-paper shadow-[var(--shadow-surface)] lg:grid-cols-[190px_minmax(330px,0.62fr)_minmax(0,1.35fr)]">
         <aside className="border-b border-iusia-mist/25 bg-iusia-ice/45 p-3 lg:border-b-0 lg:border-r" aria-label="Expedientes autorizados">
           <div className="flex items-center justify-between px-2 pb-3 pt-1">
             <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-iusia-mist-text">Expedientes</h2>
@@ -82,7 +82,7 @@ export function Documents() {
                 const active = matter.id === matterId;
                 return <div key={matter.id} className="min-w-[210px] lg:min-w-0">
                   <button type="button" onClick={() => { setMatterId(matter.id); setSelectedId(""); }} className={clsx("flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-iusia-action/40", active ? "bg-iusia-navy text-white" : "text-iusia-carbon hover:bg-iusia-paper")}>
-                    {active ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span className="min-w-0 flex-1 truncate">{matter.title}</span>
+                    {active ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span title={matter.title} className="min-w-0 flex-1 truncate">{matter.title}</span>
                   </button>
                   {active ? <div className="ml-4 mt-1 space-y-0.5 border-l border-iusia-mist/30 pl-2">
                     <FolderButton active={folder === "uploaded"} onClick={() => setFolder("uploaded")} label="Aportados" />
@@ -96,16 +96,16 @@ export function Documents() {
 
         <section className="flex min-h-[420px] min-w-0 flex-col border-b border-iusia-mist/25 lg:border-b-0 lg:border-r" aria-label="Documentos del expediente">
           <div className="border-b border-iusia-mist/20 p-3">
-            <p className="truncate text-[14px] font-semibold text-iusia-navy">{selectedMatter?.title ?? "Selecciona un expediente"}</p>
-            <p className="mt-0.5 text-[11.5px] text-iusia-mist-text">{folder === "uploaded" ? "01 Documentos aportados" : "02 Documentos generados por IUSIA"}</p>
+            <div className="flex items-center justify-between gap-2"><p title={selectedMatter?.title} className="min-w-0 flex-1 truncate text-[14px] font-semibold text-iusia-navy">{selectedMatter?.title ?? "Selecciona un expediente"}</p>{folder === "uploaded" ? <Button size="sm" className="shrink-0" onClick={() => fileInput.current?.click()}><Upload size={13} /> Subir documento</Button> : null}</div>
+            <p className="mt-0.5 text-[11.5px] text-iusia-mist-text">{folder === "uploaded" ? "Documentos aportados" : "Documentos generados por IUSIA"}</p>
             <label className="mt-3 flex h-9 items-center gap-2 rounded-[9px] bg-iusia-ice/70 px-3 text-iusia-mist-text focus-within:ring-2 focus-within:ring-iusia-action/30">
               <Search size={14} aria-hidden /><span className="sr-only">Buscar archivos</span>
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar en este expediente" className="min-w-0 flex-1 bg-transparent text-[13px] text-iusia-carbon outline-none placeholder:text-iusia-mist-text" />
               {query ? <button type="button" onClick={() => setQuery("")} aria-label="Limpiar búsqueda"><X size={13} /></button> : null}
             </label>
           </div>
-          {folder === "uploaded" ? <div onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); void uploadFiles(event.dataTransfer.files); }} className={clsx("m-3 rounded-[12px] border border-dashed px-3 py-3 transition-colors", dragging ? "border-iusia-action bg-iusia-action/5" : "border-iusia-mist/45 bg-iusia-ice/25")}>
-            <div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-iusia-navy text-iusia-intel"><Upload size={15} /></span><div className="min-w-0 flex-1"><p className="text-[12.5px] font-medium text-iusia-navy">Nuevo documento</p><p className="text-[11px] text-iusia-mist-text">Crea un documento v1 · hasta 50 MB</p></div><Button size="sm" onClick={() => fileInput.current?.click()}><Upload size={13} /> Subir documento</Button><input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.target.value = ""; }} /></div>
+          {folder === "uploaded" ? <div onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); void uploadFiles(event.dataTransfer.files); }} className={clsx("relative mx-2 mt-2 rounded-[10px] px-2 py-1 transition-colors", dragging ? "bg-iusia-action/8 ring-2 ring-iusia-action/35" : "")}>
+            {dragging ? <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[10px] bg-iusia-paper/95 text-[12px] font-medium text-iusia-navy">Suelta aquí para subir al expediente</div> : null}<input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.target.value = ""; }} />
             {uploads.length > 0 ? <div className="mt-3 space-y-1.5 border-t border-iusia-mist/20 pt-2.5">{uploads.slice(0, 4).map((item) => <UploadRow key={item.id} item={item} />)}</div> : null}
           </div> : null}
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">

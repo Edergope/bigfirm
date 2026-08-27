@@ -8,7 +8,7 @@ import {
 import { DocumentRepository, TemplateRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
 import { DriveWorkspaceService } from "./drive-workspace.js";
-import { DriveCredentialResolver } from "./drive-credentials.js";
+import { OrganizationStorageResolver } from "./drive-credentials.js";
 import { DriveApiError } from "../integrations/google-drive.js";
 
 const TRANSIENT_DRIVE_KINDS = new Set(["network", "rate_limited", "http_5xx"]);
@@ -87,14 +87,14 @@ export class DocumentGenerationError extends Error {
 export class DocumentGenerationService {
   constructor(
     private readonly env: Env,
-    private readonly driveCredentials: DriveCredentialResolver,
+    private readonly storage: OrganizationStorageResolver,
     private readonly workspace: DriveWorkspaceService,
   ) {}
 
   static forEnv(env: Env): DocumentGenerationService {
     return new DocumentGenerationService(
       env,
-      DriveCredentialResolver.forEnv(env),
+      OrganizationStorageResolver.forEnv(env),
       DriveWorkspaceService.forEnv(env),
     );
   }
@@ -163,7 +163,7 @@ export class DocumentGenerationService {
       throw error;
     }
 
-    const drive = await this.driveCredentials.resolveAdapter(input.userId, { requireWrite: true });
+    const drive = await this.storage.resolveAdapter(input.organizationId, { requireWrite: true });
     const { generated } = await this.workspace.ensureMatterFolders(
       input.userId,
       input.organizationId,

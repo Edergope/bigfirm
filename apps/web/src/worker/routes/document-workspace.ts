@@ -3,7 +3,7 @@ import { z } from "zod";
 import { IusiaError, documentErrorMessage } from "@iusia/domain";
 import { TemplateRepository, createDb } from "@iusia/db";
 import type { AppBindings } from "../context.js";
-import { DriveConnectionError, DriveCredentialResolver } from "../services/drive-credentials.js";
+import { DriveConnectionError, OrganizationStorageResolver } from "../services/drive-credentials.js";
 import { DriveWorkspaceService } from "../services/drive-workspace.js";
 import {
   DocumentGenerationError,
@@ -80,7 +80,7 @@ function driveErrorToCode(error: unknown): string {
  */
 documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) => {
   const { documents, matters, authz, audit } = c.get("ctx");
-  const { organizationId, userId } = c.get("session");
+  const { organizationId } = c.get("session");
   const matterId = c.req.param("matterId");
 
   await authz.authorizeMatter(organizationId, userId, matterId, "document:link");
@@ -105,8 +105,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
     throw new IusiaError("CONFLICT", documentErrorMessage(code), { code });
   }
 
-  const resolver = DriveCredentialResolver.forEnv(c.env);
-  const drive = await resolver.resolveAdapter(userId, { requireWrite: true });
+  const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
 
   const results: Array<{ document_id: string; name: string; status: string }> = [];
   for (const file of files) {
@@ -255,9 +254,8 @@ documentWorkspaceRoutes.get("/matters/:matterId/documents/:documentId/content", 
   if (!version || version.matterId !== matterId) {
     throw new IusiaError("NOT_FOUND", "Versión no encontrada");
   }
-  // La ACL autoriza al solicitante; el token físico corresponde a quien subió ESA
-  // versión, que es quien tiene garantizado drive.file sobre el binario.
-  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(version.createdBy);
+  // La ACL autoriza al solicitante; la firma provee el storage físico.
+  const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId);
   const bytes = await drive.download(version.driveFileId);
   const disposition = c.req.query("download") === "1" ? "attachment" : "inline";
   return new Response(bytes, {
@@ -313,7 +311,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/versions"
   const targetFolder = document.classification === "ENTREGABLE" ? folders.generated : folders.uploaded;
   const bytes = await file.arrayBuffer();
   const ingestionStatus = initialIngestionStatus(mime);
-  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
   const meta = await drive.uploadFile({
     name: file.name,
     parentId: targetFolder,
@@ -373,7 +371,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retire", 
   if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Datos de retiro inválidos");
   const folders = await DriveWorkspaceService.forEnv(c.env).ensureMatterFolders(userId, organizationId, matter);
   const versions = await documents.listVersions(organizationId, documentId);
-  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
   for (const version of versions) await drive.moveFile(version.driveFileId, folders.retired);
   if (!await documents.retire({ organizationId, documentId, retiredBy: userId, reason: parsed.data.reason })) throw new IusiaError("CONFLICT", "El documento ya fue retirado");
   await audit.record({ organizationId, matterId, actorUserId: userId, action: "document.retired", resourceType: "document", resourceId: documentId, outcome: "SUCCESS", detail: { reason: parsed.data.reason ?? null, versions: versions.length } });
@@ -503,8 +501,7 @@ documentWorkspaceRoutes.get("/drive/smoke", async (c) => {
   };
 
   try {
-    const resolver = DriveCredentialResolver.forEnv(c.env);
-    const drive = await resolver.resolveAdapter(userId, { requireWrite: true });
+    const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
 
     const folderId = await drive.ensureFolder(`IUSIA Smoke ${new Date().toISOString().slice(0, 10)}`);
     mark("A_create_folder", true);
@@ -599,13 +596,13 @@ documentWorkspaceRoutes.get("/templates", async (c) => {
 
 /** Preview privado de plantilla visible para la firma. */
 documentWorkspaceRoutes.get("/templates/:templateId/content", async (c) => {
-  const { organizationId, userId } = c.get("session");
+  const { organizationId } = c.get("session");
   const repo = new TemplateRepository(createDb(c.env.DB));
   const template = await repo.findVisibleById(organizationId, c.req.param("templateId"));
   if (!template || template.status === "RETIRED") {
     throw new IusiaError("NOT_FOUND", "Plantilla no encontrada");
   }
-  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(template.createdBy ?? userId);
+  const drive = await OrganizationStorageResolver.forEnv(c.env).resolvePlatformAdapter();
   const ref = template.originalSourceRef ?? template.sourceRef;
   if (!ref) throw new IusiaError("NOT_FOUND", "Archivo de plantilla no encontrado");
   const bytes = template.originalSourceRef
@@ -694,7 +691,7 @@ documentWorkspaceRoutes.post("/admin/templates", async (c) => {
   if (variables.length === 0) throw new IusiaError("VALIDATION_FAILED", "La plantilla debe contener campos renderizables.");
   const workspace = DriveWorkspaceService.forEnv(c.env);
   const { templates: templatesFolder } = await workspace.ensureFirmStructure(userId, organizationId);
-  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  const drive = await OrganizationStorageResolver.forEnv(c.env).resolvePlatformAdapter({ requireWrite: true });
   const original = await drive.uploadFile({
     name: file.name,
     parentId: templatesFolder,
@@ -750,7 +747,7 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
   const existing = await repo.listSystemHistory();
   const workspace = DriveWorkspaceService.forEnv(c.env);
   const { templates: templatesFolder } = await workspace.ensureFirmStructure(userId, organizationId);
-  const drive = await DriveCredentialResolver.forEnv(c.env).resolveAdapter(userId, { requireWrite: true });
+  const drive = await OrganizationStorageResolver.forEnv(c.env).resolvePlatformAdapter({ requireWrite: true });
   const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
   const imported: Array<{ id: string; name: string; version: number; checksum: string }> = [];

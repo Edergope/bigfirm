@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { createDb, schema } from "@iusia/db";
+import { createDb, schema, StorageConnectionRepository } from "@iusia/db";
 import type { Env } from "../env.js";
 import { createAuth } from "../auth/config.js";
 import { GoogleDriveAdapter } from "../integrations/google-drive.js";
@@ -56,6 +56,7 @@ export interface GoogleAccountRef {
 
 /** Localiza la cuenta Google vinculada a un usuario (sin exponer tokens). */
 export type FindGoogleAccountFn = (userId: string) => Promise<GoogleAccountRef | null>;
+export type FindGoogleAccountByIdFn = (accountId: string) => Promise<GoogleAccountRef | null>;
 
 /**
  * Obtiene un access token vigente para la cuenta. Debe refrescar de forma
@@ -88,12 +89,14 @@ export class DriveCredentialResolver {
   constructor(
     private readonly findGoogleAccount: FindGoogleAccountFn,
     private readonly getAccessToken: GetAccessTokenFn,
+    private readonly findGoogleAccountByPrimaryId: FindGoogleAccountByIdFn = async () => null,
   ) {}
 
   static forEnv(env: Env): DriveCredentialResolver {
     const db = createDb(env.DB);
     const auth = createAuth(env);
 
+    const asRef = (row: { id: string; scope: string | null; refreshToken: string | null } | undefined): GoogleAccountRef | null => row ? { accountId: row.id, scope: row.scope, hasRefreshToken: Boolean(row.refreshToken) } : null;
     const find: FindGoogleAccountFn = async (userId) => {
       const rows = await db
         .select({
@@ -105,13 +108,12 @@ export class DriveCredentialResolver {
         .from(schema.account)
         .where(and(eq(schema.account.userId, userId), eq(schema.account.providerId, "google")))
         .limit(1);
-      const row = rows[0];
-      if (!row) return null;
-      return {
-        accountId: row.id,
-        scope: row.scope,
-        hasRefreshToken: Boolean(row.refreshToken),
-      };
+      return asRef(rows[0]);
+    };
+    const findById: FindGoogleAccountByIdFn = async (accountId) => {
+      const rows = await db.select({ id: schema.account.id, scope: schema.account.scope, refreshToken: schema.account.refreshToken }).from(schema.account)
+        .where(and(eq(schema.account.id, accountId), eq(schema.account.providerId, "google"))).limit(1);
+      return asRef(rows[0]);
     };
 
     const getToken: GetAccessTokenFn = async (accountId, userId) => {
@@ -120,7 +122,7 @@ export class DriveCredentialResolver {
       return { accessToken: res.accessToken, accessTokenExpiresAt: res.accessTokenExpiresAt };
     };
 
-    return new DriveCredentialResolver(find, getToken);
+    return new DriveCredentialResolver(find, getToken, findById);
   }
 
   /**
@@ -193,5 +195,44 @@ export class DriveCredentialResolver {
     }
 
     return new GoogleDriveAdapter({ accessToken: token.accessToken });
+  }
+
+  /** Resuelve una cuenta ya seleccionada por storage de organización/plataforma. */
+  async resolveStoredAccount(account: GoogleAccountRef, ownerUserId: string, opts: { requireWrite?: boolean } = {}): Promise<GoogleDriveAdapter> {
+    if (opts.requireWrite && !scopeIncludesDriveFile(account.scope)) throw new DriveConnectionError("DRIVE_WRITE_SCOPE_MISSING", "El almacenamiento documental no tiene permisos de escritura.");
+    if (!opts.requireWrite && !scopeIncludesDriveReadonly(account.scope) && !scopeIncludesDriveFile(account.scope)) throw new DriveConnectionError("DRIVE_SCOPE_MISSING", "El almacenamiento documental no tiene permisos de lectura.");
+    try {
+      const token = await this.getAccessToken(account.accountId, ownerUserId);
+      if (!token.accessToken || isExpired(token.accessTokenExpiresAt)) throw new Error("expired");
+      return new GoogleDriveAdapter({ accessToken: token.accessToken });
+    } catch {
+      throw new DriveConnectionError("DRIVE_REAUTH_REQUIRED", "No fue posible acceder al almacenamiento documental.");
+    }
+  }
+
+  async findGoogleAccountById(accountId: string): Promise<GoogleAccountRef | null> {
+    return this.findGoogleAccountByPrimaryId(accountId);
+  }
+}
+
+/** Credencial de infraestructura: actor ACL y dueño de token son deliberadamente distintos. */
+export class OrganizationStorageResolver {
+  constructor(private readonly connections: StorageConnectionRepository, private readonly credentials: DriveCredentialResolver) {}
+  static forEnv(env: Env): OrganizationStorageResolver {
+    return new OrganizationStorageResolver(new StorageConnectionRepository(createDb(env.DB)), DriveCredentialResolver.forEnv(env));
+  }
+  async resolveAdapter(organizationId: string, opts: { requireWrite?: boolean } = {}): Promise<GoogleDriveAdapter> {
+    const connection = await this.connections.findOrganization(organizationId);
+    if (!connection) throw new DriveConnectionError("DRIVE_NOT_CONNECTED", "No hay almacenamiento documental configurado para esta firma.");
+    const account = await this.credentials.findGoogleAccountById(connection.accountId);
+    if (!account) throw new DriveConnectionError("DRIVE_NOT_CONNECTED", "La cuenta de almacenamiento documental no está disponible.");
+    return this.credentials.resolveStoredAccount(account, connection.storageOwnerUserId, opts);
+  }
+  async resolvePlatformAdapter(opts: { requireWrite?: boolean } = {}): Promise<GoogleDriveAdapter> {
+    const connection = await this.connections.findPlatform();
+    if (!connection) throw new DriveConnectionError("DRIVE_NOT_CONNECTED", "No hay almacenamiento de plantillas configurado.");
+    const account = await this.credentials.findGoogleAccountById(connection.accountId);
+    if (!account) throw new DriveConnectionError("DRIVE_NOT_CONNECTED", "La cuenta de almacenamiento de plantillas no está disponible.");
+    return this.credentials.resolveStoredAccount(account, connection.storageOwnerUserId, opts);
   }
 }

@@ -5,7 +5,7 @@ import {
 } from "@iusia/domain";
 import { DocumentRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
-import { DriveConnectionError, DriveCredentialResolver } from "./drive-credentials.js";
+import { DriveConnectionError, OrganizationStorageResolver } from "./drive-credentials.js";
 
 /**
  * Servicio de ingestión documental.
@@ -26,11 +26,11 @@ export class IngestionService {
   constructor(
     private readonly env: Env,
     /** Resuelve credenciales de Drive del usuario que vinculó el documento. */
-    private readonly driveCredentials: DriveCredentialResolver,
+    private readonly storage: OrganizationStorageResolver,
   ) {}
 
   static forEnv(env: Env): IngestionService {
-    return new IngestionService(env, DriveCredentialResolver.forEnv(env));
+    return new IngestionService(env, OrganizationStorageResolver.forEnv(env));
   }
 
   async ingest(message: DocumentIngestionMessage): Promise<IngestionOutcome> {
@@ -50,7 +50,7 @@ export class IngestionService {
     // y el mensaje se ACK-ea: ningún reintento resolverá una reconexión OAuth pendiente.
     let storage;
     try {
-      storage = await this.driveCredentials.resolveAdapter(doc.linkedBy);
+      storage = await this.storage.resolveAdapter(message.organization_id);
     } catch (error) {
       if (error instanceof DriveConnectionError) {
         await documents.setStatus(message.organization_id, message.document_id, "PENDIENTE");
