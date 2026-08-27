@@ -80,7 +80,7 @@ function driveErrorToCode(error: unknown): string {
  */
 documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) => {
   const { documents, matters, authz, audit } = c.get("ctx");
-  const { organizationId } = c.get("session");
+  const { organizationId, userId } = c.get("session");
   const matterId = c.req.param("matterId");
 
   await authz.authorizeMatter(organizationId, userId, matterId, "document:link");
