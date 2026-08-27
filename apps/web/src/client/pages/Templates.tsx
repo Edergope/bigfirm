@@ -30,7 +30,9 @@ export function Templates() {
     },
   });
   const rows = useMemo<TemplateRow[]>(() => {
-    if (superadmin) return adminTemplates.data?.templates ?? [];
+    // Las retiradas siguen en auditoría/backend, pero nunca contaminan la biblioteca
+    // operativa ni permiten descarga/activación accidental desde este workspace.
+    if (superadmin) return (adminTemplates.data?.templates ?? []).filter((row) => row.status !== "RETIRED");
     return (publicTemplates.data?.templates ?? []).map((row) => ({
       ...row, checksum: null, created_by: null, created_at: "", updated_at: "",
     }));
