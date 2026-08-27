@@ -122,6 +122,7 @@ const MATTER_ROLE_ACTIONS: Record<MatterRole, readonly MatterAction[]> = {
 
 /** Rol de firma que puede supervisar toda la cartera. La supervisión se audita. */
 export const PORTFOLIO_SUPERVISOR_ROLES: readonly FirmRole[] = ["FIRM_DIRECTOR"];
+const PORTFOLIO_SUPERVISION_ACTIONS: readonly MatterAction[] = ["matter:read", "execution:read"];
 
 export interface MatterAccessContext {
   /** Rol del usuario en la organización (Better Auth). */
@@ -170,7 +171,7 @@ export function decideMatterAccess(
   // Sin membresía en el matter: sólo la dirección puede supervisar, y sólo en lectura.
   if (
     PORTFOLIO_SUPERVISOR_ROLES.includes(ctx.firmRole) &&
-    READ_ONLY_ACTIONS.includes(action)
+    PORTFOLIO_SUPERVISION_ACTIONS.includes(action)
   ) {
     return {
       allowed: true,

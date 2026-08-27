@@ -37,6 +37,7 @@ const TERMINAL = new Set(["COMPLETED", "FAILED", "CANCELLED", "BLOCKED"]);
 /** Copy de producto por etapa. Traduce nodos del motor a fases del encargo. */
 const STAGE_LABEL: Record<string, string> = {
   received: "Encargo recibido",
+  facts: "Analizando los hechos del caso",
   evidence: "Evidencia del expediente recuperada",
   done: "Análisis completado",
   stopped: "Análisis detenido",
@@ -343,8 +344,9 @@ function RunView({
       events: eventsQuery.data.events,
       executions: eventsQuery.data.executions,
       rootExecutionId,
+      documentCount: matterDocuments.length,
     });
-  }, [eventsQuery.data, rootStatus, rootExecutionId]);
+  }, [eventsQuery.data, rootStatus, rootExecutionId, matterDocuments.length]);
 
   const gatePassed = (eventsQuery.data?.events ?? []).some((e) => e.type === "gate.passed");
 
@@ -542,9 +544,14 @@ function ResultView({
         <CardHeader
           title="Conclusión de IUSIA"
           subtitle={headline ? `${headline.agent_name}` : undefined}
-          action={<StatusChip label="Fundamentado en el expediente" tone="success" dot />}
+          action={<StatusChip label={result.evidence.chunk_count > 0 ? "Fundamentado en el expediente" : "Basado en hechos informados"} tone="success" dot />}
         />
         <div className="px-6 py-5">
+          {result.evidence.chunk_count === 0 ? (
+            <p className="mb-4 rounded-[10px] border border-iusia-warning/35 bg-iusia-warning/10 px-4 py-3 text-[13px] leading-relaxed text-iusia-warning-text">
+              Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada.
+            </p>
+          ) : null}
           {headline ? (
             <>
               <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-iusia-carbon">

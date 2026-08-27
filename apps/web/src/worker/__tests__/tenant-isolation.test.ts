@@ -128,12 +128,95 @@ describe("ACL por Matter dentro de una firma", () => {
     );
   });
 
+  it("un LAWYER con ACL OWNER puede leer, adjuntar/versionar y publicar entregables", async () => {
+    await expect(t.authz.authorizeMatter(org, lawyerOwner, matter, "document:read")).resolves.toMatchObject({
+      allowed: true,
+    });
+    await expect(t.authz.authorizeMatter(org, lawyerOwner, matter, "document:link")).resolves.toMatchObject({
+      allowed: true,
+    });
+    await expect(t.authz.authorizeMatter(org, lawyerOwner, matter, "deliverable:publish")).resolves.toMatchObject({
+      allowed: true,
+    });
+  });
+
   it("el director supervisa en lectura, pero no puede escribir por supervisión", async () => {
     const read = await t.authz.authorizeMatter(org, director, matter, "matter:read");
     expect(read.allowed).toBe(true);
     expect(read.viaSupervision).toBe(true);
     await expectDenied(() =>
+      t.authz.authorizeMatter(org, director, matter, "document:read"),
+    );
+    await expectDenied(() =>
+      t.authz.authorizeMatter(org, director, matter, "fact:read"),
+    );
+    await expectDenied(() =>
       t.authz.authorizeMatter(org, director, matter, "matter:update"),
+    );
+  });
+
+  it("FIRM_DIRECTOR puede cancelar una ejecución de su firma sin recibir ACL de contenido", async () => {
+    const root = await t.executions.create({
+      organizationId: org,
+      matterId: matter,
+      agentId: "pisoso-orquestador-juridico",
+      parentExecutionId: null,
+      rootExecutionId: null,
+      startedBy: lawyerOwner,
+    });
+
+    await expect(t.authz.authorizeExecutionCancel(director, {
+      organizationId: org,
+      matterId: matter,
+      id: root,
+      status: "RUNNING",
+    })).resolves.toMatchObject({
+      actorControlRole: "FIRM_DIRECTOR",
+      reason: "CANCELLED_BY_FIRM_DIRECTOR",
+    });
+    await expectDenied(() =>
+      t.authz.authorizeMatter(org, director, matter, "document:read"),
+    );
+  });
+
+  it("un FIRM_DIRECTOR de otra organización no puede cancelar la ejecución", async () => {
+    const otherFirm = await seedFirm(t, { orgName: "Firma Y", directorEmail: "y@y.test" });
+    const root = await t.executions.create({
+      organizationId: org,
+      matterId: matter,
+      agentId: "pisoso-orquestador-juridico",
+      parentExecutionId: null,
+      rootExecutionId: null,
+      startedBy: lawyerOwner,
+    });
+
+    await expectForbidden(() =>
+      t.authz.authorizeExecutionCancel(otherFirm.directorUserId, {
+        organizationId: org,
+        matterId: matter,
+        id: root,
+        status: "RUNNING",
+      }),
+    );
+  });
+
+  it("un miembro ordinario de la firma sin ACL del Matter no puede cancelar", async () => {
+    const root = await t.executions.create({
+      organizationId: org,
+      matterId: matter,
+      agentId: "pisoso-orquestador-juridico",
+      parentExecutionId: null,
+      rootExecutionId: null,
+      startedBy: lawyerOwner,
+    });
+
+    await expectDenied(() =>
+      t.authz.authorizeExecutionCancel(otherLawyer, {
+        organizationId: org,
+        matterId: matter,
+        id: root,
+        status: "RUNNING",
+      }),
     );
   });
 

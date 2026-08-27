@@ -59,9 +59,14 @@ describe("deriveOutcome", () => {
   it("[D] COMPLETED con evidencia => COMPLETED", () => {
     expect(deriveOutcome({ rootStatus: "COMPLETED", evidenceChunkCount: 3 })).toBe("COMPLETED");
   });
-  it("[E] COMPLETED sin evidencia => INSUFFICIENT_EVIDENCE", () => {
+  it("[E] COMPLETED con documentos pero sin evidencia => INSUFFICIENT_EVIDENCE", () => {
     expect(deriveOutcome({ rootStatus: "COMPLETED", evidenceChunkCount: 0 })).toBe(
       "INSUFFICIENT_EVIDENCE",
+    );
+  });
+  it("[E2] COMPLETED text-only no se degrada automáticamente a evidencia insuficiente", () => {
+    expect(deriveOutcome({ rootStatus: "COMPLETED", evidenceChunkCount: 0, documentCount: 0 })).toBe(
+      "COMPLETED",
     );
   });
   it("[F] estados no terminales => RUNNING; terminales conservan su naturaleza", () => {
@@ -108,6 +113,18 @@ describe("deriveProgressStages", () => {
     const stages = deriveProgressStages({ rootStatus: "FAILED", events, executions, rootExecutionId: ROOT });
     expect(stages.find((s) => s.key === "agent:01-intake-y-clasificador")?.state).toBe("failed");
     expect(stages.at(-1)?.state).toBe("failed");
+  });
+
+  it("[H2] con cero documentos no muestra etapa documental falsa", () => {
+    const stages = deriveProgressStages({
+      rootStatus: "RUNNING",
+      events: [{ type: "execution.created" }],
+      executions: [],
+      rootExecutionId: ROOT,
+      documentCount: 0,
+    });
+    expect(stages.map((s) => s.key)).toEqual(["received", "facts", "done"]);
+    expect(stages.map((s) => s.key)).not.toContain("evidence");
   });
 });
 

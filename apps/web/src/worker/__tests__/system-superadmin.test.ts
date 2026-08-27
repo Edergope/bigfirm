@@ -152,4 +152,42 @@ describe("escalada de privilegios", () => {
       t.authz.authorizeMatter(otra.organizationId, directorId, matterAjeno, "matter:read"),
     ).rejects.toThrow();
   });
+
+  it("SYSTEM_SUPERADMIN puede cancelar una ejecución sin abrir contenido del Matter", async () => {
+    const otra = await seedFirm(t, { orgName: "Otra Firma", directorEmail: "dir@otra.test" });
+    const matterAjeno = await t.matters.create(
+      otra.organizationId,
+      otra.directorUserId,
+      {
+        title: "Caso ajeno",
+        client_name: "Cliente",
+        materiality: "MATERIAL",
+        practice_areas: ["CIVIL"],
+        jurisdiction: "Colombia",
+      },
+      "IUS-OTRA-002",
+    );
+    const root = await t.executions.create({
+      organizationId: otra.organizationId,
+      matterId: matterAjeno,
+      agentId: "pisoso-orquestador-juridico",
+      parentExecutionId: null,
+      rootExecutionId: null,
+      startedBy: otra.directorUserId,
+    });
+
+    grantSystemRole(t, directorId);
+    await expect(t.authz.authorizeExecutionCancel(directorId, {
+      organizationId: otra.organizationId,
+      matterId: matterAjeno,
+      id: root,
+      status: "RUNNING",
+    })).resolves.toMatchObject({
+      actorControlRole: "SYSTEM_SUPERADMIN",
+      reason: "CANCELLED_BY_SYSTEM_ADMIN",
+    });
+    await expect(
+      t.authz.authorizeMatter(otra.organizationId, directorId, matterAjeno, "document:read"),
+    ).rejects.toThrow();
+  });
 });

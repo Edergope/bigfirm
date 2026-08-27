@@ -75,4 +75,20 @@ describe("renderizado del WorkPackage", () => {
     expect(rendered).not.toContain("external_document");
     expect(rendered).not.toContain(UNTRUSTED_CONTENT_NOTICE);
   });
+
+  it("un WorkPackage text-only conserva el encargo sin inventar evidencia documental", () => {
+    const rendered = renderWorkPackage(
+      baseWorkPackage({
+        objective:
+          "Representamos a Distribuciones Caribe S.A.S. frente a una terminación unilateral sin documentos aportados todavía.",
+        constraints: [
+          "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada.",
+        ],
+      }),
+    );
+    expect(rendered).toContain("Distribuciones Caribe S.A.S.");
+    expect(rendered).toContain("deberá contrastarse con la documentación cuando sea aportada");
+    expect(rendered).not.toContain("<authorized_sources>");
+    expect(rendered).not.toContain("<external_document");
+  });
 });

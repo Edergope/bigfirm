@@ -65,6 +65,20 @@ const DEFAULT_ROOT_CREDIT_LIMIT = 5000;
 
 type DagResult = { root_execution_id: string; completed: string[]; failed: string[] };
 
+const TIMING_MILESTONES = {
+  EXECUTION_CREATED: "execution_created",
+  PLAN_START: "PLAN_START",
+  PLAN_LLM_COMPLETE: "PLAN_LLM_COMPLETE",
+  TEAMPLAN_PARSED: "TEAMPLAN_PARSED",
+  TEAMPLAN_VALIDATED: "TEAMPLAN_VALIDATED",
+  DAG_CREATED: "DAG_CREATED",
+  FIRST_SPECIALIST_DISPATCH: "FIRST_SPECIALIST_DISPATCH",
+  SPECIALISTS_COMPLETE: "SPECIALISTS_COMPLETE",
+  INTEGRATION_START: "INTEGRATION_START",
+  INTEGRATION_COMPLETE: "INTEGRATION_COMPLETE",
+  ROOT_COMPLETE: "ROOT_COMPLETE",
+} as const;
+
 /**
  * DAG jurídico sobre Cloudflare Workflows.
  *
@@ -135,19 +149,20 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       });
     });
 
-    const sources = await step.do("collect-authorized-sources", async () => {
+    const sourceContext = await step.do("collect-authorized-sources", async () => {
       const docs = await documents.listForMatter(params.organization_id, params.matter_id);
-      return docs.map((d) => ({
+      return { documentCount: docs.length, sources: docs.map((d) => ({
         ref_id: d.id,
         kind: "DOCUMENT" as const,
         label: d.name,
         locator: d.driveFileId ? `drive://${d.driveFileId}` : `iusia://document/${d.id}`,
-      }));
+      })) };
     });
 
     const evidence = await step.do(
       "collect-rag-evidence",
       async (): Promise<DocumentExcerpt[]> => {
+        if (sourceContext.documentCount === 0) return [];
         const docs = await documents.listForMatter(params.organization_id, params.matter_id);
         return collectMatterEvidence({
           retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
@@ -161,6 +176,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     );
 
     await step.do("emit-rag-retrieval", async () => {
+      if (sourceContext.documentCount === 0) return;
       await events.append({
         ...eventBase,
         executionId: params.root_execution_id,
@@ -214,7 +230,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                 objective: params.objective,
                 questions: [],
                 fact_refs: [],
-                source_refs: sources,
+                source_refs: sourceContext.sources,
                 document_excerpts: evidence,
                 upstream_outputs: [],
                 constraints: [
@@ -367,8 +383,27 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         status: "RUNNING",
         detail: { mode: "dynamic" },
       });
-      return Date.now();
+      const now = Date.now();
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.milestone",
+        status: "RUNNING",
+        detail: { milestone: TIMING_MILESTONES.EXECUTION_CREATED, elapsed_ms: 0 },
+      });
+      return now;
     });
+
+    const timing = (milestone: string, extra: Record<string, string | number | boolean> = {}) =>
+      step.do(`dyn-timing-${milestone}`, async () => {
+        await events.append({
+          ...eventBase,
+          executionId: params.root_execution_id,
+          type: "agent.milestone",
+          status: "RUNNING",
+          detail: { milestone, elapsed_ms: Date.now() - startedAtMs, ...extra },
+        });
+      });
 
     // Cancelación server-side: re-lee la raíz antes de cada nueva llamada/despacho.
     const isCancelled = async (label: string): Promise<boolean> =>
@@ -381,7 +416,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       reason: CircuitBreakerReason,
       detail: string,
     ): Promise<DagResult> => {
-      await step.do(`dyn-abort-${reason}-${Math.random().toString(36).slice(2, 7)}`, async () => {
+      await step.do(`dyn-abort-${reason}`, async () => {
         const status = reason === "USER_CANCELLED" ? "CANCELLED" : "FAILED";
         const root = await executions.findById(params.root_execution_id);
         if (root && root.status !== "CANCELLED" && root.status !== "COMPLETED" && root.status !== "FAILED") {
@@ -397,13 +432,15 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           status: reason === "USER_CANCELLED" ? "CANCELLED" : "BLOCKED",
           detail: { circuit_breaker_reason: reason, detail: detail.slice(0, 200) },
         });
-        await events.append({
-          ...eventBase,
-          executionId: params.root_execution_id,
-          type: "execution.failed",
-          status: "FAILED",
-          detail: { circuit_breaker_reason: reason, completed: completed.length },
-        });
+        if (reason !== "USER_CANCELLED") {
+          await events.append({
+            ...eventBase,
+            executionId: params.root_execution_id,
+            type: "execution.failed",
+            status: "FAILED",
+            detail: { circuit_breaker_reason: reason, completed: completed.length },
+          });
+        }
       });
       return { root_execution_id: params.root_execution_id, completed, failed };
     };
@@ -418,6 +455,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         jurisdiction: matter.jurisdiction,
         title: matter.title,
         practice_areas: matter.practiceAreas ?? [],
+        document_count: docs.length,
         document_summary: docs.map((d) => `${d.name} (${d.classification})`),
         document_names: docs.map((d) => [d.id, d.name] as const),
       };
@@ -428,6 +466,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
 
     // ── FASE 00 PLAN ──
     const orchestratorDef = getAgentDefinition(ORCHESTRATOR_AGENT_ID);
+    await timing(TIMING_MILESTONES.PLAN_START);
     const planExecutionId = await step.do("dyn-create-plan-exec", async () =>
       executions.create({
         organizationId: params.organization_id,
@@ -478,6 +517,39 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
             { objective: params.objective, materiality: ctx.materiality, practice_areas: ctx.practice_areas },
             [orchestratorDef, ...buildAgentCatalog().map((c) => getAgentDefinition(c.agent_id))],
           ),
+      });
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.milestone",
+        status: "RUNNING",
+        detail: {
+          milestone: TIMING_MILESTONES.PLAN_LLM_COMPLETE,
+          elapsed_ms: Date.now() - startedAtMs,
+          plan_source: result.source,
+        },
+      });
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.milestone",
+        status: "RUNNING",
+        detail: {
+          milestone: TIMING_MILESTONES.TEAMPLAN_PARSED,
+          elapsed_ms: Date.now() - startedAtMs,
+          specialist_count: result.plan.tasks.length,
+        },
+      });
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.milestone",
+        status: "RUNNING",
+        detail: {
+          milestone: TIMING_MILESTONES.TEAMPLAN_VALIDATED,
+          elapsed_ms: Date.now() - startedAtMs,
+          validation_error_count: result.validation_errors.length,
+        },
       });
 
       // Persistir el TeamPlan como artefacto de control + costear la planificación.
@@ -556,7 +628,9 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     // ── DAG dinámico ──
     const nodes = teamPlanToDag(plan);
     const batches = dispatchBatches(nodes);
+    await timing(TIMING_MILESTONES.DAG_CREATED, { node_count: nodes.length, batch_count: batches.length });
     const outputByAgent = new Map<string, { execution_id: string; output_ref: string; output_type: string }>();
+    let firstSpecialistDispatchEmitted = false;
 
     for (const [batchIndex, batch] of batches.entries()) {
       if (await isCancelled(`batch-${batchIndex}`)) return abort("USER_CANCELLED", "cancelado durante la ejecución");
@@ -606,6 +680,23 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
               `dyn-dispatch-${batchIndex}-${node.agent_id}`,
               { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "10 minutes" },
               async (): Promise<RunResult & { agent_id: string; output_ref: string | null }> => {
+                if (await isCancelled(`pre-dispatch-${node.agent_id}`)) {
+                  return { execution_id: "", status: "CANCELLED", output_ref: null, credits_consumed: 0, agent_id: node.agent_id };
+                }
+                if (!firstSpecialistDispatchEmitted) {
+                  firstSpecialistDispatchEmitted = true;
+                  await events.append({
+                    ...eventBase,
+                    executionId: params.root_execution_id,
+                    type: "agent.milestone",
+                    status: "RUNNING",
+                    detail: {
+                      milestone: TIMING_MILESTONES.FIRST_SPECIALIST_DISPATCH,
+                      elapsed_ms: Date.now() - startedAtMs,
+                      agent_id: node.agent_id,
+                    },
+                  });
+                }
                 const def = getAgentDefinition(node.agent_id);
                 const executionId = await executions.create({
                   organizationId: params.organization_id,
@@ -654,26 +745,30 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   });
                 }
                 // RAG por misión.
-                const excerpts = await collectMatterEvidence({
-                  retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
-                  organizationId: params.organization_id,
-                  matterId: params.matter_id,
-                  objective: `${task.mission} ${task.questions.join(" ")}`.trim(),
-                  documentNames,
-                  maxResults: 5,
-                });
-                await events.append({
-                  ...eventBase,
-                  executionId,
-                  type: "agent.tool.called",
-                  status: "RUNNING",
-                  detail: {
-                    tool: "ai_search.retrieval",
-                    chunk_count: excerpts.length,
-                    document_ids: [...new Set(excerpts.map((e) => e.ref_id.split("#")[0] ?? e.ref_id))].join(","),
-                    query_source: "task.mission",
-                  },
-                });
+                const excerpts = ctx.document_count === 0
+                  ? []
+                  : await collectMatterEvidence({
+                      retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
+                      organizationId: params.organization_id,
+                      matterId: params.matter_id,
+                      objective: `${task.mission} ${task.questions.join(" ")}`.trim(),
+                      documentNames,
+                      maxResults: 5,
+                    });
+                if (ctx.document_count > 0) {
+                  await events.append({
+                    ...eventBase,
+                    executionId,
+                    type: "agent.tool.called",
+                    status: "RUNNING",
+                    detail: {
+                      tool: "ai_search.retrieval",
+                      chunk_count: excerpts.length,
+                      document_ids: [...new Set(excerpts.map((e) => e.ref_id.split("#")[0] ?? e.ref_id))].join(","),
+                      query_source: "task.mission",
+                    },
+                  });
+                }
                 const workPackage: WorkPackage = {
                   work_package_id: newId("workPackage"),
                   matter_id: params.matter_id,
@@ -688,7 +783,9 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   upstream_outputs: resolvedUpstream,
                   constraints: [
                     `Contexto del encargo global (subordinado a tu rol): ${params.objective}`,
-                    "Trabaja únicamente con la evidencia autorizada del WorkPackage.",
+                    ctx.document_count === 0
+                      ? "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada."
+                      : "Trabaja únicamente con la evidencia autorizada del WorkPackage.",
                     "Declara expresamente lo que no consta en el expediente.",
                   ],
                   expected_output_schema: def.output_schema_id,
@@ -706,6 +803,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         );
 
         for (const r of results) {
+          if (r.status === "CANCELLED") continue;
           spentCredits += r.credits_consumed;
           if (r.status === "COMPLETED") {
             completed.push(r.execution_id);
@@ -719,6 +817,9 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           } else {
             failed.push(r.execution_id);
           }
+        }
+        if (await isCancelled(`post-batch-${batchIndex}-${i}`)) {
+          return abort("USER_CANCELLED", "cancelado después de una respuesta tardía");
         }
       }
 
@@ -761,6 +862,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     }
 
     if (await isCancelled("pre-integrate")) return abort("USER_CANCELLED", "cancelado antes de integrar");
+    await timing(TIMING_MILESTONES.SPECIALISTS_COMPLETE, { completed: completed.length, failed: failed.length });
 
     // ── FASE 00 INTEGRATE (usa el agent.md canónico del 00, sin modificarlo) ──
     const intGuard = safety.registerPlanOrIntegration("integration");
@@ -773,6 +875,13 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       "dyn-integrate",
       { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "10 minutes" },
       async (): Promise<RunResult> => {
+        await events.append({
+          ...eventBase,
+          executionId: params.root_execution_id,
+          type: "agent.milestone",
+          status: "RUNNING",
+          detail: { milestone: TIMING_MILESTONES.INTEGRATION_START, elapsed_ms: Date.now() - startedAtMs },
+        });
         const executionId = await executions.create({
           organizationId: params.organization_id,
           matterId: params.matter_id,
@@ -801,14 +910,16 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
             summary: await this.readUpstreamSummary(o.output_ref),
           });
         }
-        const excerpts = await collectMatterEvidence({
-          retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
-          organizationId: params.organization_id,
-          matterId: params.matter_id,
-          objective: params.objective,
-          documentNames,
-          maxResults: 5,
-        });
+        const excerpts = ctx.document_count === 0
+          ? []
+          : await collectMatterEvidence({
+              retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
+              organizationId: params.organization_id,
+              matterId: params.matter_id,
+              objective: params.objective,
+              documentNames,
+              maxResults: 5,
+            });
         const def = getAgentDefinition(ORCHESTRATOR_AGENT_ID);
         const workPackage: WorkPackage = {
           work_package_id: newId("workPackage"),
@@ -824,6 +935,9 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           upstream_outputs: upstream,
           constraints: [
             "Integra los hallazgos de los especialistas: compara, detecta contradicciones y prioriza la evidencia del expediente.",
+            ctx.document_count === 0
+              ? "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada."
+              : "Usa la evidencia documental recuperada únicamente cuando exista en el WorkPackage.",
             "No asumas que un especialista tiene razón; marca la incertidumbre y la evidencia faltante.",
             failed.length > 0 ? `Ejecuciones fallidas: ${failed.length} (repórtalas).` : "Todas las tareas requeridas se completaron.",
           ],
@@ -837,6 +951,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         return worker.run(workPackage);
       },
     );
+    if (await isCancelled("post-integrate")) return abort("USER_CANCELLED", "cancelado después de integrar");
     spentCredits += integration.credits_consumed;
     if (integration.status === "COMPLETED") completed.push(integration.execution_id);
     else failed.push(integration.execution_id);
@@ -859,6 +974,26 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           failed: failed.length,
           specialists: outputByAgent.size,
           spent_credits: spentCredits,
+        },
+      });
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.milestone",
+        status: integration.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+        detail: {
+          milestone: TIMING_MILESTONES.INTEGRATION_COMPLETE,
+          elapsed_ms: Date.now() - startedAtMs,
+        },
+      });
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.milestone",
+        status: integration.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+        detail: {
+          milestone: TIMING_MILESTONES.ROOT_COMPLETE,
+          elapsed_ms: Date.now() - startedAtMs,
         },
       });
     });

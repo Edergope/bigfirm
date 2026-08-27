@@ -3,6 +3,7 @@ import {
   DRIVE_READONLY_SCOPE,
   DriveConnectionError,
   DriveCredentialResolver,
+  OrganizationStorageResolver,
   scopeIncludesDriveReadonly,
   type GoogleAccountRef,
 } from "../services/drive-credentials.js";
@@ -164,5 +165,39 @@ describe("DriveCredentialResolver", () => {
     );
     const e2 = await captureError(() => r2.resolveAdapter("usr_1"));
     expect(e2.message).not.toContain("at_SECRET");
+  });
+});
+
+describe("OrganizationStorageResolver", () => {
+  it("resuelve el storage de la organización sin consultar ni requerir la cuenta Google del actor", async () => {
+    const findOrganization = vi.fn(async (organizationId: string) => ({
+      organizationId,
+      accountId: "storage-account",
+      storageOwnerUserId: "storage-owner",
+      provider: "GOOGLE_DRIVE" as const,
+      status: "ACTIVE" as const,
+    }));
+    const findActorGoogleAccount = vi.fn(async () => null);
+    const findStorageGoogleAccount = vi.fn(async (accountId: string) =>
+      connectedAccount({ accountId }),
+    );
+    const backend = tokenBackend({ accessToken: "at_storage", expiresAt: FUTURE(), hasRefreshToken: true });
+    const credentials = new DriveCredentialResolver(
+      findActorGoogleAccount,
+      backend.getAccessToken,
+      findStorageGoogleAccount,
+    );
+    const resolver = new OrganizationStorageResolver(
+      { findOrganization } as never,
+      credentials,
+    );
+
+    const adapter = await resolver.resolveAdapter("org_fixture", { requireWrite: false });
+
+    expect(adapter).toBeInstanceOf(GoogleDriveAdapter);
+    expect(findOrganization).toHaveBeenCalledWith("org_fixture");
+    expect(findStorageGoogleAccount).toHaveBeenCalledWith("storage-account");
+    expect(findActorGoogleAccount).not.toHaveBeenCalled();
+    expect(backend.getAccessToken).toHaveBeenCalledWith("storage-account", "storage-owner");
   });
 });

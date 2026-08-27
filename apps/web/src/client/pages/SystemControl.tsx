@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardHeader, KpiTile, ScreenTitle, Skeleton, StateBlock, StatusChip } from "@iusia/ui";
 import { api, ApiError } from "../api.js";
 
@@ -171,7 +171,15 @@ function AgentsTab() {
 }
 
 function ExecutionsTab() {
+  const queryClient = useQueryClient();
   const execs = useQuery({ queryKey: ["system-executions"], queryFn: api.systemExecutions });
+  const cancel = useMutation({
+    mutationFn: (rootExecutionId: string) => api.cancelExecution(rootExecutionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["system-executions"] });
+      void queryClient.invalidateQueries({ queryKey: ["active-analyses"] });
+    },
+  });
   if (execs.isLoading) return <Skeleton className="h-64" />;
   if (execs.error) {
     return (
@@ -201,6 +209,7 @@ function ExecutionsTab() {
                 <th className="px-3 py-2.5 font-medium">Agentes</th>
                 <th className="px-3 py-2.5 font-medium">Créditos</th>
                 <th className="px-6 py-2.5 font-medium">Inicio</th>
+                <th className="px-6 py-2.5 font-medium">Control</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-iusia-mist/15">
@@ -226,6 +235,22 @@ function ExecutionsTab() {
                   <td className="px-3 py-2.5 tabular-nums text-iusia-carbon">{r.credits}</td>
                   <td className="px-6 py-2.5 tabular-nums text-iusia-mist-text">
                     {new Date(r.started_at).toLocaleString("es-CO")}
+                  </td>
+                  <td className="px-6 py-2.5">
+                    {["PENDING", "RUNNING", "WAITING", "BLOCKED"].includes(r.status) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm("¿Detener esta ejecución activa?")) cancel.mutate(r.root_execution_id);
+                        }}
+                        disabled={cancel.isPending}
+                        className="text-[12.5px] font-medium text-iusia-critical hover:underline disabled:opacity-50"
+                      >
+                        {cancel.isPending ? "Deteniendo…" : "Detener análisis"}
+                      </button>
+                    ) : (
+                      <span className="text-[12px] text-iusia-mist-text">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

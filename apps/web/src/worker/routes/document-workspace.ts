@@ -40,6 +40,38 @@ const ACCEPTED_MIME = new Set([
 ]);
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const OFFICIAL_TEMPLATE_PREFIX = "official-templates/pisoso-legal/";
+
+/**
+ * Acota las conversiones de Workers AI durante una importación masiva. La versión
+ * serial agotaba la ventana de la petición aunque cada DOCX fuera válido; el límite
+ * conserva el back-pressure sin introducir una cola, workflow o parser adicional.
+ */
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, map: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await map(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function withTimeout<T>(label: string, timeoutMs: number, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new IusiaError("CONFLICT", `${label} excedió el tiempo permitido`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 const OfficialTemplateManifest = z.object({
   templates: z.array(z.object({
     file: z.string().min(1),
@@ -753,7 +785,13 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
   const imported: Array<{ id: string; name: string; version: number; checksum: string }> = [];
   const skipped: Array<{ name: string; checksum: string; reason: string }> = [];
 
-  for (const item of manifest.data.templates) {
+  const prepared = await mapWithConcurrency(manifest.data.templates, 4, async (item) => {
+    const documentType = item.document_type.toUpperCase();
+    const matchingChecksum = existing.find((row) => row.checksum === item.sha256 && row.documentType === documentType);
+    if (matchingChecksum) {
+      skipped.push({ name: item.name, checksum: item.sha256, reason: "already_registered" });
+      return null;
+    }
     const object = await c.env.ARTIFACTS.get(`${OFFICIAL_TEMPLATE_PREFIX}${item.file}`);
     if (!object) throw new IusiaError("NOT_FOUND", `Plantilla oficial no encontrada: ${item.file}`);
     const bytes = await object.arrayBuffer();
@@ -761,15 +799,20 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
     if (actualChecksum !== item.sha256) {
       throw new IusiaError("VALIDATION_FAILED", `Checksum inválido para ${item.file}`);
     }
-    const normalizedTemplate = await normalizeToText(bytes, DOCX_MIME, item.file, c.env.AI);
-    const variables = discoverTemplateVariables(normalizedTemplate);
+    const normalizedTemplate = await withTimeout(
+      `Conversión de ${item.file}`,
+      25_000,
+      normalizeToText(bytes, DOCX_MIME, item.file, c.env.AI),
+    );
+    const familyMatch = existing.find((row) => row.name === item.name && row.documentType === documentType);
+    return { item, bytes, actualChecksum, familyId: familyMatch?.familyId, variables: discoverTemplateVariables(normalizedTemplate) };
+  });
+
+  for (const preparedItem of prepared) {
+    if (!preparedItem) continue;
+    const { item, bytes, actualChecksum, familyId, variables } = preparedItem;
     if (variables.length === 0) {
       skipped.push({ name: item.name, checksum: item.sha256, reason: "not_renderable" });
-      continue;
-    }
-    const matching = existing.find((row) => row.checksum === item.sha256 && row.documentType === item.document_type.toUpperCase());
-    if (matching && JSON.stringify(matching.variables ?? []) === JSON.stringify(variables)) {
-      skipped.push({ name: item.name, checksum: item.sha256, reason: "already_registered" });
       continue;
     }
     const filename = item.file.split("/").pop() ?? `${item.name}.docx`;
@@ -785,7 +828,7 @@ documentWorkspaceRoutes.post("/admin/templates/import-official", async (c) => {
       content: bytes,
     });
     const created = await repo.createSystemVersion({
-      familyId: matching?.familyId,
+      familyId,
       name: item.name,
       documentType: item.document_type.toUpperCase(),
       category: item.category,

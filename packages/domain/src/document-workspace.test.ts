@@ -34,14 +34,15 @@ describe("generatedFileName", () => {
       version: 1,
       extension: "docx",
     });
-    expect(name).toBe("STAGING-E2E-2026_OPINION-LEGAL_2026-08-26_v1.docx");
+    expect(name).toBe("STAGING-E2E-2026 - Concepto jurídico - 2026-08-26 - v1.docx");
+    expect(name).not.toContain("OPINION");
     expect(name).not.toMatch(/exe_|[a-f0-9]{16}/);
   });
 
   it("normaliza acentos y produce PDF con la misma raíz", () => {
     const base = { reference: "R1", documentType: "Demanda", date, version: 2 } as const;
-    expect(generatedFileName({ ...base, extension: "docx" })).toBe("R1_DEMANDA_2026-08-26_v2.docx");
-    expect(generatedFileName({ ...base, extension: "pdf" })).toBe("R1_DEMANDA_2026-08-26_v2.pdf");
+    expect(generatedFileName({ ...base, extension: "docx" })).toBe("R1 - Demanda - 2026-08-26 - v2.docx");
+    expect(generatedFileName({ ...base, extension: "pdf" })).toBe("R1 - Demanda - 2026-08-26 - v2.pdf");
   });
 });
 

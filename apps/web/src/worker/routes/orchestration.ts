@@ -285,7 +285,7 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
   return c.json({
     root_execution_id: rootExecutionId,
     status: root.status,
-    outcome: deriveOutcome({ rootStatus: root.status, evidenceChunkCount }),
+    outcome: deriveOutcome({ rootStatus: root.status, evidenceChunkCount, documentCount: docs.length }),
     outputs,
     evidence: { chunk_count: evidenceChunkCount, documents: evidenceDocuments },
   });
@@ -346,12 +346,16 @@ orchestrationRoutes.post("/executions/:rootExecutionId/cancel", async (c) => {
   const rootExecutionId = c.req.param("rootExecutionId");
 
   const root = await executions.findById(rootExecutionId);
-  if (!root || root.organizationId !== organizationId) {
+  const systemSuperadmin = await authz.isSystemSuperadmin(userId);
+  if (!root || (root.organizationId !== organizationId && !systemSuperadmin)) {
     throw new IusiaError("NOT_FOUND", "Ejecución no encontrada");
   }
-  await authz.authorizeMatter(organizationId, userId, root.matterId, "execution:cancel");
+  const control = await authz.authorizeExecutionCancel(userId, root);
 
   if (TERMINAL_STATUSES.includes(root.status as (typeof TERMINAL_STATUSES)[number])) {
+    if (root.status === "CANCELLED") {
+      return c.json({ ok: true, status: "CANCELLED" });
+    }
     throw new IusiaError("CONFLICT", "La ejecución ya finalizó y no puede cancelarse", {
       status: root.status,
     });
@@ -368,26 +372,31 @@ orchestrationRoutes.post("/executions/:rootExecutionId/cancel", async (c) => {
   }
 
   await executions.transition(rootExecutionId, "CANCELLED", {
-    errorCode: "CANCELLED_BY_USER",
-    errorMessage: `Cancelada por ${userId}`,
+    errorCode: control.reason,
+    errorMessage: `Cancelada por ${control.actorControlRole}`,
   });
   await events.append({
-    organizationId,
+    organizationId: root.organizationId,
     matterId: root.matterId,
     rootExecutionId,
     executionId: rootExecutionId,
     type: "agent.cancelled",
     status: "CANCELLED",
-    detail: { cancelled_by: userId },
+    detail: { actor_control_role: control.actorControlRole, reason: control.reason },
   });
   await audit.record({
-    organizationId,
+    organizationId: root.organizationId,
     matterId: root.matterId,
     actorUserId: userId,
     action: "execution.cancel",
     resourceType: "execution",
     resourceId: rootExecutionId,
     outcome: "SUCCESS",
+    reason: control.reason,
+    detail: {
+      actor_control_role: control.actorControlRole,
+      root_execution_id: rootExecutionId,
+    },
   });
 
   return c.json({ ok: true, status: "CANCELLED" });

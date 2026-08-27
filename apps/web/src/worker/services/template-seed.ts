@@ -1,6 +1,6 @@
 import { TemplateRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
-import { DriveCredentialResolver } from "./drive-credentials.js";
+import { OrganizationStorageResolver } from "./drive-credentials.js";
 import { DriveWorkspaceService } from "./drive-workspace.js";
 
 /**
@@ -59,8 +59,11 @@ export async function seedOpinionTemplate(
     return { template_id: OPINION_TEMPLATE_ID, source_ref: existing.sourceRef, created: false };
   }
 
-  const resolver = DriveCredentialResolver.forEnv(env);
-  const drive = await resolver.resolveAdapter(userId, { requireWrite: true });
+  // Las plantillas de sistema pertenecen al almacenamiento de plataforma, no al
+  // actor que dispara el seed. Así un SYSTEM_SUPERADMIN sin Google vinculado no
+  // altera la disponibilidad ni recibe credenciales de almacenamiento.
+  const resolver = OrganizationStorageResolver.forEnv(env);
+  const drive = await resolver.resolvePlatformAdapter({ requireWrite: true });
   const workspace = DriveWorkspaceService.forEnv(env);
   const { templates: templatesFolder } = await workspace.ensureFirmStructure(userId, organizationId);
 

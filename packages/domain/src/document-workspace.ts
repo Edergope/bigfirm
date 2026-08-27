@@ -62,11 +62,18 @@ export function generatedFileName(input: {
   version: number;
   extension: "docx" | "pdf";
 }): string {
-  const ref = sanitizeToken(input.reference) || "SIN-REF";
-  const type = sanitizeToken(input.documentType) || "DOCUMENTO";
+  const ref = sanitizeName(input.reference) || "SIN-REF";
+  const type = humanDocumentTypeLabel(input.documentType);
   const day = input.date.toISOString().slice(0, 10);
   const v = Math.max(1, Math.floor(input.version));
-  return `${ref}_${type}_${day}_v${v}.${input.extension}`;
+  return `${ref} - ${type} - ${day} - v${v}.${input.extension}`;
+}
+
+/** Etiqueta visible de tipo documental. Los enums internos nunca nombran archivos. */
+export function humanDocumentTypeLabel(documentType: string): string {
+  const normalized = sanitizeToken(documentType);
+  if (normalized === "OPINION" || normalized === "OPINION-LEGAL") return "Concepto jurídico";
+  return sanitizeName(documentType) || "Documento";
 }
 
 /** MIME de exportación de un Google Doc nativo. */

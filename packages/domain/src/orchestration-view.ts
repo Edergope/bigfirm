@@ -72,13 +72,15 @@ export function selectIntegratorExecution<T extends ExecutionView>(
 export function deriveOutcome(args: {
   rootStatus: string;
   evidenceChunkCount: number;
+  documentCount?: number;
 }): OrchestrationOutcome {
-  const { rootStatus, evidenceChunkCount } = args;
+  const { rootStatus, evidenceChunkCount, documentCount } = args;
   if (rootStatus === "CANCELLED") return "CANCELLED";
   if (rootStatus === "FAILED") return "FAILED";
   if (rootStatus === "BLOCKED") return "BLOCKED";
   if (!isTerminalStatus(rootStatus)) return "RUNNING";
   // COMPLETED
+  if (documentCount === 0) return "COMPLETED";
   return evidenceChunkCount > 0 ? "COMPLETED" : "INSUFFICIENT_EVIDENCE";
 }
 
@@ -122,13 +124,15 @@ export function deriveProgressStages(args: {
   events: readonly EventView[];
   executions: readonly ExecutionView[];
   rootExecutionId: string;
+  documentCount?: number;
 }): ProgressStage[] {
-  const { rootStatus, events, executions, rootExecutionId } = args;
+  const { rootStatus, events, executions, rootExecutionId, documentCount } = args;
 
   const hasAnyEvent = events.length > 0;
   const retrieval = events.find(
     (e) => e.type === "agent.tool.called" && e.detail?.tool === "ai_search.retrieval",
   );
+  const hasNoDocuments = documentCount === 0;
   const rootTerminal = isTerminalStatus(rootStatus);
 
   const stages: ProgressStage[] = [];
@@ -136,15 +140,22 @@ export function deriveProgressStages(args: {
   // 1. Encargo recibido.
   stages.push({ key: "received", state: hasAnyEvent ? "done" : "active" });
 
-  // 2. Recuperación de evidencia.
-  const evidenceState: StageState = retrieval
-    ? "done"
-    : rootTerminal
+  // 2. Base del análisis. Con cero documentos no se inventa una fase RAG.
+  if (hasNoDocuments) {
+    stages.push({
+      key: "facts",
+      state: rootTerminal ? "done" : hasAnyEvent ? "active" : "pending",
+    });
+  } else {
+    const evidenceState: StageState = retrieval
       ? "done"
-      : hasAnyEvent
-        ? "active"
-        : "pending";
-  stages.push({ key: "evidence", state: evidenceState });
+      : rootTerminal
+        ? "done"
+        : hasAnyEvent
+          ? "active"
+          : "pending";
+    stages.push({ key: "evidence", state: evidenceState });
+  }
 
   // 3. Una etapa por AGENTE, no por fila de ejecución.
   //

@@ -3,6 +3,7 @@ import {
   IusiaError,
   decideMatterAccess,
   type AccessDecision,
+  type ExecutionStatus,
   isSystemRole,
   type FirmRole,
   type MatterAction,
@@ -146,6 +147,40 @@ export class AuthorizationService {
     }
 
     return decision;
+  }
+
+  /**
+   * Autoriza control operacional sobre una ejecución sin conceder acceso al
+   * contenido del Matter. Dirección puede detener ejecuciones de su firma; sistema
+   * puede usar el kill switch global; miembros del Matter conservan su ACL normal.
+   */
+  async authorizeExecutionCancel(
+    actorUserId: string,
+    execution: { organizationId: string; matterId: string; id: string; status: string },
+  ): Promise<{ actorControlRole: "MATTER_MEMBER" | "FIRM_DIRECTOR" | "SYSTEM_SUPERADMIN"; reason: string }> {
+    if ((await this.systemRole(actorUserId)) === "SYSTEM_SUPERADMIN") {
+      return { actorControlRole: "SYSTEM_SUPERADMIN", reason: "CANCELLED_BY_SYSTEM_ADMIN" };
+    }
+
+    const firmRole = await this.firmRole(execution.organizationId, actorUserId);
+    if (firmRole === "FIRM_DIRECTOR") {
+      return { actorControlRole: "FIRM_DIRECTOR", reason: "CANCELLED_BY_FIRM_DIRECTOR" };
+    }
+
+    const decision = await this.authorizeMatter(
+      execution.organizationId,
+      actorUserId,
+      execution.matterId,
+      "execution:cancel",
+    );
+    if (decision.allowed) {
+      return { actorControlRole: "MATTER_MEMBER", reason: "CANCELLED_BY_MATTER_MEMBER" };
+    }
+
+    throw new IusiaError("FORBIDDEN", "No autorizado para detener esta ejecución", {
+      execution_id: execution.id,
+      status: execution.status as ExecutionStatus,
+    });
   }
 
   /** True si el usuario puede ver la cartera completa de la firma. */
