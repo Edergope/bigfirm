@@ -598,16 +598,6 @@ function DocFolder({
                   </span>
                 </span>
                 <StatusChip label={st.label} tone={st.tone} title={st.hint} />
-                {d.drive_file_id ? (
-                  <a
-                    href={`https://drive.google.com/file/d/${d.drive_file_id}/view`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 text-[12px] font-medium text-iusia-action hover:underline"
-                  >
-                    Abrir en Drive
-                  </a>
-                ) : null}
               </li>
             );
           })}
@@ -1261,4 +1251,3 @@ function Actividad({ data }: { data: MatterDetail }) {
     </Module>
   );
 }
-

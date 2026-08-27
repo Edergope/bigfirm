@@ -81,12 +81,12 @@ export const ANALYSIS_TERMS: Record<string, TermPresentation> = {
 
 /** Papel de una persona DENTRO de un expediente concreto. */
 export const MATTER_ROLE_TERMS: Record<string, TermPresentation> = {
-  OWNER: { label: "Responsable", hint: "Dirige el expediente.", tone: "info" },
-  COLLABORATOR: { label: "Colabora", tone: "neutral" },
-  REVIEWER: { label: "Revisa", tone: "neutral" },
-  ASSISTANT: { label: "Apoya", tone: "neutral" },
-  EXTERNAL: { label: "Externo", hint: "Ajeno a la firma.", tone: "warning" },
-  READ_ONLY: { label: "Sólo lectura", tone: "neutral" },
+  OWNER: { label: "Abogado líder", hint: "Dirige el expediente.", tone: "info" },
+  COLLABORATOR: { label: "Abogado colaborador", tone: "neutral" },
+  REVIEWER: { label: "Revisor", tone: "neutral" },
+  ASSISTANT: { label: "Asistente", tone: "neutral" },
+  EXTERNAL: { label: "Abogado externo", hint: "Ajeno a la firma.", tone: "warning" },
+  READ_ONLY: { label: "Consulta", tone: "neutral" },
 };
 
 /** Tareas y términos procesales. */

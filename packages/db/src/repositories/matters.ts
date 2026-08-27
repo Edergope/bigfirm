@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, inArray } from "drizzle-orm";
+import { and, desc, eq, isNull, inArray, ne } from "drizzle-orm";
 import {
   IusiaError,
   newId,
@@ -157,6 +157,62 @@ export class MatterRepository {
         target: [matterMembers.matterId, matterMembers.userId],
         set: { role, revokedAt: null, grantedAt: now, grantedBy },
       });
+  }
+
+  /**
+   * Establece el único abogado líder activo. D1 ejecuta el lote de forma atómica:
+   * cualquier OWNER previo pasa a COLLABORATOR y el nuevo queda OWNER.
+   */
+  async assignLead(
+    organizationId: string,
+    matterId: string,
+    userId: string,
+    grantedBy: string,
+  ): Promise<{ previousOwnerIds: string[] }> {
+    const previous = await this.db
+      .select({ userId: matterMembers.userId })
+      .from(matterMembers)
+      .where(
+        and(
+          eq(matterMembers.organizationId, organizationId),
+          eq(matterMembers.matterId, matterId),
+          eq(matterMembers.role, "OWNER"),
+          isNull(matterMembers.revokedAt),
+        ),
+      );
+    const now = new Date().toISOString();
+    await this.db.batch([
+      this.db
+        .update(matterMembers)
+        .set({ role: "COLLABORATOR", grantedAt: now, grantedBy })
+        .where(
+          and(
+            eq(matterMembers.organizationId, organizationId),
+            eq(matterMembers.matterId, matterId),
+            eq(matterMembers.role, "OWNER"),
+            ne(matterMembers.userId, userId),
+            isNull(matterMembers.revokedAt),
+          ),
+        ),
+      this.db
+        .insert(matterMembers)
+        .values({
+          id: crypto.randomUUID(),
+          organizationId,
+          matterId,
+          userId,
+          role: "OWNER",
+          delegatedByUserId: null,
+          grantedBy,
+          grantedAt: now,
+          revokedAt: null,
+        })
+        .onConflictDoUpdate({
+          target: [matterMembers.matterId, matterMembers.userId],
+          set: { role: "OWNER", revokedAt: null, grantedAt: now, grantedBy },
+        }),
+    ]);
+    return { previousOwnerIds: previous.map((row) => row.userId).filter((id) => id !== userId) };
   }
 
   async revokeMember(matterId: string, userId: string): Promise<void> {

@@ -70,7 +70,7 @@ export function Documents() {
   return (
     <div className="flex min-h-0 flex-col pb-2">
       <ScreenTitle eyebrow="Expediente digital" title="Documentos" description="Consulta, previsualiza y versiona los archivos de los expedientes a los que tienes acceso." />
-      <div className="grid min-h-[650px] overflow-hidden rounded-[var(--radius-lg)] bg-iusia-paper shadow-[var(--shadow-surface)] lg:grid-cols-[230px_minmax(300px,0.82fr)_minmax(380px,1.45fr)]">
+      <div className="grid min-h-[calc(100vh-185px)] overflow-hidden rounded-[var(--radius-lg)] bg-iusia-paper shadow-[var(--shadow-surface)] lg:grid-cols-[190px_minmax(250px,0.48fr)_minmax(0,1.35fr)]">
         <aside className="border-b border-iusia-mist/25 bg-iusia-ice/45 p-3 lg:border-b-0 lg:border-r" aria-label="Expedientes autorizados">
           <div className="flex items-center justify-between px-2 pb-3 pt-1">
             <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-iusia-mist-text">Expedientes</h2>
@@ -105,7 +105,7 @@ export function Documents() {
             </label>
           </div>
           {folder === "uploaded" ? <div onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); void uploadFiles(event.dataTransfer.files); }} className={clsx("m-3 rounded-[12px] border border-dashed px-3 py-3 transition-colors", dragging ? "border-iusia-action bg-iusia-action/5" : "border-iusia-mist/45 bg-iusia-ice/25")}>
-            <div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-iusia-navy text-iusia-intel"><Upload size={15} /></span><div className="min-w-0 flex-1"><p className="text-[12.5px] font-medium text-iusia-navy">Arrastra archivos aquí</p><p className="text-[11px] text-iusia-mist-text">o selecciónalos · hasta 50 MB por archivo</p></div><Button size="sm" variant="secondary" onClick={() => fileInput.current?.click()}>Seleccionar</Button><input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.target.value = ""; }} /></div>
+            <div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-iusia-navy text-iusia-intel"><Upload size={15} /></span><div className="min-w-0 flex-1"><p className="text-[12.5px] font-medium text-iusia-navy">Nuevo documento</p><p className="text-[11px] text-iusia-mist-text">Crea un documento v1 · hasta 50 MB</p></div><Button size="sm" onClick={() => fileInput.current?.click()}><Upload size={13} /> Subir documento</Button><input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.target.value = ""; }} /></div>
             {uploads.length > 0 ? <div className="mt-3 space-y-1.5 border-t border-iusia-mist/20 pt-2.5">{uploads.slice(0, 4).map((item) => <UploadRow key={item.id} item={item} />)}</div> : null}
           </div> : null}
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -113,7 +113,7 @@ export function Documents() {
           </div>
         </section>
 
-        <section className="min-h-[520px] min-w-0 bg-iusia-surface/45" aria-label="Vista previa">
+        <section className="min-h-[calc(100vh-185px)] min-w-0 bg-iusia-surface/45" aria-label="Vista previa">
           {selected && matterId ? <DocumentInspector matterId={matterId} document={selected} /> : <div className="flex h-full min-h-[520px] flex-col items-center justify-center px-8 text-center"><FileArchive size={28} className="text-iusia-mist" /><p className="mt-3 text-[14px] font-medium text-iusia-navy">Selecciona un documento</p><p className="mt-1 max-w-sm text-[12.5px] leading-relaxed text-iusia-mist-text">La vista previa, las versiones y las acciones aparecerán aquí.</p></div>}
         </section>
       </div>
@@ -145,7 +145,7 @@ function DocumentInspector({ matterId, document }: { matterId: string; document:
   const currentStatus = humanIngestion(selectedVersion?.ingestion_status ?? document.ingestion_status);
   const contentUrl = api.documentContentUrl(matterId, document.id, version);
   const downloadUrl = api.documentContentUrl(matterId, document.id, version, true);
-  return <div className="flex h-full min-h-[520px] flex-col">
+  return <div className="flex h-full min-h-[calc(100vh-185px)] flex-col">
     <header className="border-b border-iusia-mist/20 bg-iusia-paper px-4 py-3">
       <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><h2 className="truncate text-[14px] font-semibold text-iusia-navy">{selectedVersion?.filename ?? document.name}</h2><div className="mt-1.5 flex flex-wrap items-center gap-2"><StatusChip label={`v${version}${version === document.current_version ? " · vigente" : ""}`} tone={version === document.current_version ? "info" : "neutral"} /><StatusChip label={currentStatus.label} tone={currentStatus.tone} /><span className="text-[11.5px] text-iusia-mist-text">{formatBytes(selectedVersion?.size_bytes ?? document.size_bytes)}</span></div></div><a href={downloadUrl} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-iusia-mist/35 bg-iusia-paper px-2.5 text-[12px] font-medium text-iusia-navy transition-colors hover:border-iusia-action/40 hover:text-iusia-action focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iusia-action/35"><Download size={13} /> Descargar</a></div>
       <div className="mt-3 flex items-center gap-2"><label className="flex items-center gap-1.5 text-[11.5px] text-iusia-mist-text"><History size={13} /> Versión<select value={version} onChange={(event) => setVersion(Number(event.target.value))} className="rounded-[7px] border border-iusia-mist/35 bg-iusia-paper px-2 py-1 text-[12px] font-medium text-iusia-navy outline-none focus:ring-2 focus:ring-iusia-action/30">{(versions.data?.versions ?? [{ version_number: document.current_version }]).map((item) => <option key={item.version_number} value={item.version_number}>v{item.version_number}{item.version_number === document.current_version ? " — vigente" : ""}</option>)}</select></label><Button size="sm" variant="secondary" onClick={() => setShowVersionForm((value) => !value)}><RefreshCw size={13} /> Subir nueva versión</Button></div>
@@ -174,7 +174,7 @@ export function FileViewer({ mime, url, name }: { mime: string; url: string; nam
   if (mime === "application/pdf") {
     const base = url.split("#")[0]!;
     const src = `${base}#zoom=${fit ? "page-width" : zoom}`;
-    return <ViewerFrame fit={fit} zoom={zoom} onDecrease={decrease} onIncrease={increase} onFit={useFit}><iframe src={src} title={`Vista previa de ${name}`} className="h-[calc(100vh-250px)] min-h-[560px] w-full rounded-b-[10px] bg-iusia-paper" /></ViewerFrame>;
+    return <ViewerFrame fit={fit} zoom={zoom} onDecrease={decrease} onIncrease={increase} onFit={useFit}><iframe src={src} title={`Vista previa de ${name}`} className="h-[calc(100vh-285px)] min-h-[620px] w-full rounded-b-[10px] bg-iusia-paper" /></ViewerFrame>;
   }
   if (mime.startsWith("image/")) return <div className="flex min-h-[420px] items-center justify-center rounded-[10px] bg-iusia-paper p-4 shadow-[var(--shadow-surface)]"><img src={url} alt={`Vista previa de ${name}`} className="max-h-[620px] max-w-full object-contain" /></div>;
   if (mime.startsWith("video/")) return <div className="flex min-h-[420px] items-center rounded-[10px] bg-iusia-navy p-3"><video src={url} controls className="max-h-[620px] w-full" aria-label={`Vista previa de ${name}`} /></div>;
@@ -229,7 +229,7 @@ function DocxViewer({ url, fit, zoom }: { url: string; fit: boolean; zoom: numbe
     return () => { observer.disconnect(); timers.forEach((timer) => window.clearTimeout(timer)); };
   }, [fit, zoom, url, error, renderTick]);
   if (error) return <ViewerError message={error} />;
-  return <div ref={outerRef} className="h-[calc(100vh-250px)] min-h-[560px] overflow-auto bg-[#e7e8eb] p-4">
+  return <div ref={outerRef} className="h-[calc(100vh-285px)] min-h-[620px] overflow-auto bg-[#e7e8eb] p-4">
     <div className="mx-auto" style={{ height: scaledHeight ?? undefined, width: scaledWidth ?? undefined }}>
       <div ref={ref} className="w-fit origin-top-left [&_.iusia-docx-wrapper]:bg-transparent [&_.iusia-docx-wrapper]:p-0 [&_section]:mx-auto [&_section]:shadow-[0_8px_28px_-12px_rgba(11,29,58,0.28)]" style={{ transform: `scale(${fitScale})` }} />
     </div>

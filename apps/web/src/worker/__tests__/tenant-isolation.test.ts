@@ -156,6 +156,22 @@ describe("ACL por Matter dentro de una firma", () => {
     );
   });
 
+  it("ASSIGN_MATTER_LEAD mantiene un único OWNER activo y conserva al anterior como colaborador", async () => {
+    const newLead = addUser(t, org, "nuevo-lider@x.test", "LAWYER");
+    const result = await t.matters.assignLead(org, matter, newLead, director);
+    expect(result.previousOwnerIds).toEqual([lawyerOwner]);
+    expect(await t.matters.roleFor(matter, newLead)).toBe("OWNER");
+    expect(await t.matters.roleFor(matter, lawyerOwner)).toBe("COLLABORATOR");
+    expect((await t.matters.listMembers(matter)).filter((member) => member.role === "OWNER")).toHaveLength(1);
+  });
+
+  it("un miembro de firma recién añadido no ve matters hasta recibir ACL explícito", async () => {
+    const invitedLawyer = addUser(t, org, "invitado@x.test", "LAWYER");
+    expect(await t.matters.listForUser(org, invitedLawyer, { includeAll: false })).toHaveLength(0);
+    await t.matters.addMember(org, matter, invitedLawyer, "ASSISTANT", lawyerOwner);
+    expect((await t.matters.listForUser(org, invitedLawyer, { includeAll: false })).map((row) => row.id)).toEqual([matter]);
+  });
+
   it("una denegación queda registrada en el audit ledger", async () => {
     await expectDenied(() =>
       t.authz.authorizeMatter(org, otherLawyer, matter, "matter:read"),

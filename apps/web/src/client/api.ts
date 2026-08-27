@@ -319,6 +319,30 @@ export const api = {
       }>;
     }>("/api/admin/matter-access"),
 
+  matterTeam: (matterId: string) =>
+    request<{
+      members: Array<{ userId: string; role: string; name: string; email: string }>;
+      firm_members: Array<{ userId: string; role: string; name: string; email: string }>;
+    }>(`/api/admin/matters/${matterId}/team`),
+
+  assignMatterLead: (matterId: string, userId: string) =>
+    request<{ ok: true }>(`/api/admin/matters/${matterId}/lead`, {
+      method: "POST", body: JSON.stringify({ user_id: userId }),
+    }),
+
+  addMatterMember: (matterId: string, userId: string, role: string) =>
+    request<{ ok: true }>(`/api/admin/matters/${matterId}/members`, {
+      method: "POST", body: JSON.stringify({ user_id: userId, role }),
+    }),
+
+  setMatterMemberRole: (matterId: string, userId: string, role: string) =>
+    request<{ ok: true }>(`/api/admin/matters/${matterId}/members/${userId}`, {
+      method: "PATCH", body: JSON.stringify({ role }),
+    }),
+
+  revokeMatterMember: (matterId: string, userId: string) =>
+    request<{ ok: true }>(`/api/admin/matters/${matterId}/members/${userId}`, { method: "DELETE" }),
+
   systemExecutions: () =>
     request<{
       executions: Array<{

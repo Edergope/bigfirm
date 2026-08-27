@@ -53,6 +53,36 @@ export function serverInvitationPayload(
   return { ...input, organizationId };
 }
 
+const MatterTeamMemberInput = z.object({ user_id: z.string().min(1), role: MatterRole });
+const MatterTeamLeadInput = z.object({ user_id: z.string().min(1) });
+
+async function requireMatterTeamManager(
+  c: Context<AppBindings>,
+  matterId: string,
+): Promise<void> {
+  const { authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const firmRole = await authz.firmRole(organizationId, userId);
+  if (firmRole === "FIRM_DIRECTOR") return;
+  await authz.authorizeMatter(organizationId, userId, matterId, "matter:manage_members");
+}
+
+async function requireActiveFirmMember(
+  c: Context<AppBindings>,
+  targetUserId: string,
+): Promise<{ role: string; name: string; email: string }> {
+  const { db } = c.get("ctx");
+  const { organizationId } = c.get("session");
+  const [member] = await db
+    .select({ role: schema.member.role, name: schema.user.name, email: schema.user.email })
+    .from(schema.member)
+    .innerJoin(schema.user, eq(schema.member.userId, schema.user.id))
+    .where(and(eq(schema.member.organizationId, organizationId), eq(schema.member.userId, targetUserId)))
+    .limit(1);
+  if (!member) throw new IusiaError("NOT_FOUND", "La persona no pertenece a esta firma");
+  return member;
+}
+
 /** Miembros de la firma con su rol. */
 /**
  * Acceso a expedientes de toda la firma, para administración.
@@ -85,6 +115,98 @@ adminRoutes.get("/matter-access", async (c) => {
   );
   void db;
   return c.json({ matters: rows });
+});
+
+/** Equipo operativo de un expediente: sólo miembros de la misma firma. */
+adminRoutes.get("/matters/:matterId/team", async (c) => {
+  const { matters, db } = c.get("ctx");
+  const { organizationId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  await requireMatterTeamManager(c, matterId);
+  if (!(await matters.findById(organizationId, matterId))) {
+    throw new IusiaError("NOT_FOUND", "Expediente no encontrado");
+  }
+  const firmMembers = await db
+    .select({ userId: schema.member.userId, role: schema.member.role, name: schema.user.name, email: schema.user.email })
+    .from(schema.member)
+    .innerJoin(schema.user, eq(schema.member.userId, schema.user.id))
+    .where(eq(schema.member.organizationId, organizationId));
+  return c.json({ members: await matters.listMembers(matterId), firm_members: firmMembers });
+});
+
+/** Releva al abogado líder sin permitir dos OWNER activos. */
+adminRoutes.post("/matters/:matterId/lead", async (c) => {
+  const { matters, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  await requireMatterTeamManager(c, matterId);
+  if (!(await matters.findById(organizationId, matterId))) {
+    throw new IusiaError("NOT_FOUND", "Expediente no encontrado");
+  }
+  const parsed = MatterTeamLeadInput.safeParse(await c.req.json());
+  if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Abogado líder inválido");
+  const target = await requireActiveFirmMember(c, parsed.data.user_id);
+  if (!["LAWYER", "PARTNER", "FIRM_DIRECTOR"].includes(target.role)) {
+    throw new IusiaError("VALIDATION_FAILED", "Esta persona no puede ser abogado líder");
+  }
+  const result = await matters.assignLead(organizationId, matterId, parsed.data.user_id, userId);
+  await audit.record({
+    organizationId, matterId, actorUserId: userId,
+    action: result.previousOwnerIds.length ? "matter.lead.reassigned" : "matter.lead.assigned",
+    resourceType: "matter_member", resourceId: parsed.data.user_id, outcome: "SUCCESS",
+    detail: { previous_owner_ids: result.previousOwnerIds },
+  });
+  return c.json({ ok: true, lead: { user_id: parsed.data.user_id, name: target.name, email: target.email } });
+});
+
+adminRoutes.post("/matters/:matterId/members", async (c) => {
+  const { matters, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  await requireMatterTeamManager(c, matterId);
+  const parsed = MatterTeamMemberInput.safeParse(await c.req.json());
+  if (!parsed.success || parsed.data.role === "OWNER") {
+    throw new IusiaError("VALIDATION_FAILED", "Miembro o rol de expediente inválido");
+  }
+  const target = await requireActiveFirmMember(c, parsed.data.user_id);
+  if (parsed.data.role === "ASSISTANT" && !["ASSISTANT", "PARALEGAL"].includes(target.role)) {
+    throw new IusiaError("VALIDATION_FAILED", "Selecciona un asistente o paralegal para este rol");
+  }
+  if (parsed.data.role === "EXTERNAL" && target.role !== "EXTERNAL_LAWYER") {
+    throw new IusiaError("VALIDATION_FAILED", "El rol externo requiere un abogado externo de la firma");
+  }
+  await matters.addMember(organizationId, matterId, parsed.data.user_id, parsed.data.role, userId);
+  await audit.record({ organizationId, matterId, actorUserId: userId, action: "matter.member.grant", resourceType: "matter_member", resourceId: parsed.data.user_id, outcome: "SUCCESS", detail: { role: parsed.data.role } });
+  return c.json({ ok: true });
+});
+
+adminRoutes.patch("/matters/:matterId/members/:userId", async (c) => {
+  const { matters, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const targetUserId = c.req.param("userId");
+  await requireMatterTeamManager(c, matterId);
+  const parsed = MatterTeamMemberInput.pick({ role: true }).safeParse(await c.req.json());
+  if (!parsed.success || parsed.data.role === "OWNER") throw new IusiaError("VALIDATION_FAILED", "Usa la acción de abogado líder para asignar OWNER");
+  await requireActiveFirmMember(c, targetUserId);
+  if (!(await matters.roleFor(matterId, targetUserId))) throw new IusiaError("NOT_FOUND", "La persona no pertenece al expediente");
+  await matters.addMember(organizationId, matterId, targetUserId, parsed.data.role, userId);
+  await audit.record({ organizationId, matterId, actorUserId: userId, action: "matter.member.role.set", resourceType: "matter_member", resourceId: targetUserId, outcome: "SUCCESS", detail: { role: parsed.data.role } });
+  return c.json({ ok: true });
+});
+
+adminRoutes.delete("/matters/:matterId/members/:userId", async (c) => {
+  const { matters, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const targetUserId = c.req.param("userId");
+  await requireMatterTeamManager(c, matterId);
+  const role = await matters.roleFor(matterId, targetUserId);
+  if (!role) throw new IusiaError("NOT_FOUND", "La persona no pertenece al expediente");
+  if (role === "OWNER") throw new IusiaError("CONFLICT", "Primero asigna otro abogado líder antes de retirar al actual");
+  await matters.revokeMember(matterId, targetUserId);
+  await audit.record({ organizationId, matterId, actorUserId: userId, action: "matter.member.revoke", resourceType: "matter_member", resourceId: targetUserId, outcome: "SUCCESS" });
+  return c.json({ ok: true });
 });
 
 adminRoutes.get("/members", async (c) => {
