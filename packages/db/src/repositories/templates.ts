@@ -113,6 +113,8 @@ export class TemplateRepository {
     if (!row || row.scope !== "SYSTEM") return null;
     const now = new Date().toISOString();
     if (status === "ACTIVE") {
+      // La invariancia es por familia, no por checksum: el mismo DOCX puede estar
+      // preservado en familias editoriales distintas.
       await this.db
         .update(templates)
         .set({ status: "INACTIVE", updatedAt: now })
