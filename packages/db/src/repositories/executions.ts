@@ -1,5 +1,6 @@
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import {
+  ABANDONED_ROOT_AFTER_MINUTES,
   IusiaError,
   assertDetailIsSafe,
   canTransition,
@@ -119,7 +120,13 @@ export class ExecutionRepository {
    * Devuelve sólo raíces (sin padre); el filtrado por acceso a expediente lo aplica
    * la capa de rutas, que es donde vive la autorización.
    */
-  async listActiveRoots(organizationId: string, limit = 20) {
+  async listActiveRoots(organizationId: string, limit = 20, now: Date = new Date()) {
+    // Una raíz creada hace más que el margen de abandono y todavía no terminal no
+    // está trabajando: su workflow murió sin cerrar el ledger. Seguirla contando hacía
+    // que el indicador de la firma afirmara análisis en curso que no existían.
+    const cutoff = new Date(
+      now.getTime() - ABANDONED_ROOT_AFTER_MINUTES * 60_000,
+    ).toISOString();
     return this.db
       .select()
       .from(executions)
@@ -128,6 +135,31 @@ export class ExecutionRepository {
           eq(executions.organizationId, organizationId),
           isNull(executions.parentExecutionId),
           inArray(executions.status, ["PENDING", "RUNNING", "WAITING", "BLOCKED"]),
+          gte(executions.createdAt, cutoff),
+        ),
+      )
+      .orderBy(desc(executions.createdAt))
+      .limit(limit);
+  }
+
+  /**
+   * Raíces no terminales que ya superaron el margen de abandono. No se tocan desde
+   * una ruta de lectura —eso borraría evidencia—: se exponen para que la autoridad de
+   * sistema sepa que existen y decida.
+   */
+  async listAbandonedRoots(organizationId: string, limit = 20, now: Date = new Date()) {
+    const cutoff = new Date(
+      now.getTime() - ABANDONED_ROOT_AFTER_MINUTES * 60_000,
+    ).toISOString();
+    return this.db
+      .select()
+      .from(executions)
+      .where(
+        and(
+          eq(executions.organizationId, organizationId),
+          isNull(executions.parentExecutionId),
+          inArray(executions.status, ["PENDING", "RUNNING", "WAITING", "BLOCKED"]),
+          lt(executions.createdAt, cutoff),
         ),
       )
       .orderBy(desc(executions.createdAt))

@@ -37,7 +37,7 @@ import {
   ShieldAlert,
   Users,
 } from "lucide-react";
-import type { RiskLevel } from "@iusia/domain";
+import { matterLoadFailure, type RiskLevel } from "@iusia/domain";
 import {
   api,
   ApiError,
@@ -137,6 +137,12 @@ export function MatterWorkspace() {
     queryKey: ["matter", matterId],
     queryFn: () => api.getMatter(matterId),
     enabled: matterId.length > 0,
+    // Un fallo transitorio del servicio no es un expediente inexistente. Se reintenta
+    // sólo lo que puede recuperarse; 404 y 403 son respuestas definitivas y volver a
+    // pedirlas sólo retrasa la única frase útil que el abogado puede leer.
+    retry: (failureCount, error) =>
+      failureCount < 3 && (!(error instanceof ApiError) || error.status >= 500),
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
   });
 
   if (detail.isLoading) {
@@ -148,13 +154,27 @@ export function MatterWorkspace() {
     );
   }
   if (detail.error || !detail.data) {
+    // Un 503 transitorio, un expediente inexistente y una falta de autorización son
+    // tres cosas distintas, y sólo una es responsabilidad del abogado. Decirlas todas
+    // como «Expediente no disponible» convertía un problema del servicio en una duda
+    // sobre el propio expediente.
+    const failure = matterLoadFailure(
+      detail.error instanceof ApiError ? detail.error.status : 0,
+    );
     return (
       <Card>
-        <StateBlock
-          kind="error"
-          title="Expediente no disponible"
-          hint={detail.error instanceof ApiError ? detail.error.message : "No fue posible cargar."}
-        />
+        <StateBlock kind="error" title={failure.title} hint={failure.hint} />
+        {failure.retryable ? (
+          <div className="px-5 pb-5">
+            <Button
+              variant="secondary"
+              onClick={() => void detail.refetch()}
+              disabled={detail.isFetching}
+            >
+              {detail.isFetching ? "Reintentando…" : "Reintentar"}
+            </Button>
+          </div>
+        ) : null}
       </Card>
     );
   }

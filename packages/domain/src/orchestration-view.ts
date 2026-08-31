@@ -634,6 +634,72 @@ export function planningWaitHint(args: {
   return "El socio director está estudiando el encargo para decidir qué especialistas intervienen. Suele tardar entre uno y dos minutos.";
 }
 
+/**
+ * Una raíz de orquestación no puede seguir «en curso» indefinidamente.
+ *
+ * El motor tiene un límite duro de tiempo de pared por ejecución, así que una raíz
+ * creada hace mucho más que eso y todavía no terminal no está trabajando: su workflow
+ * murió sin cerrar el ledger. Contarla como activa hace que el indicador de la firma
+ * mienta —«2 análisis en curso» cuando sólo hay uno— y esconde el problema real.
+ *
+ * El margen es deliberadamente generoso (el doble del límite del motor): antes se
+ * oculta un problema que se esconde un análisis lento que sigue vivo.
+ */
+export const ABANDONED_ROOT_AFTER_MINUTES = 30;
+
+export function isAbandonedRoot(createdAt: string, now: Date = new Date()): boolean {
+  const started = Date.parse(createdAt);
+  if (Number.isNaN(started)) return false;
+  return now.getTime() - started > ABANDONED_ROOT_AFTER_MINUTES * 60_000;
+}
+
+/**
+ * Cómo presentar un fallo al cargar un expediente.
+ *
+ * «Expediente no disponible» se mostraba ante CUALQUIER error, de modo que un 503
+ * transitorio era indistinguible de un expediente inexistente o de una falta de
+ * autorización. Son tres cosas distintas y sólo una es responsabilidad del abogado.
+ */
+export function matterLoadFailure(status: number): {
+  title: string;
+  hint: string;
+  retryable: boolean;
+} {
+  if (status === 404) {
+    return {
+      title: "Expediente no encontrado",
+      hint: "Este expediente no existe o no está entre los que tienes asignados.",
+      retryable: false,
+    };
+  }
+  if (status === 403) {
+    return {
+      title: "Sin acceso a este expediente",
+      hint: "No formas parte del equipo de este expediente. Pídeselo a la dirección de la firma.",
+      retryable: false,
+    };
+  }
+  if (status === 401) {
+    return {
+      title: "Sesión expirada",
+      hint: "Vuelve a iniciar sesión para continuar.",
+      retryable: false,
+    };
+  }
+  if (status >= 500 || status === 0) {
+    return {
+      title: "No fue posible cargar el expediente",
+      hint: "Es un problema temporal del servicio, no del expediente. El análisis en curso, si lo hay, sigue trabajando.",
+      retryable: true,
+    };
+  }
+  return {
+    title: "No fue posible cargar el expediente",
+    hint: "Vuelve a intentarlo.",
+    retryable: true,
+  };
+}
+
 export function diffFinishedAnalyses(
   prev: readonly ActiveAnalysisRef[],
   next: readonly ActiveAnalysisRef[],
