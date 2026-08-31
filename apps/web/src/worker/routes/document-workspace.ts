@@ -11,7 +11,7 @@ import {
 } from "../services/document-generation.js";
 import { DocumentDraftError, DocumentDraftService } from "../services/document-draft.js";
 import { SEED_TEMPLATE_IDS, seedOpinionTemplate } from "../services/template-seed.js";
-import { isIndexableMimeType, normalizeToText } from "../services/ingestion.js";
+import { isIndexableMimeType, normalizeToText, setMirrorIndexActive } from "../services/ingestion.js";
 import { discoverTemplateVariables } from "../services/template-placeholders.js";
 
 export const documentWorkspaceRoutes = new Hono<AppBindings>();
@@ -214,17 +214,24 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
   if (!matter) throw new IusiaError("NOT_FOUND", "Expediente no encontrado");
 
   const docs = await documents.listForMatter(organizationId, matterId);
+  // El identificador del proveedor NO viaja al cliente: no le sirve para nada —toda
+  // lectura se resuelve por `document_id` tras comprobar ACL— y exponerlo era la
+  // materia prima de la vinculación cruzada entre expedientes.
   const shape = (d: (typeof docs)[number]) => ({
     id: d.id,
     name: d.name,
     mime_type: d.mimeType,
     status: d.status,
     classification: d.classification,
-    drive_file_id: d.driveFileId,
     current_version: d.currentVersion,
     size_bytes: d.sizeBytes,
     ingestion_status: d.ingestionStatus,
     updated_at: d.updatedAt,
+    content_source: d.contentSource,
+    // Provenance visible del entregable: de qué plantilla y con qué agente salió.
+    generated_from_template_id: d.generatedFromTemplateId,
+    generated_from_template_version: d.generatedFromTemplateVersion,
+    generated_by_agent_id: d.generatedByAgentId,
   });
 
   return c.json({
@@ -365,6 +372,10 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/versions"
     ingestionStatus,
   });
   if (!added) throw new IusiaError("NOT_FOUND", "Documento no encontrado");
+  // La versión anterior deja de ser recuperable EN EL ACTO. Antes, su espejo seguía
+  // indexado como activo hasta que la cola reescribía la clave: durante esa ventana
+  // el índice contenía v1 mientras el expediente ya afirmaba v2.
+  await setMirrorIndexActive(c.env, document.r2MirrorKey, false);
   if (ingestionStatus === "PROCESSING") {
     await c.env.DOCUMENT_INGESTION.send({
       organization_id: organizationId,
@@ -406,12 +417,18 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retire", 
   const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
   for (const version of versions) await drive.moveFile(version.driveFileId, folders.retired);
   if (!await documents.retire({ organizationId, documentId, retiredBy: userId, reason: parsed.data.reason })) throw new IusiaError("CONFLICT", "El documento ya fue retirado");
-  await audit.record({ organizationId, matterId, actorUserId: userId, action: "document.retired", resourceType: "document", resourceId: documentId, outcome: "SUCCESS", detail: { reason: parsed.data.reason ?? null, versions: versions.length } });
-  return c.json({ ok: true });
+  // El retiro llega HASTA EL ÍNDICE. Marcar `retired_at` en D1 y mover los binarios
+  // dejaba el espejo publicado como activo: el documento retirado seguía siendo
+  // recuperable. No se borra nada — el retiro es lógico, auditable y reversible.
+  const deindexed = await setMirrorIndexActive(c.env, document.r2MirrorKey, false);
+  await audit.record({ organizationId, matterId, actorUserId: userId, action: "document.retired", resourceType: "document", resourceId: documentId, outcome: "SUCCESS", detail: { reason: parsed.data.reason ?? null, versions: versions.length, deindexed } });
+  return c.json({ ok: true, deindexed });
 });
 
 const GenerateInput = z.object({
   document_type: z.string().min(1),
+  /** Familia editorial concreta. Obligatoria si hay más de una activa para el tipo. */
+  family_id: z.string().min(1).optional(),
   // Redacción manual: valores explícitos del abogado. Si se omiten, IUSIA redacta.
   values: z.record(z.string(), z.string()).optional(),
   // Indicaciones opcionales del abogado para la redacción del agente.
@@ -444,6 +461,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/generate", async (c) => {
       organizationId,
       matter: { id: matter.id, reference: matter.reference, title: matter.title },
       documentType: parsed.data.document_type,
+      familyId: parsed.data.family_id,
       values: parsed.data.values,
       // Sin valores manuales → el agente 08 redacta el contenido desde el expediente.
       resolveValues: async (variables) => {

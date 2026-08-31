@@ -30,14 +30,20 @@ interface WranglerConfig {
     }>;
   };
   env?: {
-    staging?: {
-      ai?: { binding?: string };
-      vars?: Record<string, unknown>;
-      d1_databases?: Array<{ binding: string; database_id?: string }>;
-      ai_search?: Array<{ binding: string; instance_name?: string }>;
-      queues?: WranglerConfig["queues"];
-    };
+    staging?: WranglerEnv;
+    production?: WranglerEnv;
   };
+}
+
+interface WranglerEnv {
+  ai?: { binding?: string };
+  vars?: Record<string, unknown>;
+  d1_databases?: Array<{ binding: string; database_id?: string }>;
+  r2_buckets?: R2Binding[];
+  ai_search?: Array<{ binding: string; instance_name?: string }>;
+  workflows?: Array<{ binding?: string }>;
+  durable_objects?: { bindings?: Array<{ name?: string }> };
+  queues?: WranglerConfig["queues"];
 }
 
 /** Quita comentarios JSONC (bloque y línea) para poder parsear el objeto real. */
@@ -126,6 +132,65 @@ describe("environment staging (recursos remotos)", () => {
     expect(consumer?.max_batch_size).toBe(4);
     expect(consumer?.max_retries).toBe(3);
     expect(consumer?.dead_letter_queue).toBe("iusia-document-ingestion-dlq");
+  });
+});
+
+/**
+ * Producción existía sólo como hueco: la única configuración desplegable era la base,
+ * sin AI_SEARCH, sin ORCHESTRATION_MODE y con un database_id de marcador. Nada de lo
+ * validado en staging describía un deploy real de producción. Estos tests fijan que
+ * el entorno esté DECLARADO y que sus decisiones sean explícitas, no heredadas.
+ */
+describe("environment production (declarado y fail-closed)", () => {
+  const config = parseJsonc(readFileSync(WRANGLER, "utf8"));
+  const production = config.env?.production;
+
+  it("existe env.production", () => {
+    expect(production).toBeDefined();
+  });
+
+  it("production fija IUSIA_ENV=production (harness dev cerrado)", () => {
+    expect(production?.vars?.IUSIA_ENV).toBe("production");
+    expect(production?.vars?.IUSIA_ENV).not.toBe("development");
+  });
+
+  it("production declara ORCHESTRATION_MODE de forma explícita, no por herencia", () => {
+    // La decisión de correr el planner dinámico en producción debe ser consciente.
+    expect(["pilot", "dynamic"]).toContain(String(production?.vars?.ORCHESTRATION_MODE));
+  });
+
+  it("production declara los mismos bindings que staging (los env no heredan)", () => {
+    expect((production?.d1_databases ?? []).map((d) => d.binding)).toContain("DB");
+    expect((production?.r2_buckets ?? []).map((b) => b.binding)).toEqual(
+      expect.arrayContaining(["PROMPTS", "ARTIFACTS"]),
+    );
+    expect((production?.ai_search ?? []).map((a) => a.binding)).toContain("AI_SEARCH");
+    expect((production?.workflows ?? []).map((w) => w.binding)).toContain("MATTER_ORCHESTRATION");
+    expect((production?.durable_objects?.bindings ?? []).map((b) => b.name)).toContain(
+      "LegalWorker",
+    );
+    expect(production?.ai?.binding).toBe("AI");
+  });
+
+  it("production mantiene batch documental seguro con DLQ", () => {
+    const consumer = (production?.queues?.consumers ?? [])[0];
+    expect(consumer?.max_batch_size).toBe(4);
+    expect(consumer?.max_retries).toBe(3);
+    expect(consumer?.dead_letter_queue).toMatch(/-dlq$/);
+  });
+
+  it("production NO comparte los recursos de staging", () => {
+    const stagingDb = (config.env?.staging?.d1_databases ?? []).find((d) => d.binding === "DB");
+    const productionDb = (production?.d1_databases ?? []).find((d) => d.binding === "DB");
+    expect(productionDb?.database_id).not.toBe(stagingDb?.database_id);
+    expect((production?.r2_buckets ?? []).map((b) => b.binding).length).toBeGreaterThan(0);
+    for (const bucket of production?.r2_buckets ?? []) {
+      expect(bucket.remote).not.toBe(true);
+    }
+  });
+
+  it("production NO apunta a localhost", () => {
+    expect(String(production?.vars?.APP_URL ?? "")).not.toMatch(/localhost/i);
   });
 });
 

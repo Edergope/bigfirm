@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
   IusiaError,
   assertDetailIsSafe,
@@ -19,6 +19,13 @@ export interface CreateExecutionInput {
   rootExecutionId: string | null;
   startedBy: string | null;
   workflowInstanceId?: string | null;
+  /**
+   * Identidad lógica del despacho dentro del grafo (p.ej. `<root>:task:<task_id>`).
+   * Un reintento TÉCNICO del step debe reutilizar la misma ejecución jurídica: sin
+   * esta clave, el reintento creaba una fila nueva, una clave de idempotencia nueva
+   * y, por tanto, un segundo cobro por el mismo trabajo.
+   */
+  dispatchKey?: string | null;
 }
 
 /**
@@ -30,21 +37,50 @@ export class ExecutionRepository {
 
   async create(input: CreateExecutionInput): Promise<string> {
     const id = newId("execution");
-    await this.db.insert(executions).values({
-      id,
-      organizationId: input.organizationId,
-      matterId: input.matterId,
-      agentId: input.agentId,
-      parentExecutionId: input.parentExecutionId,
-      // Una ejecución sin padre es raíz de su propio grafo.
-      rootExecutionId: input.rootExecutionId ?? id,
-      workflowInstanceId: input.workflowInstanceId ?? null,
-      status: "PENDING",
-      retries: 0,
-      startedBy: input.startedBy,
-      createdAt: new Date().toISOString(),
+    const inserted = await this.db
+      .insert(executions)
+      .values({
+        id,
+        organizationId: input.organizationId,
+        matterId: input.matterId,
+        agentId: input.agentId,
+        parentExecutionId: input.parentExecutionId,
+        // Una ejecución sin padre es raíz de su propio grafo.
+        rootExecutionId: input.rootExecutionId ?? id,
+        workflowInstanceId: input.workflowInstanceId ?? null,
+        dispatchKey: input.dispatchKey ?? null,
+        status: "PENDING",
+        retries: 0,
+        startedBy: input.startedBy,
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoNothing()
+      .returning({ id: executions.id });
+
+    if (inserted[0]) return inserted[0].id;
+
+    // Conflicto sobre `dispatch_key`: este despacho lógico ya tiene ejecución. Se
+    // reutiliza — un reintento técnico no es una ejecución jurídica nueva.
+    if (input.dispatchKey) {
+      const existing = await this.findByDispatchKey(input.dispatchKey);
+      if (existing) {
+        await this.incrementRetries(existing.id);
+        return existing.id;
+      }
+    }
+    throw new IusiaError("CONFLICT", "No fue posible registrar la ejecución", {
+      dispatch_key: input.dispatchKey ?? null,
     });
-    return id;
+  }
+
+  /** Ejecución ya registrada para una identidad lógica de despacho, si existe. */
+  async findByDispatchKey(dispatchKey: string) {
+    const [row] = await this.db
+      .select()
+      .from(executions)
+      .where(eq(executions.dispatchKey, dispatchKey))
+      .limit(1);
+    return row ?? null;
   }
 
   async findById(executionId: string) {
@@ -113,6 +149,20 @@ export class ExecutionRepository {
       .limit(limit);
   }
 
+  /**
+   * Raíces recientes de TODA la plataforma. Reservado a la autoridad de sistema:
+   * el kill switch global necesita ver lo que puede detener. Devuelve filas de
+   * ejecución (estado, consumo, tiempos), nunca contenido del expediente.
+   */
+  async listRecentRootsGlobal(limit = 50) {
+    return this.db
+      .select()
+      .from(executions)
+      .where(isNull(executions.parentExecutionId))
+      .orderBy(desc(executions.createdAt))
+      .limit(limit);
+  }
+
   /** Transición de estado validada contra la máquina de estados del dominio. */
   async transition(
     executionId: string,
@@ -150,16 +200,40 @@ export class ExecutionRepository {
     }
 
     const now = new Date().toISOString();
+    const reachesTerminal = to === "COMPLETED" || to === "FAILED" || to === "CANCELLED";
     await this.db
       .update(executions)
       .set({
         ...patch,
         status: to,
         startedAt: to === "RUNNING" && !current.startedAt ? now : current.startedAt,
-        completedAt:
-          to === "COMPLETED" || to === "FAILED" || to === "CANCELLED" ? now : null,
+        // Sólo una transición terminal fija `completed_at`. Antes se escribía `null`
+        // en cualquier destino no terminal, de modo que el campo dependía de que la
+        // máquina de estados nunca permitiera salir de un terminal, no de sí mismo.
+        completedAt: reachesTerminal ? now : current.completedAt,
       })
       .where(eq(executions.id, executionId));
+  }
+
+  /**
+   * Cierra en CANCELLED toda ejecución hija aún viva de una raíz cancelada.
+   * Sin esto, un especialista quedaba RUNNING para siempre en el ledger aunque el
+   * workflow ya estuviera terminado: el registro afirmaba trabajo que no ocurría.
+   */
+  async cancelDescendants(rootExecutionId: string, reason: string): Promise<number> {
+    const now = new Date().toISOString();
+    const result = await this.db
+      .update(executions)
+      .set({ status: "CANCELLED", completedAt: now, errorCode: reason })
+      .where(
+        and(
+          eq(executions.rootExecutionId, rootExecutionId),
+          ne(executions.id, rootExecutionId),
+          inArray(executions.status, ["PENDING", "RUNNING", "WAITING", "BLOCKED"]),
+        ),
+      )
+      .returning({ id: executions.id });
+    return result.length;
   }
 
   async incrementRetries(executionId: string): Promise<void> {
@@ -168,6 +242,12 @@ export class ExecutionRepository {
       .set({ retries: sql`${executions.retries} + 1` })
       .where(eq(executions.id, executionId));
   }
+}
+
+/** Choque con un índice único de SQLite/D1, con independencia del driver. */
+function isUniqueViolation(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /UNIQUE constraint failed|SQLITE_CONSTRAINT/i.test(message);
 }
 
 /**
@@ -191,14 +271,19 @@ export class ExecutionEventRepository {
     const detail = input.detail ?? {};
     assertDetailIsSafe(detail);
 
-    const [row] = await this.db
-      .select({ maxSeq: sql<number>`coalesce(max(${executionEvents.sequence}), -1)` })
-      .from(executionEvents)
-      .where(eq(executionEvents.rootExecutionId, input.rootExecutionId));
+    // La secuencia se asigna DENTRO de la misma sentencia INSERT, con una subconsulta
+    // escalar: en SQLite/D1 eso es atómico. La versión anterior leía `max(sequence)`
+    // y luego insertaba, así que dos agentes en paralelo sobre la misma raíz podían
+    // calcular el mismo número y violar `execution_events_root_seq_uq`. Esa excepción
+    // ocurría dentro de un `step.do` reintentable y era el origen real de las filas
+    // de ejecución duplicadas (UI_RETRY_DUPLICATE_ROWS).
+    const nextSequence = sql<number>`(
+      select coalesce(max(${executionEvents.sequence}), -1) + 1
+      from ${executionEvents}
+      where ${executionEvents.rootExecutionId} = ${input.rootExecutionId}
+    )`;
 
-    const sequence = (row?.maxSeq ?? -1) + 1;
-    await this.db.insert(executionEvents).values({
-      id: newId("event"),
+    const values = {
       organizationId: input.organizationId,
       matterId: input.matterId,
       rootExecutionId: input.rootExecutionId,
@@ -208,10 +293,25 @@ export class ExecutionEventRepository {
       toAgentId: input.toAgentId ?? null,
       status: input.status ?? null,
       detail,
-      sequence,
       occurredAt: new Date().toISOString(),
-    });
-    return sequence;
+    };
+
+    // Defensa en profundidad: si el motor llegara a serializar de otro modo, un
+    // choque de unicidad se reintenta un número acotado de veces en vez de propagar.
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const [inserted] = await this.db
+          .insert(executionEvents)
+          .values({ id: newId("event"), ...values, sequence: nextSequence })
+          .returning({ sequence: executionEvents.sequence });
+        if (inserted) return inserted.sequence;
+      } catch (error) {
+        lastError = error;
+        if (!isUniqueViolation(error)) throw error;
+      }
+    }
+    throw lastError ?? new IusiaError("CONFLICT", "No fue posible registrar el evento");
   }
 
   async listByRoot(rootExecutionId: string, sinceSequence = -1) {

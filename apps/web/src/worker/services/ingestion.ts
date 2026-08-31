@@ -25,7 +25,7 @@ export interface IngestionOutcome {
 export class IngestionService {
   constructor(
     private readonly env: Env,
-    /** Resuelve credenciales de Drive del usuario que vinculó el documento. */
+    /** Resuelve el almacenamiento documental DE LA ORGANIZACIÓN (nunca el del actor). */
     private readonly storage: OrganizationStorageResolver,
   ) {}
 
@@ -45,9 +45,10 @@ export class IngestionService {
       return { status: "SKIPPED", detail: "versión no vigente" };
     }
 
-    // Las credenciales de Drive pertenecen al usuario que vinculó el archivo (tiene
-    // acceso de lectura sobre él). Sin conexión válida, el documento queda PENDIENTE
-    // y el mensaje se ACK-ea: ningún reintento resolverá una reconexión OAuth pendiente.
+    // Las credenciales son las del ALMACENAMIENTO DE LA ORGANIZACIÓN, no las del
+    // abogado que vinculó el archivo: una ingestión en background no puede depender
+    // del OAuth personal de nadie. Sin conexión válida el documento queda PENDIENTE y
+    // el mensaje se ACK-ea: ningún reintento resolverá una reconexión OAuth pendiente.
     let storage;
     try {
       storage = await this.storage.resolveAdapter(message.organization_id);
@@ -176,6 +177,52 @@ type AiSearchIngestionBinding = {
  * evita que la orquestación arranque sobre un documento recién escrito en R2 que
  * todavía no ha entrado al índice por sync diferido.
  */
+/**
+ * Marca el espejo indexado de un documento como INACTIVO (o lo reactiva).
+ *
+ * El filtro de recuperación exige `is_active = "true"`, pero ese valor se escribía en
+ * la ingestión y no volvía a tocarse nunca: un documento retirado seguía en el índice
+ * como activo, y una versión antigua seguía siendo recuperable hasta que la cola
+ * reescribía la clave. Esta función cierra las dos brechas reescribiendo la metadata
+ * en R2 y reenviando el item a AI Search con la misma clave (operación idempotente).
+ *
+ * Nunca borra el espejo: el retiro documental es lógico y auditable, no destructivo.
+ * Devuelve `false` si no había nada que desactivar o si el índice no está configurado
+ * — el estado autoritativo sigue siendo D1, que ya excluye el documento.
+ */
+export async function setMirrorIndexActive(
+  env: Pick<Env, "ARTIFACTS" | "AI_SEARCH">,
+  mirrorKey: string | null | undefined,
+  active: boolean,
+): Promise<boolean> {
+  if (!mirrorKey) return false;
+  const object = await env.ARTIFACTS.get(mirrorKey);
+  if (!object) return false;
+  const text = await object.text();
+  const metadata = {
+    ...(object.customMetadata ?? {}),
+    is_active: active ? "true" : "false",
+  };
+  await env.ARTIFACTS.put(mirrorKey, text, {
+    httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+    customMetadata: metadata,
+  });
+  if (!env.AI_SEARCH?.items?.uploadAndPoll) return false;
+  try {
+    await uploadToAiSearch(env.AI_SEARCH, mirrorKey, text, metadata);
+    return true;
+  } catch (error) {
+    // El índice puede rechazar o tardar; D1 ya excluye el documento y toda ruta de
+    // recuperación revalida contra los documentos vigentes. Se registra y se sigue.
+    console.warn("mirror_deactivation_failed", {
+      mirror_key: mirrorKey,
+      active,
+      safe_message: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+    });
+    return false;
+  }
+}
+
 export async function uploadToAiSearch(
   aiSearch: AiSearchIngestionBinding | null,
   key: string,

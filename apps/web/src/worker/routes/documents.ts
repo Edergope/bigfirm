@@ -164,7 +164,7 @@ const RetrievalInput = z.object({
  * servidor a partir de la autorización real; el cliente NUNCA define el scope.
  */
 documentsRoutes.post("/matters/:matterId/retrieval", async (c) => {
-  const { authz } = c.get("ctx");
+  const { authz, documents } = c.get("ctx");
   const { organizationId, userId } = c.get("session");
   const matterId = c.req.param("matterId");
 
@@ -196,5 +196,13 @@ documentsRoutes.post("/matters/:matterId/retrieval", async (c) => {
     query: parsed.data.query,
     max_results: parsed.data.max_results,
   });
-  return c.json({ status: "OK", results });
+
+  // Defensa en profundidad sobre el índice: sólo se devuelve lo que hoy es un
+  // documento VIGENTE del expediente. Un documento retirado —o una versión que ya no
+  // es la actual— puede sobrevivir unos instantes en el índice; D1 es la autoridad.
+  const active = new Set(
+    (await documents.listForMatter(organizationId, matterId)).map((d) => d.id),
+  );
+  const visible = results.filter((r) => active.has(r.document_id));
+  return c.json({ status: "OK", results: visible });
 });

@@ -121,6 +121,19 @@ export const documents = sqliteTable(
     sizeBytes: integer("size_bytes"),
     /** FILE_STORED | PROCESSING | AI_INDEXED | NOT_INDEXABLE | ERROR */
     ingestionStatus: text("ingestion_status").notNull().default("FILE_STORED"),
+    /**
+     * Provenance del entregable generado por IUSIA. Vive EN EL DOCUMENTO, no sólo en
+     * `audit_events`: de un DOCX debe poder reconstruirse su plantilla, su ejecución,
+     * su agente redactor y el hash del prompt canónico sin recorrer la auditoría.
+     * Null en documentos aportados por el despacho.
+     */
+    contentSource: text("content_source"),
+    generatedFromTemplateId: text("generated_from_template_id"),
+    generatedFromTemplateVersion: integer("generated_from_template_version"),
+    generatedByExecutionId: text("generated_by_execution_id"),
+    generatedByAgentId: text("generated_by_agent_id"),
+    generatedPromptSha256: text("generated_prompt_sha256"),
+    generatedModel: text("generated_model"),
     linkedBy: text("linked_by")
       .notNull()
       .references(() => user.id),
@@ -302,6 +315,12 @@ export const executions = sqliteTable(
     /** Ejecución raíz del DAG: agrupa el grafo completo de la Strategy Room. */
     rootExecutionId: text("root_execution_id").notNull(),
     workflowInstanceId: text("workflow_instance_id"),
+    /**
+     * Identidad lógica del despacho (`<root>:plan`, `<root>:task:<id>`, …). Hace que
+     * un reintento técnico del Workflow reutilice la MISMA ejecución jurídica, y con
+     * ella la misma clave de idempotencia de créditos.
+     */
+    dispatchKey: text("dispatch_key"),
     status: text("status").notNull().default("PENDING"),
     provider: text("provider"),
     model: text("model"),
@@ -327,6 +346,7 @@ export const executions = sqliteTable(
     index("executions_org_matter_idx").on(t.organizationId, t.matterId),
     index("executions_root_idx").on(t.rootExecutionId),
     index("executions_parent_idx").on(t.parentExecutionId),
+    uniqueIndex("executions_dispatch_key_uq").on(t.dispatchKey),
   ],
 );
 

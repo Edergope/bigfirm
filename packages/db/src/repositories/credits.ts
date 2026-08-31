@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { IusiaError, newId, type CreditTxKind } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { creditTransactions, creditWallets } from "../schema/iusia.js";
@@ -46,31 +46,26 @@ export class CreditRepository {
     providerCostUsd?: number | null;
     allowNegative?: boolean;
   }): Promise<{ balance: number; applied: boolean }> {
-    const existing = await this.db
-      .select({ balanceAfter: creditTransactions.balanceAfter })
-      .from(creditTransactions)
-      .where(eq(creditTransactions.idempotencyKey, input.idempotencyKey))
-      .limit(1);
-    if (existing[0]) return { balance: existing[0].balanceAfter, applied: false };
-
-    const current = await this.balance(input.organizationId);
-    const next = current + input.amount;
-    if (next < 0 && !input.allowNegative) {
-      throw new IusiaError(
-        "INSUFFICIENT_CREDITS",
-        "Saldo de créditos insuficiente para ejecutar la operación",
-        { balance: current, required: Math.abs(input.amount) },
-      );
-    }
+    // El wallet debe existir para que la mutación atómica tenga una fila que tocar.
+    // Antes, un movimiento sobre una organización sin wallet actualizaba 0 filas en
+    // silencio: quedaba el asiento sin saldo.
+    await this.ensureWallet(input.organizationId);
 
     const now = new Date().toISOString();
-    await this.db.batch([
-      this.db.insert(creditTransactions).values({
-        id: newId("creditTx"),
+    const txId = newId("creditTx");
+
+    // 1. La transacción se reclama PRIMERO. El índice único sobre `idempotency_key`
+    //    es lo que decide quién aplica el movimiento: comprobar antes con un SELECT
+    //    dejaba una ventana en la que dos reintentos simultáneos cobraban dos veces.
+    const claimed = await this.db
+      .insert(creditTransactions)
+      .values({
+        id: txId,
         organizationId: input.organizationId,
         kind: input.kind,
         amount: input.amount,
-        balanceAfter: next,
+        // Provisional: se corrige con el saldo REAL devuelto por la mutación atómica.
+        balanceAfter: 0,
         matterId: input.matterId ?? null,
         executionId: input.executionId ?? null,
         userId: input.userId ?? null,
@@ -79,13 +74,74 @@ export class CreditRepository {
         providerCostUsd: input.providerCostUsd ?? null,
         idempotencyKey: input.idempotencyKey,
         createdAt: now,
-      }),
-      this.db
-        .update(creditWallets)
-        .set({ balance: next, updatedAt: now })
-        .where(eq(creditWallets.organizationId, input.organizationId)),
-    ]);
+      })
+      .onConflictDoNothing()
+      .returning({ id: creditTransactions.id });
+
+    if (!claimed[0]) {
+      // Ya aplicada por otro intento: se devuelve el saldo que dejó aquella.
+      const [existing] = await this.db
+        .select({ balanceAfter: creditTransactions.balanceAfter })
+        .from(creditTransactions)
+        .where(eq(creditTransactions.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      return {
+        balance: existing?.balanceAfter ?? (await this.balance(input.organizationId)),
+        applied: false,
+      };
+    }
+
+    // 2. Mutación ATÓMICA del saldo: `balance = balance + amount` en SQL. Nunca se
+    //    escribe un valor absoluto calculado en JS — dos débitos en paralelo perdían
+    //    uno de los dos (lost update) y el wallet divergía del ledger.
+    const guard = input.allowNegative
+      ? sql`1 = 1`
+      : sql`${creditWallets.balance} + ${input.amount} >= 0`;
+    const updated = await this.db
+      .update(creditWallets)
+      .set({ balance: sql`${creditWallets.balance} + ${input.amount}`, updatedAt: now })
+      .where(and(eq(creditWallets.organizationId, input.organizationId), guard))
+      .returning({ balance: creditWallets.balance });
+
+    if (!updated[0]) {
+      // Saldo insuficiente (o wallet inexistente): se revierte la reclamación para
+      // que un reintento posterior con la misma clave pueda volver a intentarlo.
+      await this.db.delete(creditTransactions).where(eq(creditTransactions.id, txId));
+      const current = await this.balance(input.organizationId);
+      throw new IusiaError(
+        "INSUFFICIENT_CREDITS",
+        "Saldo de créditos insuficiente para ejecutar la operación",
+        { balance: current, required: Math.abs(input.amount) },
+      );
+    }
+
+    const next = updated[0].balance;
+    // 3. El asiento queda con el saldo real posterior al movimiento.
+    await this.db
+      .update(creditTransactions)
+      .set({ balanceAfter: next })
+      .where(eq(creditTransactions.id, txId));
 
     return { balance: next, applied: true };
+  }
+
+  /**
+   * Reconciliación contable: saldo del wallet frente a la suma del ledger.
+   * Es la comprobación que delata un lost update, y la usan los tests de concurrencia.
+   */
+  async reconcile(organizationId: string): Promise<{
+    walletBalance: number;
+    ledgerBalance: number;
+    reconciled: boolean;
+  }> {
+    const [wallet, ledger] = await Promise.all([
+      this.balance(organizationId),
+      this.db
+        .select({ total: sql<number>`coalesce(sum(${creditTransactions.amount}), 0)` })
+        .from(creditTransactions)
+        .where(eq(creditTransactions.organizationId, organizationId)),
+    ]);
+    const ledgerBalance = Number(ledger[0]?.total ?? 0);
+    return { walletBalance: wallet, ledgerBalance, reconciled: wallet === ledgerBalance };
   }
 }

@@ -10,6 +10,8 @@ function baseWorkPackage(overrides: Partial<WorkPackage> = {}): WorkPackage {
     agent_id: "01-intake-y-clasificador",
     objective: "Establecer la base fáctica del expediente",
     questions: [],
+    facts: [],
+    authorities: [],
     fact_refs: [],
     source_refs: [],
     document_excerpts: [],

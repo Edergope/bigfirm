@@ -56,6 +56,18 @@ export class AuthorizationService {
     return isSystemRole(row?.role) ? row.role : null;
   }
 
+  /**
+   * Exige que una persona pertenezca a la firma antes de concederle acceso a un
+   * expediente. El ACL de Matter presupone tenencia: sin esta comprobación se podían
+   * crear filas de acceso para usuarios de otra organización.
+   */
+  async assertOrganizationMember(organizationId: string, targetUserId: string): Promise<void> {
+    if (await this.firmRole(organizationId, targetUserId)) return;
+    throw new IusiaError("NOT_FOUND", "La persona no pertenece a esta firma", {
+      user_id: targetUserId,
+    });
+  }
+
   async isSystemSuperadmin(userId: string): Promise<boolean> {
     return (await this.systemRole(userId)) === "SYSTEM_SUPERADMIN";
   }

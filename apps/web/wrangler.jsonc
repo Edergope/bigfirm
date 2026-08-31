@@ -153,6 +153,67 @@
       // NOTA: `analytics_engine_datasets` (USAGE_ANALYTICS) se omite en staging hasta
       // habilitar Analytics Engine en la cuenta (backlog/observabilidad). La escritura
       // en legal-worker.ts es opcional (`?.`) → no-op seguro sin el binding.
+    },
+
+    // ENVIRONMENT PRODUCTION. Existe DECLARADO para que producción deje de ser un
+    // hueco: sin este bloque, la única configuración desplegable era la base —sin
+    // AI_SEARCH (⇒ recuperación NOT_CONFIGURED), sin ORCHESTRATION_MODE (⇒ DAG piloto)
+    // y con un `database_id` de marcador—, de modo que nada de lo validado en staging
+    // describía lo que un deploy de producción haría realmente.
+    //
+    // Los recursos de producción todavía NO están aprovisionados: los identificadores
+    // son marcadores explícitos y un despliegue con ellos falla de inmediato en vez de
+    // arrancar contra recursos equivocados. `IUSIA_ENV=production` mantiene cerrado el
+    // harness dev (comparación estricta con "development").
+    //
+    // ORCHESTRATION_MODE se declara aquí de forma CONSCIENTE: producción arranca en el
+    // DAG piloto validado y sólo pasa a "dynamic" por decisión explícita, nunca por
+    // heredar la configuración de staging.
+    "production": {
+      "vars": {
+        "AI_GATEWAY_NAME": "iusia",
+        "IUSIA_ENV": "production",
+        "APP_URL": "REPLACE_WITH_PRODUCTION_APP_URL",
+        "CLOUDFLARE_ACCOUNT_ID": "e4478495bf6483c58722d92498f0362f",
+        "ORCHESTRATION_MODE": "pilot"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "iusia-db-production",
+          "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "PROMPTS", "bucket_name": "iusia-prompts-production" },
+        { "binding": "ARTIFACTS", "bucket_name": "iusia-artifacts-production" }
+      ],
+      "durable_objects": {
+        "bindings": [{ "name": "LegalWorker", "class_name": "LegalWorker" }]
+      },
+      "workflows": [
+        {
+          "name": "iusia-matter-orchestration",
+          "binding": "MATTER_ORCHESTRATION",
+          "class_name": "MatterOrchestrationWorkflow"
+        }
+      ],
+      "queues": {
+        "producers": [
+          { "binding": "DOCUMENT_INGESTION", "queue": "iusia-document-ingestion-production" }
+        ],
+        "consumers": [
+          {
+            "queue": "iusia-document-ingestion-production",
+            "max_batch_size": 4,
+            "max_retries": 3,
+            "dead_letter_queue": "iusia-document-ingestion-production-dlq"
+          }
+        ]
+      },
+      "ai_search": [{ "binding": "AI_SEARCH", "instance_name": "REPLACE_WITH_PRODUCTION_AI_SEARCH" }],
+      "ai": { "binding": "AI" }
     }
   }
 }

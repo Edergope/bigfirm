@@ -8,11 +8,56 @@ import { FileViewer } from "./Documents.js";
 
 type TemplateRow = Awaited<ReturnType<typeof api.adminTemplates>>["templates"][number];
 
+/**
+ * El abogado nunca lee un enum interno. Cubre los 23 tipos del catálogo oficial más
+ * los alias históricos; `documentTypeLabel` recompone cualquier valor no mapeado en
+ * lenguaje legible en vez de mostrar `LEGAL_AUDIT_REPORT` tal cual.
+ */
 const TYPE_LABEL: Record<string, string> = {
-  OPINION: "Concepto jurídico", CONTRACT: "Contrato", CONTRATO: "Contrato",
-  DEMANDA: "Demanda", MEMORANDO: "Memorando", ESCRITO: "Actuación judicial",
-  POWER: "Poder", REPORT: "Informe", CORPORATE: "Societario", COMMUNICATION: "Comunicación",
+  OPINION: "Concepto jurídico",
+  COMMERCIAL_PROPOSAL: "Propuesta comercial",
+  LEGAL_SERVICES_AGREEMENT: "Contrato de servicios jurídicos",
+  ENGAGEMENT_LETTER: "Hoja de encargo",
+  LEGAL_AUDIT_REPORT: "Informe de auditoría legal",
+  DUE_DILIGENCE_REPORT: "Informe de debida diligencia",
+  JUDICIAL_FILING: "Actuación judicial",
+  ADMINISTRATIVE_FILING: "Actuación administrativa",
+  POWER_OF_ATTORNEY: "Poder",
+  CORPORATE_BYLAWS: "Estatutos societarios",
+  CORPORATE_MINUTES: "Actas y decisiones societarias",
+  CONTRACT: "Contrato",
+  PROGRESS_REPORT: "Reporte de avance",
+  FORMAL_COMMUNICATION: "Comunicación formal",
+  FEE_STATEMENT: "Cuenta de cobro",
+  NDA: "Acuerdo de confidencialidad",
+  CLIENT_ONBOARDING: "Vinculación de cliente",
+  DATA_AUTHORIZATION: "Autorización de datos personales",
+  CONFLICT_CHECK: "Verificación de conflictos",
+  SERVICE_ACCEPTANCE: "Acta de entrega y aceptación",
+  ENGAGEMENT_CLOSURE: "Cierre del encargo",
+  LETTERHEAD: "Hoja membrete",
+  COVER_LETTERHEAD: "Portada y membrete",
+  // Alias históricos.
+  CONTRATO: "Contrato", DEMANDA: "Demanda", MEMORANDO: "Memorando",
+  ESCRITO: "Actuación judicial", POWER: "Poder", REPORT: "Informe",
+  CORPORATE: "Societario", COMMUNICATION: "Comunicación",
 };
+
+/** Nunca devuelve un enum crudo: si el tipo es nuevo, se humaniza su forma. */
+export function documentTypeLabel(documentType: string): string {
+  const known = TYPE_LABEL[documentType];
+  if (known) return known;
+  const words = documentType.toLocaleLowerCase("es").replace(/_/g, " ").trim();
+  return words ? words.charAt(0).toLocaleUpperCase("es") + words.slice(1) : "Documento";
+}
+
+/** Estado editorial de la plantilla, en lenguaje de despacho. */
+export function templateStatusLabel(status: string): string {
+  if (status === "ACTIVE") return "Activa";
+  if (status === "INACTIVE") return "Inactiva";
+  if (status === "RETIRED") return "Retirada";
+  return "Sin estado";
+}
 
 export function Templates() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
@@ -62,7 +107,7 @@ export function Templates() {
           <label className="mt-3 flex h-9 items-center gap-2 rounded-[9px] bg-iusia-ice/70 px-3 text-iusia-mist-text focus-within:ring-2 focus-within:ring-iusia-action/30"><Search size={14} /><span className="sr-only">Buscar plantillas</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, tipo o categoría" className="min-w-0 flex-1 bg-transparent text-[13px] text-iusia-carbon outline-none placeholder:text-iusia-mist-text" />{search ? <button type="button" onClick={() => setSearch("")} aria-label="Limpiar búsqueda"><X size={13} /></button> : null}</label>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {loading ? <Skeleton className="m-2 h-40" /> : filtered.length === 0 ? <div className="flex h-44 flex-col items-center justify-center text-center"><FileSignature size={25} className="text-iusia-mist" /><p className="mt-2 text-[13px] font-medium text-iusia-navy">No hay plantillas disponibles</p></div> : filtered.map((template) => <button key={template.id} type="button" onClick={() => { setSelectedId(template.id); setEditor(null); }} className={clsx("mb-1 flex w-full items-start gap-3 rounded-[10px] px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-iusia-action/35", selectedId === template.id ? "bg-iusia-navy text-white" : "hover:bg-iusia-ice/70")}><FileSignature size={17} className={selectedId === template.id ? "mt-0.5 text-iusia-intel" : "mt-0.5 text-iusia-action"} /><span className="min-w-0 flex-1"><span className={clsx("block truncate text-[12.75px] font-medium", selectedId === template.id ? "text-white" : "text-iusia-carbon")}>{template.name}</span><span className={clsx("mt-0.5 flex flex-wrap gap-x-2 text-[10.75px]", selectedId === template.id ? "text-white/65" : "text-iusia-mist-text")}><span>{TYPE_LABEL[template.document_type] ?? template.document_type}</span><span>v{template.version}</span><span>{template.status}</span></span></span></button>)}
+          {loading ? <Skeleton className="m-2 h-40" /> : filtered.length === 0 ? <div className="flex h-44 flex-col items-center justify-center text-center"><FileSignature size={25} className="text-iusia-mist" /><p className="mt-2 text-[13px] font-medium text-iusia-navy">No hay plantillas disponibles</p></div> : filtered.map((template) => <button key={template.id} type="button" onClick={() => { setSelectedId(template.id); setEditor(null); }} className={clsx("mb-1 flex w-full items-start gap-3 rounded-[10px] px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-iusia-action/35", selectedId === template.id ? "bg-iusia-navy text-white" : "hover:bg-iusia-ice/70")}><FileSignature size={17} className={selectedId === template.id ? "mt-0.5 text-iusia-intel" : "mt-0.5 text-iusia-action"} /><span className="min-w-0 flex-1"><span className={clsx("block truncate text-[12.75px] font-medium", selectedId === template.id ? "text-white" : "text-iusia-carbon")}>{template.name}</span><span className={clsx("mt-0.5 flex flex-wrap gap-x-2 text-[10.75px]", selectedId === template.id ? "text-white/65" : "text-iusia-mist-text")}><span>{documentTypeLabel(template.document_type)}</span><span>v{template.version}</span><span>{templateStatusLabel(template.status)}</span></span></span></button>)}
         </div>
         </> : null}
       </section>
@@ -79,7 +124,7 @@ function TemplateInspector({ template, superadmin, onNewVersion }: { template: T
   const status = useMutation({ mutationFn: (value: "ACTIVE" | "INACTIVE" | "RETIRED") => api.setTemplateStatus(template.id, value), onSuccess: async (result) => { await Promise.all([queryClient.refetchQueries({ queryKey: ["admin-templates"] }), queryClient.refetchQueries({ queryKey: ["templates"] })]); setNotice(result.status === "ACTIVE" ? "Plantilla activada." : "Estado de plantilla actualizado."); }, onError: (error: Error) => setNotice(`No fue posible activar la plantilla. ${error.message}`) });
   return <div className="flex min-h-[calc(100vh-185px)] flex-col">
     <header className="border-b border-iusia-mist/20 bg-iusia-paper px-4 py-3">
-      <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><h2 className="text-[15px] font-semibold text-iusia-navy">{template.name}</h2><p className="mt-1 text-[12px] text-iusia-mist-text">{template.category} · {TYPE_LABEL[template.document_type] ?? template.document_type}</p><div className="mt-2 flex flex-wrap items-center gap-2"><StatusChip label={`v${template.version}`} tone="info" /><StatusChip label={template.status === "ACTIVE" ? "Activa" : template.status === "INACTIVE" ? "Inactiva" : "Retirada"} tone={template.status === "ACTIVE" ? "success" : template.status === "RETIRED" ? "warning" : "neutral"} /><StatusChip label="Institucional" tone="neutral" /></div></div><a href={api.templateContentUrl(template.id, true)} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-iusia-mist/35 bg-iusia-paper px-2.5 text-[12px] font-medium text-iusia-navy hover:text-iusia-action"><Download size={13} /> Descargar</a></div>
+      <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><h2 className="text-[15px] font-semibold text-iusia-navy">{template.name}</h2><p className="mt-1 text-[12px] text-iusia-mist-text">{template.category} · {documentTypeLabel(template.document_type)}</p><div className="mt-2 flex flex-wrap items-center gap-2"><StatusChip label={`v${template.version}`} tone="info" /><StatusChip label={templateStatusLabel(template.status)} tone={template.status === "ACTIVE" ? "success" : template.status === "RETIRED" ? "warning" : "neutral"} /><StatusChip label="Institucional" tone="neutral" /></div></div><a href={api.templateContentUrl(template.id, true)} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-iusia-mist/35 bg-iusia-paper px-2.5 text-[12px] font-medium text-iusia-navy hover:text-iusia-action"><Download size={13} /> Descargar</a></div>
       {template.description ? <p className="mt-3 max-w-[72ch] text-[12.5px] leading-relaxed text-iusia-carbon/75">{template.description}</p> : null}
       {superadmin ? <><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={onNewVersion}><History size={13} /> Nueva versión</Button>{template.status !== "ACTIVE" ? <Button size="sm" variant="secondary" onClick={() => { setNotice(null); status.mutate("ACTIVE"); }} disabled={status.isPending}><Power size={13} /> {status.isPending ? "Activando…" : "Activar"}</Button> : <Button size="sm" variant="secondary" onClick={() => status.mutate("INACTIVE")} disabled={status.isPending}><Power size={13} /> Desactivar</Button>}<Button size="sm" variant="secondary" onClick={() => status.mutate("RETIRED")} disabled={status.isPending || template.status === "RETIRED"}><Archive size={13} /> Retirar</Button></div>{notice ? <p role="status" className={clsx("mt-2 text-[12px]", status.isError ? "text-iusia-critical" : "text-iusia-success")}>{notice}</p> : null}</> : null}
     </header>

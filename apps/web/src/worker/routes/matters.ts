@@ -108,6 +108,11 @@ mattersRoutes.post("/:matterId/members", async (c) => {
     });
   }
 
+  // El ACL de expediente sólo puede alcanzar a personas de ESTA firma. Sin esta
+  // comprobación quedaban filas de acceso apuntando a usuarios de otra organización:
+  // inertes, pero engañosas en la tabla que hace de muralla ética.
+  await authz.assertOrganizationMember(organizationId, parsed.data.user_id);
+
   await matters.addMember(
     organizationId,
     matterId,
@@ -132,64 +137,44 @@ mattersRoutes.post("/:matterId/members", async (c) => {
   return c.json({ ok: true }, 201);
 });
 
-const LinkDocumentInput = z.object({
-  drive_file_id: z.string().min(1),
-  name: z.string().min(1).max(300),
-  mime_type: z.string().min(1),
-  classification: z.enum(["FUENTE", "TRABAJO_INTERNO", "ENTREGABLE", "ANEXO"]).optional(),
-});
-
 /**
- * Vincula un archivo ya seleccionado por el usuario en Google Drive Picker.
- * IUSIA guarda metadata; el archivo permanece en Drive.
+ * Vinculación por identificador de proveedor: RETIRADA.
+ *
+ * Esta ruta aceptaba un `drive_file_id` elegido por el cliente y lo leía con la
+ * credencial de almacenamiento DE LA FIRMA. Un identificador de proveedor pasaba
+ * así a operar como autorización: bastaba conocer el id de un archivo de otro
+ * expediente para adjuntarlo al propio, leerlo e indexarlo como evidencia. La
+ * cadena legítima es organización → ACL de Matter → identidad documental de IUSIA
+ * → proveedor, nunca provider_file_id → acceso.
+ *
+ * La vía correcta —y la única que usa la aplicación— es subir el archivo por
+ * `POST /matters/:matterId/documents/upload`, donde IUSIA crea el archivo en la
+ * carpeta del expediente y es ella quien fija el identificador de proveedor.
  */
 mattersRoutes.post("/:matterId/documents", async (c) => {
-  const { documents, authz, audit } = c.get("ctx");
+  const { authz, audit } = c.get("ctx");
   const { organizationId, userId } = c.get("session");
   const matterId = c.req.param("matterId");
 
+  // Se autoriza igualmente para no revelar la existencia del expediente y para que
+  // el intento quede atribuido en la auditoría.
   await authz.authorizeMatter(organizationId, userId, matterId, "document:link");
-
-  const parsed = LinkDocumentInput.safeParse(await c.req.json());
-  if (!parsed.success) {
-    throw new IusiaError("VALIDATION_FAILED", "Datos de documento inválidos", {
-      issues: parsed.error.issues,
-    });
-  }
-
-  const documentId = await documents.link({
-    organizationId,
-    matterId,
-    driveFileId: parsed.data.drive_file_id,
-    name: parsed.data.name,
-    mimeType: parsed.data.mime_type,
-    classification: parsed.data.classification,
-    linkedBy: userId,
-  });
-
   await audit.record({
     organizationId,
     matterId,
     actorUserId: userId,
-    action: "document.link",
+    action: "document.link.by_provider_id",
     resourceType: "document",
-    resourceId: documentId,
-    outcome: "SUCCESS",
-    detail: { source: "DRIVE" },
+    resourceId: null,
+    outcome: "DENIED",
+    reason: "PROVIDER_ID_IS_NOT_AUTHORIZATION",
   });
 
-  // Encola la ingestión. El consumidor la procesará cuando Drive esté conectado;
-  // mientras tanto deja el documento PENDIENTE, sin inventar contenido.
-  await c.env.DOCUMENT_INGESTION.send({
-    organization_id: organizationId,
-    matter_id: matterId,
-    document_id: documentId,
-    drive_file_id: parsed.data.drive_file_id,
-    reason: "LINKED",
-    enqueued_at: new Date().toISOString(),
-  });
-
-  return c.json({ document_id: documentId }, 201);
+  throw new IusiaError(
+    "VALIDATION_FAILED",
+    "Los documentos se incorporan subiéndolos al expediente, no por identificador de almacenamiento.",
+    { use_instead: `POST /api/matters/${matterId}/documents/upload` },
+  );
 });
 
 const SetRiskInput = z.object({

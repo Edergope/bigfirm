@@ -109,6 +109,8 @@ export class DocumentGenerationService {
     organizationId: string;
     matter: { id: string; reference: string; title: string };
     documentType: string;
+    /** Familia editorial concreta, cuando hay más de una activa para el tipo. */
+    familyId?: string;
     /** Valores provistos por el cliente (redacción manual). Prioridad sobre `resolveValues`. */
     values?: Record<string, string>;
     /** Cuando no hay `values`, IUSIA redacta el contenido con este resolvedor (agente 08). */
@@ -119,10 +121,20 @@ export class DocumentGenerationService {
     const templatesRepo = new TemplateRepository(db);
     const documentsRepo = new DocumentRepository(db);
 
-    const template = await templatesRepo.findByDocumentType(
+    const selection = await templatesRepo.findByDocumentType(
       input.organizationId,
       input.documentType,
+      input.familyId,
     );
+    if (selection.ambiguous) {
+      // No se adivina la plantilla: dos familias editoriales del mismo tipo exigen
+      // que el caller diga cuál. Publicar con la equivocada es peor que no publicar.
+      throw new DocumentGenerationError(
+        "TEMPLATE_AMBIGUOUS",
+        `Hay ${selection.families.length} plantillas activas para este tipo de documento. Indica cuál debe usarse.`,
+      );
+    }
+    const template = selection.template;
     if (!template) throw new DocumentGenerationError("TEMPLATE_NOT_FOUND");
     if (template.engine !== "GOOGLE_DOCS" || !template.sourceRef || (template.variables ?? []).length === 0) {
       // El MVP renderiza con Google Docs; una plantilla sin doc fuente no es usable.
@@ -220,7 +232,18 @@ export class DocumentGenerationService {
       );
     }
 
-    // 4. Registrar los entregables como documentos del expediente.
+    // 4. Registrar los entregables como documentos del expediente, CON su provenance.
+    //    De un DOCX debe poder reconstruirse plantilla, versión, ejecución, agente
+    //    redactor, modelo y hash del prompt sin recorrer el ledger de auditoría.
+    const provenance = {
+      contentSource: (draftProvenance ? "AGENT" : "MANUAL") as "AGENT" | "MANUAL",
+      templateId: template.id,
+      templateVersion: template.version,
+      executionId: input.executionId ?? null,
+      agentId: draftProvenance?.agent_id ?? null,
+      promptSha256: draftProvenance?.prompt_sha256 ?? null,
+      model: draftProvenance?.model ?? null,
+    };
     const docxDocId = await documentsRepo.link({
       organizationId: input.organizationId,
       matterId: input.matter.id,
@@ -229,6 +252,7 @@ export class DocumentGenerationService {
       mimeType: EXPORT_MIME.docx,
       classification: "ENTREGABLE",
       linkedBy: input.userId,
+      provenance,
     });
     const pdfDocId = await documentsRepo.link({
       organizationId: input.organizationId,
@@ -238,6 +262,7 @@ export class DocumentGenerationService {
       mimeType: EXPORT_MIME.pdf,
       classification: "ENTREGABLE",
       linkedBy: input.userId,
+      provenance,
     });
 
     return {
@@ -250,11 +275,27 @@ export class DocumentGenerationService {
   }
 }
 
-/** Falla cerrada: nunca se exporta un borrador con tokens o instrucciones editoriales. */
+/**
+ * Falla cerrada: nunca se exporta un borrador con tokens o instrucciones editoriales.
+ *
+ * El detector se ancla a los placeholders REALMENTE descubiertos para esta plantilla
+ * (`variables[].placeholder`), más las formas de token que ninguna prosa jurídica usa:
+ * `{{...}}`, `${...}` y corchetes en versalitas del tipo `[CLIENTE]`. La versión
+ * anterior rechazaba cualquier corchete de 2 a 240 caracteres, de modo que un
+ * `[sic]`, una interpolación en una cita o una aclaración entre corchetes —prosa
+ * legítima— abortaban la publicación de un documento válido.
+ */
 export function assertRenderedTemplate(text: string, variables: readonly GenerationTemplateVariable[]): void {
-  const residualKnown = variables.map((v) => v.placeholder ?? `{{${v.key}}}`).filter((token) => text.includes(token));
-  const residualGeneric = text.match(/\{\{[^}]+\}\}|\$\{[^}]+\}|\[[^\]\r\n]{2,240}\]/g) ?? [];
-  if (residualKnown.length || residualGeneric.length) {
+  const residualKnown = variables
+    .map((v) => v.placeholder ?? `{{${v.key}}}`)
+    .filter((token) => text.includes(token));
+  const residualGeneric = text.match(/\{\{[^}]+\}\}|\$\{[^}]+\}/g) ?? [];
+  // Placeholder tipográfico de plantilla: versalitas, como los tokens de las
+  // plantillas oficiales (`[CLIENTE]`). Exige al menos una letra mayúscula, de modo
+  // que una cifra entre corchetes —«treinta [30] días»— siga siendo prosa válida.
+  const residualUppercase =
+    text.match(/\[(?=[^\]\r\n]*[A-ZÁÉÍÓÚÑÜ])[A-ZÁÉÍÓÚÑÜ0-9][A-ZÁÉÍÓÚÑÜ0-9 _/.-]{1,80}\]/g) ?? [];
+  if (residualKnown.length || residualGeneric.length || residualUppercase.length) {
     throw new DocumentGenerationError("TEMPLATE_VALIDATION_FAILED", "La plantilla conserva campos o instrucciones sin completar.");
   }
 }

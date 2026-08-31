@@ -55,11 +55,15 @@ export interface DocumentEntry {
   mime_type: string;
   status: string;
   classification: string;
-  drive_file_id: string | null;
   current_version: number;
   size_bytes: number | null;
   ingestion_status: string;
   updated_at: string;
+  /** Provenance del entregable generado por IUSIA. Null en documentos aportados. */
+  content_source: string | null;
+  generated_from_template_id: string | null;
+  generated_from_template_version: number | null;
+  generated_by_agent_id: string | null;
 }
 
 export interface DocumentVersionEntry {

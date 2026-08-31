@@ -2,6 +2,7 @@ import { Agent } from "agents";
 import {
   IusiaError,
   creditsForCost,
+  extractLedgerEntries,
   providerCostUsd,
   renderWorkPackage,
   type ExecutionStatus,
@@ -10,9 +11,11 @@ import {
 import { getAgentDefinition, PromptLoader, R2PromptSource } from "@iusia/agents";
 import {
   AuditRepository,
+  AuthorityRepository,
   CreditRepository,
   ExecutionEventRepository,
   ExecutionRepository,
+  FactRepository,
   createDb,
 } from "@iusia/db";
 import type { Env } from "../env.js";
@@ -143,7 +146,30 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
         execution_id: execution.id,
       });
 
-      // 4. Persistir la salida en R2. La tabla sólo guarda el puntero.
+      // 4. COBRAR. El proveedor ya facturó esta llamada, así que el débito precede a
+      //    cualquier persistencia que pueda fallar: si el guardado en R2 fallaba, la
+      //    ejecución terminaba en FAILED con 0 créditos y el costo real quedaba sin
+      //    registrar. Idempotente por `execution_id`, de modo que un reintento sobre
+      //    la MISMA ejecución lógica no vuelve a cobrar.
+      const rate = rateFor(result.provider, result.model);
+      const costUsd = providerCostUsd(rate, result.usage);
+      const creditsUsed = creditsForCost(costUsd);
+      await credits.post({
+        organizationId: execution.organizationId,
+        kind: "CONSUMPTION",
+        amount: -creditsUsed,
+        idempotencyKey: `execution:${execution.id}`,
+        matterId: execution.matterId,
+        executionId: execution.id,
+        userId: execution.startedBy,
+        provider: result.provider,
+        model: result.model,
+        providerCostUsd: costUsd,
+        // El saldo ya se verificó antes de despachar; no se aborta un trabajo hecho.
+        allowNegative: true,
+      });
+
+      // 5. Persistir la salida en R2. La tabla sólo guarda el puntero.
       const outputRef = `executions/${execution.organizationId}/${execution.matterId}/${execution.id}.json`;
       await this.env.ARTIFACTS.put(
         outputRef,
@@ -166,24 +192,25 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
         { httpMetadata: { contentType: "application/json" } },
       );
 
-      // 5. Costos y créditos. Idempotente por execution_id.
-      const rate = rateFor(result.provider, result.model);
-      const costUsd = providerCostUsd(rate, result.usage);
-      const creditsUsed = creditsForCost(costUsd);
-      await credits.post({
-        organizationId: execution.organizationId,
-        kind: "CONSUMPTION",
-        amount: -creditsUsed,
-        idempotencyKey: `execution:${execution.id}`,
-        matterId: execution.matterId,
-        executionId: execution.id,
-        userId: execution.startedBy,
-        provider: result.provider,
-        model: result.model,
-        providerCostUsd: costUsd,
-        // El saldo ya se verificó antes de despachar; no se aborta un trabajo hecho.
-        allowNegative: true,
-      });
+      // 6. Persistir los hechos y autoridades ESTRUCTURADOS que produjo el agente.
+      //    Sólo se acepta lo que valida contra el contrato canónico: la prosa libre
+      //    del modelo nunca se convierte en un hecho del expediente. Sin este paso,
+      //    el Fact Ledger quedaba permanentemente vacío y el Case Brief —que alimenta
+      //    la redacción de entregables— no tenía nada que aportar.
+      const ledgers = await this.persistLedgers(db, execution, result.text);
+      if (ledgers.facts > 0 || ledgers.authorities > 0 || ledgers.rejected > 0) {
+        await events.append({
+          ...eventBase,
+          type: "agent.output.received",
+          toAgentId: def.agent_id,
+          status: "RUNNING",
+          detail: {
+            ledger_facts: ledgers.facts,
+            ledger_authorities: ledgers.authorities,
+            ledger_rejected: ledgers.rejected,
+          },
+        });
+      }
 
       // Analytics Engine es observabilidad opcional: si el binding no está aprovisionado
       // (p.ej. staging sin Analytics Engine habilitado) la escritura es un no-op seguro.
@@ -291,6 +318,55 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
         credits_consumed: 0,
         error: { code, message },
       };
+    }
+  }
+
+  /**
+   * Escribe el Fact Ledger y el Authority Ledger del expediente a partir de la salida
+   * del agente.
+   *
+   * Reglas: sólo elementos ESTRUCTURADOS y válidos contra el contrato canónico
+   * (`CanonicalFact` / `Authority`); `certainty` y `status` los declara el agente y se
+   * conservan tal cual —[F] acreditado, [D] documental, [A] alegado, [U] no
+   * verificado—, sin promoverlos nunca a una certeza mayor. `establishedByExecutionId`
+   * queda apuntando a la ejecución que lo produjo: un hecho con ejecución es
+   * AI_EXTRACTED y trazable hasta su prompt; un hecho sin ella es LAWYER_PROVIDED.
+   *
+   * Un fallo aquí NO invalida la ejecución: el dictamen ya está persistido y cobrado.
+   */
+  private async persistLedgers(
+    db: ReturnType<typeof createDb>,
+    execution: { id: string; organizationId: string; matterId: string },
+    text: string,
+  ): Promise<{ facts: number; authorities: number; rejected: number }> {
+    try {
+      const extracted = extractLedgerEntries(text);
+      if (extracted.facts.length === 0 && extracted.authorities.length === 0) {
+        return { facts: 0, authorities: 0, rejected: extracted.rejected };
+      }
+      const facts = new FactRepository(db);
+      const authorities = new AuthorityRepository(db);
+      const [factCount, authorityCount] = await Promise.all([
+        facts.upsertMany(
+          execution.organizationId,
+          execution.matterId,
+          extracted.facts,
+          execution.id,
+        ),
+        authorities.upsertMany(
+          execution.organizationId,
+          execution.matterId,
+          extracted.authorities,
+          execution.id,
+        ),
+      ]);
+      return { facts: factCount, authorities: authorityCount, rejected: extracted.rejected };
+    } catch (error) {
+      console.warn("ledger_persist_failed", {
+        execution_id: execution.id,
+        safe_message: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+      });
+      return { facts: 0, authorities: 0, rejected: 0 };
     }
   }
 }

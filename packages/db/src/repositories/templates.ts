@@ -125,10 +125,25 @@ export class TemplateRepository {
   }
 
   /**
-   * Mejor plantilla ACTIVE para un tipo documental, con acceso de la firma. Prefiere
-   * la propia de la organización sobre la institucional, y la versión más alta.
+   * Plantilla ACTIVE para un tipo documental, anclada a FAMILIA.
+   *
+   * La versión anterior ordenaba por número de versión ATRAVESANDO familias: con dos
+   * familias editoriales del mismo `document_type`, la elegida dependía de cuál tuviera
+   * la versión más alta. Ahora la preferencia legítima —la plantilla propia de la firma
+   * sobre la institucional— se resuelve por familia, y una ambigüedad REAL entre dos
+   * familias del mismo alcance no se adivina: se declara.
+   *
+   * `familyId` permite al caller fijar la familia y eliminar toda ambigüedad.
    */
-  async findByDocumentType(organizationId: string, documentType: string) {
+  async findByDocumentType(
+    organizationId: string,
+    documentType: string,
+    familyId?: string,
+  ): Promise<
+    | { template: typeof templates.$inferSelect; ambiguous: false }
+    | { template: null; ambiguous: true; families: string[] }
+    | { template: null; ambiguous: false; families: [] }
+  > {
     const rows = await this.db
       .select()
       .from(templates)
@@ -139,11 +154,22 @@ export class TemplateRepository {
           or(eq(templates.scope, "SYSTEM"), eq(templates.organizationId, organizationId)),
         ),
       );
-    if (rows.length === 0) return null;
-    return rows.sort((a, b) => {
-      const own = (r: (typeof rows)[number]) => (r.organizationId === organizationId ? 1 : 0);
-      return own(b) - own(a) || b.version - a.version;
-    })[0]!;
+
+    const candidates = familyId ? rows.filter((r) => r.familyId === familyId) : rows;
+    if (candidates.length === 0) return { template: null, ambiguous: false, families: [] };
+
+    // La plantilla propia de la firma desplaza a la institucional: es una preferencia
+    // declarada, no una ambigüedad.
+    const own = candidates.filter((r) => r.organizationId === organizationId);
+    const pool = own.length > 0 ? own : candidates;
+
+    const families = [...new Set(pool.map((r) => r.familyId))];
+    if (families.length > 1) return { template: null, ambiguous: true, families };
+
+    // Dentro de una familia sólo puede haber una ACTIVE (índice único parcial en D1);
+    // el orden por versión es defensa por si el índice se relajara.
+    const template = [...pool].sort((a, b) => b.version - a.version)[0]!;
+    return { template, ambiguous: false };
   }
 
   /** Alta/actualización idempotente de una plantilla del catálogo institucional. */

@@ -7,6 +7,7 @@ import {
   computeRootCreditBudget,
   creditsForCost,
   deriveConclusionText,
+  buildLawyerContext,
   newId,
   providerCostUsd,
   ExecutionSafetyLedger,
@@ -36,10 +37,12 @@ import {
 } from "@iusia/orchestration";
 import {
   AuditRepository,
+  AuthorityRepository,
   CreditRepository,
   DocumentRepository,
   ExecutionEventRepository,
   ExecutionRepository,
+  FactRepository,
   MatterRepository,
   createDb,
 } from "@iusia/db";
@@ -65,10 +68,12 @@ const DEFAULT_ROOT_CREDIT_LIMIT = 5000;
 
 type DagResult = { root_execution_id: string; completed: string[]; failed: string[] };
 
+
 const TIMING_MILESTONES = {
   EXECUTION_CREATED: "execution_created",
   PLAN_START: "PLAN_START",
   PLAN_LLM_COMPLETE: "PLAN_LLM_COMPLETE",
+  PLAN_COMPLETE: "PLAN_COMPLETE",
   TEAMPLAN_PARSED: "TEAMPLAN_PARSED",
   TEAMPLAN_VALIDATED: "TEAMPLAN_VALIDATED",
   DAG_CREATED: "DAG_CREATED",
@@ -124,16 +129,43 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       rootExecutionId: params.root_execution_id,
     };
 
+    const facts = new FactRepository(db);
+    const authorities = new AuthorityRepository(db);
+
     const plan = await step.do("resolve-plan", async () => {
       const matter = await matters.findById(params.organization_id, params.matter_id);
       if (!matter) throw new Error(`Matter ${params.matter_id} no encontrado`);
       const nodes = planFor(matter.materiality as Materiality);
+      const factRows = await facts.listForMatter(params.organization_id, params.matter_id);
+      const authorityRows = await authorities.listForMatter(
+        params.organization_id,
+        params.matter_id,
+      );
       return {
         materiality: matter.materiality as Materiality,
         jurisdiction: matter.jurisdiction,
         nodes: nodes.map((n) => ({ ...n, requires: [...n.requires] })) as DagNode[],
+        lawyer_context: buildLawyerContext(matter, params.objective),
+        facts: factRows.map((f) => ({
+          fact_id: f.factKey,
+          statement: f.statement,
+          certainty: f.certainty,
+          primary_source: f.primarySource,
+        })),
+        authorities: authorityRows.map((a) => ({
+          authority_id: a.authorityKey,
+          citation: a.citation,
+          type: a.type,
+          status: a.status,
+        })),
       };
     });
+
+    /** Cancelación server-side también en la ruta piloto (lectura directa, sin step). */
+    const pilotCancelled = async (): Promise<boolean> => {
+      const root = await executions.findById(params.root_execution_id);
+      return !root || root.status === "CANCELLED";
+    };
 
     await step.do("start-root-execution", async () => {
       await executions.transition(params.root_execution_id, "RUNNING");
@@ -196,6 +228,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     const failed: string[] = [];
 
     for (const [batchIndex, batch] of batches.entries()) {
+      // Cancelar debe impedir NUEVOS despachos también en la ruta piloto.
+      if (await step.do(`pilot-cancel-check-${batchIndex}`, pilotCancelled)) break;
       const results = await Promise.all(
         batch.map((node) =>
           step.do(
@@ -211,6 +245,9 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                 rootExecutionId: params.root_execution_id,
                 startedBy: params.started_by,
                 workflowInstanceId: event.instanceId,
+                // Misma invariante que en la ruta dinámica: el reintento del step
+                // reutiliza la ejecución en vez de duplicarla.
+                dispatchKey: `${params.root_execution_id}:pilot:${node.agent_id}`,
               });
               await events.append({
                 ...eventBase,
@@ -229,12 +266,17 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                 agent_id: node.agent_id,
                 objective: params.objective,
                 questions: [],
+                lawyer_provided_context: plan.lawyer_context,
+                facts: plan.facts,
+                authorities: plan.authorities,
                 fact_refs: [],
                 source_refs: sourceContext.sources,
                 document_excerpts: evidence,
                 upstream_outputs: [],
                 constraints: [
-                  "Trabaja únicamente con las fuentes autorizadas del WorkPackage.",
+                  sourceContext.documentCount === 0
+                    ? "Este expediente no tiene documentación aportada: trabaja sobre los hechos informados por el abogado y señala qué requeriría prueba documental."
+                    : "Trabaja únicamente con las fuentes autorizadas del WorkPackage.",
                   "Declara expresamente lo que no consta en el expediente.",
                 ],
                 expected_output_schema: def.output_schema_id,
@@ -311,6 +353,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     }
 
     await step.do("close-root-execution", async () => {
+      // Un resultado tardío NO puede resucitar una raíz ya cancelada.
+      if (await pilotCancelled()) return;
       await executions.transition(
         params.root_execution_id,
         failed.length > 0 ? "FAILED" : "COMPLETED",
@@ -363,6 +407,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     const events = new ExecutionEventRepository(db);
     const documents = new DocumentRepository(db);
     const credits = new CreditRepository(db);
+    const facts = new FactRepository(db);
+    const authorities = new AuthorityRepository(db);
 
     const eventBase = {
       organizationId: params.organization_id,
@@ -406,11 +452,21 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       });
 
     // Cancelación server-side: re-lee la raíz antes de cada nueva llamada/despacho.
+    //
+    // `isCancelledNow` es una LECTURA DIRECTA, sin `step.do`. Es deliberado: el
+    // Workflow no admite anidar steps, y la versión anterior llamaba a un step de
+    // comprobación DENTRO del cuerpo del step de despacho. Ese anidamiento era la
+    // causa real de que, tras terminar el 00 PLAN, pasaran minutos sin que apareciera
+    // ningún especialista: el primer despacho quedaba atrapado y sólo avanzaba por
+    // reintento. La comprobación sigue siendo server-side y sigue ocurriendo antes de
+    // cada llamada al modelo; lo que cambia es que ya no crea un step anidado.
+    const isCancelledNow = async (): Promise<boolean> => {
+      const root = await executions.findById(params.root_execution_id);
+      return !root || root.status === "CANCELLED";
+    };
+    /** Comprobación de cancelación como step propio. Sólo en el nivel superior. */
     const isCancelled = async (label: string): Promise<boolean> =>
-      step.do(`dyn-cancel-check-${label}`, async () => {
-        const root = await executions.findById(params.root_execution_id);
-        return !root || root.status === "CANCELLED";
-      });
+      step.do(`dyn-cancel-check-${label}`, isCancelledNow);
 
     const abort = async (
       reason: CircuitBreakerReason,
@@ -450,6 +506,11 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       const matter = await matters.findById(params.organization_id, params.matter_id);
       if (!matter) throw new IusiaError("NOT_FOUND", `Matter ${params.matter_id} no encontrado`);
       const docs = await documents.listForMatter(params.organization_id, params.matter_id);
+      const factRows = await facts.listForMatter(params.organization_id, params.matter_id);
+      const authorityRows = await authorities.listForMatter(
+        params.organization_id,
+        params.matter_id,
+      );
       return {
         materiality: matter.materiality as Materiality,
         jurisdiction: matter.jurisdiction,
@@ -458,6 +519,21 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         document_count: docs.length,
         document_summary: docs.map((d) => `${d.name} (${d.classification})`),
         document_names: docs.map((d) => [d.id, d.name] as const),
+        // GROUNDING PACKAGE. El relato del abogado es contexto legítimo: un
+        // expediente sin documentos NO es un expediente sin información.
+        lawyer_context: buildLawyerContext(matter, params.objective),
+        facts: factRows.map((f) => ({
+          fact_id: f.factKey,
+          statement: f.statement,
+          certainty: f.certainty,
+          primary_source: f.primarySource,
+        })),
+        authorities: authorityRows.map((a) => ({
+          authority_id: a.authorityKey,
+          citation: a.citation,
+          type: a.type,
+          status: a.status,
+        })),
       };
     });
     const documentNames = new Map(ctx.document_names);
@@ -476,6 +552,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         rootExecutionId: params.root_execution_id,
         startedBy: params.started_by,
         workflowInstanceId: event.instanceId,
+        dispatchKey: `${params.root_execution_id}:plan`,
       }),
     );
 
@@ -602,7 +679,20 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         status: "COMPLETED",
         detail: { phase: "plan", credits: creditsUsed },
       });
-      return { plan: result.plan, source: result.source, creditsUsed };
+      // Instante en que la fase PLAN queda REALMENTE cerrada. Es el ancla de
+      // POST_PLAN_DELAY_MS: la latencia entre que el Managing Partner termina y el
+      // primer especialista se despacha es la métrica que delató el step anidado.
+      await events.append({
+        ...eventBase,
+        executionId: params.root_execution_id,
+        type: "agent.milestone",
+        status: "RUNNING",
+        detail: {
+          milestone: TIMING_MILESTONES.PLAN_COMPLETE,
+          elapsed_ms: Date.now() - startedAtMs,
+        },
+      });
+      return { plan: result.plan, source: result.source, creditsUsed, planCompletedAtMs: Date.now() };
     });
 
     spentCredits += planned.creditsUsed;
@@ -680,7 +770,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
               `dyn-dispatch-${batchIndex}-${node.agent_id}`,
               { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" }, timeout: "10 minutes" },
               async (): Promise<RunResult & { agent_id: string; output_ref: string | null }> => {
-                if (await isCancelled(`pre-dispatch-${node.agent_id}`)) {
+                // Lectura directa: anidar un `step.do` aquí dejaba el despacho colgado.
+                if (await isCancelledNow()) {
                   return { execution_id: "", status: "CANCELLED", output_ref: null, credits_consumed: 0, agent_id: node.agent_id };
                 }
                 if (!firstSpecialistDispatchEmitted) {
@@ -693,11 +784,18 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                     detail: {
                       milestone: TIMING_MILESTONES.FIRST_SPECIALIST_DISPATCH,
                       elapsed_ms: Date.now() - startedAtMs,
+                      // Latencia entre el cierre del PLAN y el primer despacho real.
+                      // Debe ser de segundos; minutos delatan una espera indebida.
+                      post_plan_delay_ms: Date.now() - planned.planCompletedAtMs,
                       agent_id: node.agent_id,
                     },
                   });
                 }
                 const def = getAgentDefinition(node.agent_id);
+                // Identidad LÓGICA del despacho: si el step se reintenta, se reutiliza
+                // esta misma ejecución (y su clave de idempotencia de créditos) en vez
+                // de crear una fila nueva. Un reintento técnico no es una ejecución
+                // jurídica nueva.
                 const executionId = await executions.create({
                   organizationId: params.organization_id,
                   matterId: params.matter_id,
@@ -706,6 +804,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   rootExecutionId: params.root_execution_id,
                   startedBy: params.started_by,
                   workflowInstanceId: event.instanceId,
+                  dispatchKey: `${params.root_execution_id}:task:${task.task_id}`,
                 });
                 await events.append({
                   ...eventBase,
@@ -777,6 +876,10 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   agent_id: node.agent_id,
                   objective: task.mission,
                   questions: task.questions,
+                  // GROUNDING PACKAGE: cada fuente etiquetada por separado.
+                  lawyer_provided_context: ctx.lawyer_context,
+                  facts: ctx.facts,
+                  authorities: ctx.authorities,
                   fact_refs: [],
                   source_refs: [],
                   document_excerpts: excerpts,
@@ -784,8 +887,10 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   constraints: [
                     `Contexto del encargo global (subordinado a tu rol): ${params.objective}`,
                     ctx.document_count === 0
-                      ? "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada."
-                      : "Trabaja únicamente con la evidencia autorizada del WorkPackage.",
+                      ? "Este expediente no tiene documentación aportada: trabaja sobre los hechos informados por el abogado, califícalos como tales y señala qué requeriría prueba documental. La ausencia de documentos NO te impide emitir tu análisis."
+                      : excerpts.length === 0
+                        ? "No se recuperó soporte documental relevante para tu misión: trabaja sobre los hechos informados y dilo expresamente. No supongas el contenido de los documentos del expediente."
+                        : "Trabaja únicamente con la evidencia autorizada del WorkPackage.",
                     "Declara expresamente lo que no consta en el expediente.",
                   ],
                   expected_output_schema: def.output_schema_id,
@@ -890,6 +995,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           rootExecutionId: params.root_execution_id,
           startedBy: params.started_by,
           workflowInstanceId: event.instanceId,
+          dispatchKey: `${params.root_execution_id}:integrate`,
         });
         await events.append({
           ...eventBase,
@@ -929,6 +1035,9 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           agent_id: ORCHESTRATOR_AGENT_ID,
           objective: params.objective,
           questions: [],
+          lawyer_provided_context: ctx.lawyer_context,
+          facts: ctx.facts,
+          authorities: ctx.authorities,
           fact_refs: [],
           source_refs: [],
           document_excerpts: excerpts,
@@ -936,8 +1045,10 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           constraints: [
             "Integra los hallazgos de los especialistas: compara, detecta contradicciones y prioriza la evidencia del expediente.",
             ctx.document_count === 0
-              ? "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada."
-              : "Usa la evidencia documental recuperada únicamente cuando exista en el WorkPackage.",
+              ? "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación que posteriormente se aporte. Dilo expresamente en tu conclusión."
+              : excerpts.length === 0
+                ? "No se recuperó soporte documental relevante: apoya las conclusiones en los hechos informados y declara la ausencia de soporte documental."
+                : "Usa la evidencia documental recuperada únicamente cuando exista en el WorkPackage.",
             "No asumas que un especialista tiene razón; marca la incertidumbre y la evidencia faltante.",
             failed.length > 0 ? `Ejecuciones fallidas: ${failed.length} (repórtalas).` : "Todas las tareas requeridas se completaron.",
           ],
@@ -957,6 +1068,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     else failed.push(integration.execution_id);
 
     await step.do("dyn-close-root", async () => {
+      // Idem: si la raíz se canceló mientras integrábamos, el cierre no la reabre.
+      if (await isCancelledNow()) return;
       await executions.transition(
         params.root_execution_id,
         integration.status === "COMPLETED" ? "COMPLETED" : "FAILED",

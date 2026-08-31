@@ -101,3 +101,98 @@ export const AuthorityLedger = z.object({
   authorities: z.array(Authority).default([]),
 });
 export type AuthorityLedger = z.infer<typeof AuthorityLedger>;
+
+// ────────────────── Extracción de ledgers desde salidas de agente ──────────────────
+
+/**
+ * Extrae hechos y autoridades ESTRUCTURADOS de la salida de un agente.
+ *
+ * Regla no negociable: sólo se persiste lo que llega como objeto válido contra el
+ * contrato canónico. La prosa libre del modelo NUNCA se convierte en un hecho del
+ * expediente: un elemento que no valide se descarta en silencio, no se "repara".
+ *
+ * El schema de salida de los agentes no es estable (los arreglos pueden venir en la
+ * raíz o anidados bajo `payload`/`output`/`result`), así que la búsqueda es por clave
+ * conocida en profundidad acotada, igual que hace `deriveConclusionText`.
+ */
+const FACT_ARRAY_KEYS = ["facts", "fact_ledger", "canonical_facts", "hechos"] as const;
+const AUTHORITY_ARRAY_KEYS = ["authorities", "authority_ledger", "autoridades"] as const;
+
+export interface ExtractedLedgers {
+  facts: CanonicalFact[];
+  authorities: Authority[];
+  /** Elementos presentes pero descartados por no cumplir el contrato canónico. */
+  rejected: number;
+}
+
+export function extractLedgerEntries(text: string): ExtractedLedgers {
+  const root = parseJsonObject(text);
+  if (!root) return { facts: [], authorities: [], rejected: 0 };
+
+  let rejected = 0;
+  const facts = new Map<string, CanonicalFact>();
+  const authorities = new Map<string, Authority>();
+
+  for (const raw of collectArrays(root, FACT_ARRAY_KEYS)) {
+    const parsed = CanonicalFact.safeParse(raw);
+    if (parsed.success) facts.set(parsed.data.fact_id, parsed.data);
+    else rejected += 1;
+  }
+  for (const raw of collectArrays(root, AUTHORITY_ARRAY_KEYS)) {
+    const parsed = Authority.safeParse(raw);
+    if (parsed.success) authorities.set(parsed.data.authority_id, parsed.data);
+    else rejected += 1;
+  }
+
+  return { facts: [...facts.values()], authorities: [...authorities.values()], rejected };
+}
+
+/** Recolecta los elementos de todo arreglo alcanzable bajo alguna de las claves dadas. */
+function collectArrays(
+  node: unknown,
+  keys: readonly string[],
+  depth = 5,
+): unknown[] {
+  if (depth < 0 || node === null || typeof node !== "object") return [];
+  const out: unknown[] = [];
+  if (Array.isArray(node)) {
+    for (const el of node) out.push(...collectArrays(el, keys, depth - 1));
+    return out;
+  }
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (keys.includes(key) && Array.isArray(value)) out.push(...value);
+    else out.push(...collectArrays(value, keys, depth - 1));
+  }
+  return out;
+}
+
+/** Recorta y parsea el primer objeto JSON balanceado del texto. Tolera prosa y fences. */
+function parseJsonObject(text: string): unknown {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}

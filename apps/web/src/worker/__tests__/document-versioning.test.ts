@@ -172,6 +172,42 @@ describe("Template Bank versionado", () => {
     expect(history).toHaveLength(2);
     expect(history.find((row) => row.id === first.id)?.status).toBe("INACTIVE");
     expect(history.find((row) => row.id === second.id)?.status).toBe("ACTIVE");
-    expect((await repo.findByDocumentType(organizationId, "OPINION"))?.id).toBe(second.id);
+    const selected = await repo.findByDocumentType(organizationId, "OPINION");
+    expect(selected.ambiguous).toBe(false);
+    expect(selected.template?.id).toBe(second.id);
+  });
+
+  it("no adivina la plantilla cuando dos familias comparten tipo documental", async () => {
+    const t = createTestDb();
+    const { organizationId, directorUserId } = await seedFirm(t, {
+      orgName: "Ambigua",
+      directorEmail: "dir@ambigua.test",
+    });
+    const repo = new TemplateRepository(t.db);
+    const base = {
+      documentType: "CONTRACT",
+      category: "Contratos",
+      sourceRef: "gdoc",
+      originalSourceRef: "docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      originalFilename: "c.docx",
+      variables: [{ key: "asunto", label: "Asunto", required: true }],
+      createdBy: directorUserId,
+    };
+    await repo.createSystemVersion({ ...base, name: "Contrato marco", checksum: "aaa" });
+    await repo.createSystemVersion({ ...base, name: "Contrato de suministro", checksum: "bbb" });
+
+    // Dos familias editoriales ACTIVE del mismo tipo: elegir por número de versión
+    // publicaría el documento equivocado. Se declara la ambigüedad.
+    const ambiguous = await repo.findByDocumentType(organizationId, "CONTRACT");
+    expect(ambiguous.ambiguous).toBe(true);
+    expect(ambiguous.template).toBeNull();
+
+    // Con la familia fijada por el caller la selección vuelve a ser determinista.
+    const families = await repo.listSystemHistory();
+    const target = families.find((row) => row.name === "Contrato de suministro")!;
+    const resolved = await repo.findByDocumentType(organizationId, "CONTRACT", target.familyId);
+    expect(resolved.ambiguous).toBe(false);
+    expect(resolved.template?.id).toBe(target.id);
   });
 });

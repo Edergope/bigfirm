@@ -1,5 +1,5 @@
 import { getAgentDefinition, PromptLoader, R2PromptSource } from "@iusia/agents";
-import type { CaseBrief } from "@iusia/domain";
+import { deriveConclusionText, type CaseBrief } from "@iusia/domain";
 import { buildCaseBrief } from "./case-brief.js";
 import { ModelGateway } from "./model-gateway.js";
 import { UNTRUSTED_SYSTEM_GUARD } from "../agents/guards.js";
@@ -69,6 +69,11 @@ export class DocumentDraftService {
     executionId?: string;
   }): Promise<DraftResult> {
     const brief = await buildCaseBrief(input.ctx, input.organizationId, input.matterId);
+    // El análisis multiagente ya producido para este expediente es contexto legítimo
+    // del entregable: sin esto, el redactor trabajaba sobre un Case Brief que ignoraba
+    // por completo lo que el equipo había concluido, y ese vacío era la puerta por la
+    // que un dato objetivo podía entrar sin fundamento.
+    const analysis = await this.latestAnalysis(input.ctx, input.organizationId, input.matterId);
 
     const def = getAgentDefinition(DRAFTER_AGENT_ID);
     const loader = new PromptLoader(new R2PromptSource(this.env.PROMPTS));
@@ -86,6 +91,7 @@ export class DocumentDraftService {
           brief,
           input.variables,
           input.instructions,
+          analysis,
         ),
       },
     ];
@@ -115,6 +121,36 @@ export class DocumentDraftService {
       usage: { input_tokens: result.usage.input_tokens, output_tokens: result.usage.output_tokens },
     };
   }
+
+  /**
+   * Conclusión del análisis más reciente del expediente, leída del artefacto que el
+   * integrador ya dejó en R2. Es lectura pura: no ejecuta agentes ni consume créditos.
+   * Devuelve `null` si el expediente aún no tiene análisis — un entregable puede
+   * redactarse sin él, pero entonces el redactor lo sabe.
+   */
+  private async latestAnalysis(
+    ctx: RequestContext,
+    organizationId: string,
+    matterId: string,
+  ): Promise<string | null> {
+    try {
+      const rows = await ctx.executions.listByMatter(organizationId, matterId, 100);
+      const candidates = rows
+        .filter((r) => r.status === "COMPLETED" && r.outputRef && r.parentExecutionId !== null)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      for (const row of candidates) {
+        const object = await this.env.ARTIFACTS.get(row.outputRef!);
+        if (!object) continue;
+        const stored = await object.json<{ text?: string }>();
+        const text = deriveConclusionText(stored.text ?? "").trim();
+        if (text.length > 0) return text.slice(0, 6000);
+      }
+      return null;
+    } catch {
+      // La ausencia de análisis nunca impide redactar: se declara y se sigue.
+      return null;
+    }
+  }
 }
 
 /**
@@ -127,6 +163,7 @@ function renderDraftRequest(
   brief: CaseBrief,
   variables: readonly DraftVariable[],
   instructions?: string,
+  analysis?: string | null,
 ): string {
   const parties = brief.parties.map((p) => `- ${p.kind}: ${p.name}`).join("\n") || "- (sin partes registradas)";
   const facts =
@@ -173,6 +210,19 @@ function renderDraftRequest(
     "",
     "### Cuestiones abiertas",
     openQuestions,
+    ...(analysis
+      ? [
+          "",
+          "### Análisis del equipo jurídico de IUSIA para este expediente",
+          "Conclusión ya producida y trazable en el expediente. Es contexto de trabajo:",
+          "no la copies, redáctala como documento oficial y no añadas hechos que no consten.",
+          analysis,
+        ]
+      : [
+          "",
+          "### Análisis del equipo jurídico",
+          "(este expediente todavía no tiene un análisis multiagente registrado)",
+        ]),
     ...(instructions
       ? ["", "### Instrucciones del abogado responsable", instructions.trim()]
       : []),

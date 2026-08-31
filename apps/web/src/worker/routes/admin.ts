@@ -36,6 +36,54 @@ export function assertInvitationAdminRole(role: string | null): void {
   }
 }
 
+/**
+ * Matriz de asignación de roles de firma.
+ *
+ * La dirección es el rol que concede supervisión de TODA la cartera sin pasar por el
+ * ACL de expediente. Por eso sólo la dirección puede crearla, quitarla o retirarla, y
+ * nadie —tampoco un director— puede asignarse un rol a sí mismo: una autopromoción
+ * convertía el ACL por Matter en opcional para quien ya administraba la firma.
+ *
+ * Función pura y exportada: es la invariante, y se prueba como tal.
+ */
+export function assertCanAssignFirmRole(input: {
+  actorRole: string | null;
+  actorUserId: string;
+  targetUserId: string;
+  targetCurrentRole: string | null;
+  nextRole: string;
+}): void {
+  assertInvitationAdminRole(input.actorRole);
+
+  if (input.actorUserId === input.targetUserId) {
+    throw new IusiaError(
+      "FORBIDDEN",
+      "Nadie puede cambiar su propio rol de firma. Pídelo a otra persona de dirección.",
+    );
+  }
+  if (input.actorRole === "FIRM_DIRECTOR") return;
+
+  // A partir de aquí el actor es PARTNER.
+  if (input.nextRole === "FIRM_DIRECTOR") {
+    throw new IusiaError("FORBIDDEN", "Sólo la dirección puede nombrar dirección");
+  }
+  if (input.targetCurrentRole === "FIRM_DIRECTOR") {
+    throw new IusiaError(
+      "FORBIDDEN",
+      "Sólo la dirección puede cambiar o retirar a otra persona de dirección",
+    );
+  }
+}
+
+/** Rol de firma actual de una persona, o null si no pertenece a la firma. */
+async function currentFirmRole(
+  ctx: AppBindings["Variables"]["ctx"],
+  organizationId: string,
+  targetUserId: string,
+): Promise<string | null> {
+  return ctx.authz.firmRole(organizationId, targetUserId);
+}
+
 const CreateInvitationInput = z
   .object({
     email: z.string().trim().toLowerCase().email(),
@@ -262,12 +310,26 @@ const SetRoleInput = z.object({ user_id: z.string().min(1), role: FirmRole });
 
 /** Cambia el rol de firma de un miembro. */
 adminRoutes.post("/members/role", async (c) => {
-  const { db, audit } = c.get("ctx");
+  const ctx = c.get("ctx");
+  const { db, audit } = ctx;
   const { organizationId, userId } = c.get("session");
-  await requireFirmAdmin(c.get("ctx"), organizationId, userId);
 
   const parsed = SetRoleInput.safeParse(await c.req.json());
   if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Rol inválido");
+
+  const actorRole = await ctx.authz.firmRole(organizationId, userId);
+  const targetCurrentRole = await currentFirmRole(ctx, organizationId, parsed.data.user_id);
+  if (!targetCurrentRole) throw new IusiaError("NOT_FOUND", "La persona no pertenece a esta firma");
+
+  // Un PARTNER no puede auto-promoverse ni tocar a la dirección; nadie se cambia el
+  // rol a sí mismo. El rol de dirección concede supervisión de toda la cartera.
+  assertCanAssignFirmRole({
+    actorRole,
+    actorUserId: userId,
+    targetUserId: parsed.data.user_id,
+    targetCurrentRole,
+    nextRole: parsed.data.role,
+  });
 
   // Integridad operacional: la firma nunca puede quedarse sin dirección, ni por
   // autodegradación ni degradando al último director.
@@ -351,20 +413,23 @@ adminRoutes.post("/integrations/email/self-test", async (c) => {
  * nada de esto. La autorización es `requireSystemSuperadmin`, no el rol de firma.
  */
 adminRoutes.get("/system/executions", async (c) => {
-  const { authz, executions, matters } = c.get("ctx");
+  const { authz, executions } = c.get("ctx");
   const { organizationId, userId } = c.get("session");
   await authz.requireSystemSuperadmin(userId, "system.executions.read", organizationId);
 
-  const roots = await executions.listRecentRoots(organizationId, 25);
+  // Alcance GLOBAL: un kill switch de plataforma que sólo ve la firma activa del
+  // superadmin no es operable. Lo que se expone es estado técnico y consumo —nunca
+  // título de expediente, objetivo ni salida—, de modo que la autoridad de sistema
+  // sigue sin obtener acceso al contenido jurídico de ninguna firma.
+  const roots = await executions.listRecentRootsGlobal(50);
   const rows = await Promise.all(
     roots.map(async (r) => {
-      const matter = await matters.findById(organizationId, r.matterId);
       const nodes = await executions.listByRoot(r.id);
       const specialists = nodes.filter((n) => n.id !== r.id);
       return {
         root_execution_id: r.id,
+        organization_id: r.organizationId,
         matter_id: r.matterId,
-        matter_title: matter?.title ?? r.matterId,
         status: r.status,
         started_at: r.createdAt,
         completed_at: r.completedAt,
@@ -374,7 +439,7 @@ adminRoutes.get("/system/executions", async (c) => {
       };
     }),
   );
-  return c.json({ executions: rows });
+  return c.json({ executions: rows, scope: "PLATFORM" });
 });
 
 /**
@@ -466,13 +531,25 @@ const RemoveMemberInput = z.object({ user_id: z.string().min(1) });
  * ocurrido queda en la auditoría, que es donde corresponde.
  */
 adminRoutes.post("/members/remove", async (c) => {
-  const { db, audit } = c.get("ctx");
+  const ctx = c.get("ctx");
+  const { db, audit } = ctx;
   const { organizationId, userId } = c.get("session");
-  await requireFirmAdmin(c.get("ctx"), organizationId, userId);
 
   const parsed = RemoveMemberInput.safeParse(await c.req.json());
   if (!parsed.success) throw new IusiaError("VALIDATION_FAILED", "Miembro inválido");
   const targetUserId = parsed.data.user_id;
+
+  const actorRole = await ctx.authz.firmRole(organizationId, userId);
+  const targetCurrentRole = await currentFirmRole(ctx, organizationId, targetUserId);
+  // Retirar de la firma es la forma más directa de quitar la dirección: se somete a
+  // la misma matriz que el cambio de rol.
+  assertCanAssignFirmRole({
+    actorRole,
+    actorUserId: userId,
+    targetUserId,
+    targetCurrentRole,
+    nextRole: "READ_ONLY",
+  });
 
   await assertNotLastDirector(db, organizationId, targetUserId, "retirar");
 
@@ -645,6 +722,8 @@ adminRoutes.post("/matter-access", async (c) => {
 
   // Quien concede acceso debe poder administrar los miembros de ESE matter.
   await authz.authorizeMatter(organizationId, userId, parsed.data.matter_id, "matter:manage_members");
+  // Y quien lo recibe debe pertenecer a la firma: el ACL de expediente presupone tenencia.
+  await authz.assertOrganizationMember(organizationId, parsed.data.user_id);
 
   await matters.addMember(
     organizationId,

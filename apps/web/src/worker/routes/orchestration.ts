@@ -22,10 +22,42 @@ const StartInput = z.object({
 });
 
 type DocumentReadiness = { name: string; ingestionStatus: string };
+
+/**
+ * Estados de ingestión que SÍ justifican esperar: el documento está en camino al
+ * índice y arrancar ahora daría un análisis ciego sobre él.
+ *
+ * `PENDIENTE` no es un valor de `ingestion_status` —pertenece al ciclo de revisión
+ * jurídica del documento— y se conserva por compatibilidad con datos antiguos.
+ */
 const BLOCKING_DOCUMENT_STATUSES = new Set(["PENDIENTE", "PROCESSING"]);
+
+/**
+ * Documentos cuya ingestión falló definitivamente. NO bloquean: cero documentos
+ * utilizables nunca detiene a IUSIA. Pero tampoco desaparecen en silencio — se
+ * declaran al abogado, porque creer que un documento se consideró cuando no se pudo
+ * leer es peor que saber que faltó.
+ */
+const UNAVAILABLE_DOCUMENT_STATUSES = new Set(["ERROR"]);
 
 export function blockingDocumentsForAnalysis(docs: DocumentReadiness[]) {
   return docs.filter((doc) => BLOCKING_DOCUMENT_STATUSES.has(doc.ingestionStatus));
+}
+
+export function unavailableDocumentsForAnalysis(docs: DocumentReadiness[]) {
+  return docs.filter((doc) => UNAVAILABLE_DOCUMENT_STATUSES.has(doc.ingestionStatus));
+}
+
+/** Clasificación completa del expediente antes de convocar al equipo. */
+export function classifyDocumentsForAnalysis(docs: DocumentReadiness[]) {
+  const blocking = blockingDocumentsForAnalysis(docs);
+  const unavailable = unavailableDocumentsForAnalysis(docs);
+  return {
+    blocking,
+    unavailable,
+    /** Un expediente sin documentos es un caso NORMAL, no un error. */
+    textOnly: docs.length === 0,
+  };
 }
 
 /** Estimación conservadora de créditos por ejecución del DAG piloto. */
@@ -49,14 +81,17 @@ orchestrationRoutes.post("/matters/:matterId/executions", async (c) => {
     });
   }
 
-  const pendingDocs = blockingDocumentsForAnalysis(
+  const readiness = classifyDocumentsForAnalysis(
     await documents.listForMatter(organizationId, matterId),
   );
-  if (pendingDocs.length > 0) {
+  // Sólo se espera por lo que realmente está en camino al índice. Un expediente sin
+  // documentos —o con documentos que no pudieron procesarse— arranca igual: el
+  // análisis se apoya entonces en los hechos informados por el abogado.
+  if (readiness.blocking.length > 0) {
     throw new IusiaError(
       "CONFLICT",
       "Hay documentos del expediente que aún no están listos para recuperación RAG",
-      { reason: "INGESTION_PENDING", documents: pendingDocs.map((doc) => doc.name) },
+      { reason: "INGESTION_PENDING", documents: readiness.blocking.map((doc) => doc.name) },
     );
   }
 
@@ -104,11 +139,28 @@ orchestrationRoutes.post("/matters/:matterId/executions", async (c) => {
     resourceType: "execution",
     resourceId: rootExecutionId,
     outcome: "SUCCESS",
-    detail: { workflow_instance: instance.id },
+    detail: {
+      workflow_instance: instance.id,
+      text_only: readiness.textOnly,
+      unavailable_documents: readiness.unavailable.length,
+    },
   });
 
   return c.json(
-    { root_execution_id: rootExecutionId, workflow_instance_id: instance.id },
+    {
+      root_execution_id: rootExecutionId,
+      workflow_instance_id: instance.id,
+      // Modo del análisis y advertencias, en lenguaje de despacho. El abogado sabe
+      // desde el primer momento sobre qué se está trabajando.
+      mode: readiness.textOnly ? "TEXT_ONLY" : "DOCUMENT_BACKED",
+      warnings: readiness.unavailable.length
+        ? [
+            `No fue posible procesar ${readiness.unavailable.length} documento(s) del expediente; el análisis no los tendrá en cuenta: ${readiness.unavailable
+              .map((d) => d.name)
+              .join(", ")}.`,
+          ]
+        : [],
+    },
     202,
   );
 });
@@ -288,8 +340,38 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
     outcome: deriveOutcome({ rootStatus: root.status, evidenceChunkCount, documentCount: docs.length }),
     outputs,
     evidence: { chunk_count: evidenceChunkCount, documents: evidenceDocuments },
+    mode: docs.length === 0 ? "TEXT_ONLY" : "DOCUMENT_BACKED",
+    // Advertencia humana: un análisis sin soporte documental es válido, pero el
+    // abogado debe saber sobre qué base se produjo. Nunca se inventa soporte.
+    notices: groundingNotices({
+      documentCount: docs.length,
+      evidenceChunkCount,
+      rootStatus: root.status,
+    }),
   });
 });
+
+/** Avisos de grounding en lenguaje de despacho, derivados de datos reales. */
+export function groundingNotices(args: {
+  documentCount: number;
+  evidenceChunkCount: number;
+  rootStatus: string;
+}): string[] {
+  if (!TERMINAL_STATUSES.includes(args.rootStatus as (typeof TERMINAL_STATUSES)[number])) {
+    return [];
+  }
+  if (args.documentCount === 0) {
+    return [
+      "El análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación que posteriormente se aporte.",
+    ];
+  }
+  if (args.evidenceChunkCount === 0) {
+    return [
+      "No se recuperó soporte documental relevante para este análisis. Las conclusiones se apoyan en los hechos informados en el expediente.",
+    ];
+  }
+  return [];
+}
 
 const ApproveGateInput = z.object({
   wave: z.string().min(1),
@@ -375,6 +457,10 @@ orchestrationRoutes.post("/executions/:rootExecutionId/cancel", async (c) => {
     errorCode: control.reason,
     errorMessage: `Cancelada por ${control.actorControlRole}`,
   });
+  // Ninguna ejecución hija puede quedar viva en el ledger tras cancelar la raíz: el
+  // registro afirmaría trabajo en curso que ya no ocurre, y un resultado tardío no
+  // debe encontrar un nodo abierto donde aterrizar.
+  const cancelledChildren = await executions.cancelDescendants(rootExecutionId, control.reason);
   await events.append({
     organizationId: root.organizationId,
     matterId: root.matterId,
@@ -382,7 +468,11 @@ orchestrationRoutes.post("/executions/:rootExecutionId/cancel", async (c) => {
     executionId: rootExecutionId,
     type: "agent.cancelled",
     status: "CANCELLED",
-    detail: { actor_control_role: control.actorControlRole, reason: control.reason },
+    detail: {
+      actor_control_role: control.actorControlRole,
+      reason: control.reason,
+      cancelled_children: cancelledChildren,
+    },
   });
   await audit.record({
     organizationId: root.organizationId,

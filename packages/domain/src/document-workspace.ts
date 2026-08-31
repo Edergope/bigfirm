@@ -94,6 +94,7 @@ export const DOCUMENT_ERROR_CODES = [
   "INGESTION_FAILED",
   "INDEXING_FAILED",
   "TEMPLATE_NOT_FOUND",
+  "TEMPLATE_AMBIGUOUS",
   "TEMPLATE_NOT_RENDERABLE",
   "TEMPLATE_VALIDATION_FAILED",
   "DOCUMENT_GENERATION_FAILED",
@@ -109,6 +110,8 @@ export const DOCUMENT_ERROR_MESSAGES: Record<DocumentErrorCode, string> = {
   INGESTION_FAILED: "El documento se subió pero no pudo procesarse. Lo reintentaremos.",
   INDEXING_FAILED: "El documento se procesó pero aún no está disponible para análisis.",
   TEMPLATE_NOT_FOUND: "No hay una plantilla oficial para este tipo de documento.",
+  TEMPLATE_AMBIGUOUS:
+    "Hay más de una plantilla oficial activa para este tipo de documento. Elige cuál debe usarse.",
   TEMPLATE_NOT_RENDERABLE: "La plantilla oficial no tiene campos renderizables y no puede publicarse.",
   TEMPLATE_VALIDATION_FAILED: "Faltan datos necesarios para completar la plantilla.",
   DOCUMENT_GENERATION_FAILED: "No fue posible generar el documento. Inténtalo de nuevo.",

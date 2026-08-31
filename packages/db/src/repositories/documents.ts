@@ -8,6 +8,21 @@ import { documents, documentVersions } from "../schema/iusia.js";
  * la referencia, la clasificación jurídica y el estado de revisión.
  * No se duplica Drive.
  */
+/**
+ * Origen verificable de un entregable generado por IUSIA. Se persiste en la fila del
+ * documento para que la trazabilidad no dependa de recorrer `audit_events`.
+ */
+export interface DocumentProvenance {
+  /** AGENT (lo redactó el agente canónico) | MANUAL (valores del abogado). */
+  contentSource: "AGENT" | "MANUAL";
+  templateId: string;
+  templateVersion: number;
+  executionId?: string | null;
+  agentId?: string | null;
+  promptSha256?: string | null;
+  model?: string | null;
+}
+
 export class DocumentRepository {
   constructor(private readonly db: IusiaDb) {}
 
@@ -22,6 +37,8 @@ export class DocumentRepository {
     sizeBytes?: number | null;
     checksum?: string | null;
     ingestionStatus?: string;
+    /** Provenance del entregable cuando el documento lo generó IUSIA. */
+    provenance?: DocumentProvenance | null;
   }): Promise<string> {
     const id = newId("document");
     const now = new Date().toISOString();
@@ -47,6 +64,13 @@ export class DocumentRepository {
         currentVersion: 1,
         sizeBytes: input.sizeBytes ?? null,
         ingestionStatus: input.ingestionStatus ?? "FILE_STORED",
+        contentSource: input.provenance?.contentSource ?? null,
+        generatedFromTemplateId: input.provenance?.templateId ?? null,
+        generatedFromTemplateVersion: input.provenance?.templateVersion ?? null,
+        generatedByExecutionId: input.provenance?.executionId ?? null,
+        generatedByAgentId: input.provenance?.agentId ?? null,
+        generatedPromptSha256: input.provenance?.promptSha256 ?? null,
+        generatedModel: input.provenance?.model ?? null,
         linkedBy: input.linkedBy,
         createdAt: now,
         updatedAt: now,

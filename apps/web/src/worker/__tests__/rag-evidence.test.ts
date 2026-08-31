@@ -120,6 +120,8 @@ describe("collectMatterEvidence (grounding RAG del DAG)", () => {
       agent_id: "03-investigador-normativo-jurisprudencial",
       objective: OBJECTIVE,
       questions: [],
+      facts: [],
+      authorities: [],
       fact_refs: [],
       source_refs: [],
       document_excerpts: excerpts,

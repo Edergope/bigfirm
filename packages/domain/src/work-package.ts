@@ -44,6 +44,66 @@ export const DocumentExcerpt = z.object({
 });
 export type DocumentExcerpt = z.infer<typeof DocumentExcerpt>;
 
+/**
+ * Hecho del expediente transportado al agente. Su `certainty` distingue lo que el
+ * abogado informó de lo que está documentalmente acreditado: el agente puede razonar
+ * sobre ambos, pero nunca presentarlos como equivalentes.
+ */
+export const WorkPackageFact = z.object({
+  fact_id: z.string().min(1),
+  statement: z.string().min(1),
+  certainty: z.string().min(1),
+  primary_source: z.string().min(1),
+});
+export type WorkPackageFact = z.infer<typeof WorkPackageFact>;
+
+export const WorkPackageAuthority = z.object({
+  authority_id: z.string().min(1),
+  citation: z.string().min(1),
+  type: z.string().min(1),
+  status: z.string().min(1),
+});
+export type WorkPackageAuthority = z.infer<typeof WorkPackageAuthority>;
+
+/**
+ * Compone el LAWYER_PROVIDED_CONTEXT a partir de datos reales del expediente y del
+ * encargo. Es la base legítima de un análisis text-only: sin documentos, IUSIA no se
+ * queda sin nada sobre lo que trabajar.
+ *
+ * Función pura, en el dominio, para que la regla —qué cuenta como contexto del
+ * abogado— sea la misma en la ruta piloto, en la dinámica y en los tests.
+ */
+export function buildLawyerContext(
+  matter: {
+    title: string;
+    clientName: string;
+    objective: string | null;
+    parties: unknown;
+    riskLevel: string;
+    riskRationale: string | null;
+  },
+  executionObjective: string,
+): string {
+  const parties = Array.isArray(matter.parties)
+    ? (matter.parties as Array<{ kind?: string; name?: string }>)
+        .filter((p) => p?.name)
+        .map((p) => `- ${p.kind ?? "parte"}: ${p.name}`)
+    : [];
+  return [
+    `Asunto: ${matter.title}`,
+    `Cliente representado: ${matter.clientName}`,
+    ...(parties.length ? ["Partes:", ...parties] : []),
+    ...(matter.objective ? [`Objetivo del expediente: ${matter.objective}`] : []),
+    ...(matter.riskRationale
+      ? [`Riesgo valorado (${matter.riskLevel}): ${matter.riskRationale}`]
+      : []),
+    "Encargo del abogado responsable:",
+    executionObjective.trim(),
+  ]
+    .join("\n")
+    .slice(0, 8000);
+}
+
 export const WorkPackage = z.object({
   work_package_id: z.string().min(1),
   matter_id: MatterId,
@@ -53,6 +113,17 @@ export const WorkPackage = z.object({
 
   objective: z.string().min(1).max(4000),
   questions: z.array(z.string().min(1).max(2000)).max(30).default([]),
+
+  /**
+   * Relato y contexto aportados por el abogado responsable (LAWYER_PROVIDED_CONTEXT).
+   * Es la base legítima de un análisis text-only: no es evidencia documental, pero
+   * tampoco es una carencia. Un expediente sin documentos SÍ tiene contexto.
+   */
+  lawyer_provided_context: z.string().max(8000).optional(),
+  /** FACT_LEDGER del expediente. Vacío no bloquea: se declara la ausencia. */
+  facts: z.array(WorkPackageFact).max(200).default([]),
+  /** AUTHORITIES verificadas o en calibración del expediente. */
+  authorities: z.array(WorkPackageAuthority).max(200).default([]),
 
   fact_refs: z.array(z.string()).default([]),
   source_refs: z.array(SourceRef).default([]),
@@ -97,6 +168,35 @@ export function renderWorkPackage(wp: WorkPackage): string {
     lines.push("<constraints>");
     for (const c of wp.constraints) lines.push(`- ${c}`);
     lines.push("</constraints>");
+  }
+
+  // GROUNDING PACKAGE — cada fuente de conocimiento va etiquetada por separado para
+  // que el agente no confunda un hecho informado con un hecho acreditado.
+  if (wp.lawyer_provided_context && wp.lawyer_provided_context.trim().length > 0) {
+    lines.push("<lawyer_provided_context>");
+    lines.push(
+      "Hechos y contexto informados por el abogado responsable del expediente.",
+      "Son base legítima de análisis, pero NO están documentalmente acreditados:",
+      "trátalos como alegados y señala qué requeriría prueba documental.",
+    );
+    lines.push(wp.lawyer_provided_context.trim());
+    lines.push("</lawyer_provided_context>");
+  }
+
+  if (wp.facts.length) {
+    lines.push("<fact_ledger>");
+    for (const f of wp.facts) {
+      lines.push(`- [${f.fact_id}] ${f.certainty} ${f.statement} :: fuente: ${f.primary_source}`);
+    }
+    lines.push("</fact_ledger>");
+  }
+
+  if (wp.authorities.length) {
+    lines.push("<authorities>");
+    for (const a of wp.authorities) {
+      lines.push(`- [${a.authority_id}] ${a.citation} (${a.type}) estado: ${a.status}`);
+    }
+    lines.push("</authorities>");
   }
 
   if (wp.source_refs.length) {

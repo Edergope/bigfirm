@@ -19,6 +19,8 @@ describe("frontera contra inyección de prompts desde documentos", () => {
       agent_id: "01-intake-y-clasificador",
       objective: "Analizar el expediente",
       questions: [],
+      facts: [],
+      authorities: [],
       fact_refs: [],
       source_refs: [],
       document_excerpts: [{ ref_id: "doc_1", document_name: "malicioso.pdf", content }],
