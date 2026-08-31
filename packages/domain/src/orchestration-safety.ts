@@ -23,6 +23,18 @@ export const ORCHESTRATION_LIMITS = {
   MAX_ROOT_WALL_TIME_MINUTES: 15,
   /** Tamaño máximo del resumen de un output upstream inyectado a otro agente. */
   MAX_UPSTREAM_OUTPUT_SIZE: 4000,
+  /**
+   * Límites de la llamada de planificación (00 PLAN), calibrados sobre la latencia
+   * REAL medida en staging para ese agente y modelo: n=12, mínimo 33 s, mediana 79 s,
+   * máximo 127 s. Los valores por defecto del gateway —300 s por intento, 3 intentos,
+   * 2 candidatos— permitían casi media hora de silencio antes de que actuara ninguna
+   * guarda. Un abogado no espera media hora sin señal: cancela. Y eso fue exactamente
+   * lo que ocurrió en la primera prueba real.
+   */
+  PLANNER_REQUEST_TIMEOUT_MS: 180_000,
+  PLANNER_MAX_ATTEMPTS_PER_CANDIDATE: 2,
+  /** Cota superior del silencio admisible durante la planificación. */
+  MAX_PLANNING_WALL_TIME_MINUTES: 12,
 } as const;
 
 export type OrchestrationLimits = typeof ORCHESTRATION_LIMITS;

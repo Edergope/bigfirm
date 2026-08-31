@@ -72,6 +72,9 @@ type DagResult = { root_execution_id: string; completed: string[]; failed: strin
 const TIMING_MILESTONES = {
   EXECUTION_CREATED: "execution_created",
   PLAN_START: "PLAN_START",
+  /** Se está llamando al modelo del socio director. Prueba de vida, no de avance. */
+  PLAN_MODEL_ATTEMPT: "PLAN_MODEL_ATTEMPT",
+  PLAN_MODEL_RESPONSE: "PLAN_MODEL_RESPONSE",
   PLAN_LLM_COMPLETE: "PLAN_LLM_COMPLETE",
   PLAN_COMPLETE: "PLAN_COMPLETE",
   TEAMPLAN_PARSED: "TEAMPLAN_PARSED",
@@ -557,7 +560,16 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     );
 
     const planned = await step.do("dyn-plan", async () => {
-      const gateway = new ModelGateway(this.env);
+      // Planificación ACOTADA. La medida histórica de esta llamada en staging es
+      // 33–127 s (mediana 79 s) contra un modelo de razonamiento. Con los valores por
+      // defecto —300 s por intento, 3 intentos, 2 candidatos— el silencio podía
+      // llegar a media hora; ningún abogado espera eso, y de hecho ninguno esperó.
+      // 180 s da holgura sobre el peor caso observado y acota el total a ~12 min,
+      // tras los cuales el SAFE_FALLBACK determinista garantiza que haya equipo.
+      const gateway = new ModelGateway(this.env, {
+        requestTimeoutMs: ORCHESTRATION_LIMITS.PLANNER_REQUEST_TIMEOUT_MS,
+        maxAttemptsPerCandidate: ORCHESTRATION_LIMITS.PLANNER_MAX_ATTEMPTS_PER_CANDIDATE,
+      });
       const brief: MatterBrief = {
         title: ctx.title,
         materiality: ctx.materiality,
@@ -574,12 +586,51 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         catalog: buildAgentCatalog(),
         eligible: eligibleAgentIds(),
         runModel: async (messages) => {
-          const r = await gateway.complete(orchestratorDef.model_policy, messages, {
-            organization_id: params.organization_id,
-            matter_id: params.matter_id,
-            agent_id: ORCHESTRATOR_AGENT_ID,
-            execution_id: planExecutionId,
-          });
+          const r = await gateway.complete(
+            orchestratorDef.model_policy,
+            messages,
+            {
+              organization_id: params.organization_id,
+              matter_id: params.matter_id,
+              agent_id: ORCHESTRATOR_AGENT_ID,
+              execution_id: planExecutionId,
+            },
+            {
+              // Evidencia de vida durante la planificación: sin esto el ledger
+              // callaba entre PLAN_START y PLAN_LLM_COMPLETE, y la UI se quedaba
+              // clavada en "Identificando los especialistas" durante minutos.
+              onAttempt: async (info) => {
+                await events.append({
+                  ...eventBase,
+                  executionId: planExecutionId,
+                  type: "agent.milestone",
+                  status: "RUNNING",
+                  detail: {
+                    milestone: TIMING_MILESTONES.PLAN_MODEL_ATTEMPT,
+                    elapsed_ms: Date.now() - startedAtMs,
+                    provider: info.provider,
+                    model: info.model,
+                    attempt: info.attempt,
+                  },
+                });
+              },
+              onResponse: async (info) => {
+                await events.append({
+                  ...eventBase,
+                  executionId: planExecutionId,
+                  type: "agent.milestone",
+                  status: "RUNNING",
+                  detail: {
+                    milestone: TIMING_MILESTONES.PLAN_MODEL_RESPONSE,
+                    elapsed_ms: Date.now() - startedAtMs,
+                    model_duration_ms: info.durationMs,
+                    provider: info.provider,
+                    model: info.model,
+                  },
+                });
+              },
+            },
+          );
           usage = {
             input_tokens: usage.input_tokens + r.usage.input_tokens,
             output_tokens: usage.output_tokens + r.usage.output_tokens,

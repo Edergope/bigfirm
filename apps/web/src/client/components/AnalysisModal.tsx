@@ -6,6 +6,7 @@ import { OrchestrationNetwork, Skeleton, useCanAnimate } from "@iusia/ui";
 import {
   deriveConstellation,
   deriveProgressStages,
+  planningWaitHint,
   shouldKeepPolling,
   shouldRefreshHistory,
   type ProgressStage,
@@ -161,6 +162,13 @@ export function AnalysisModal({
   });
 
   const cbEvent = (events.data?.events ?? []).find((e) => e.detail?.circuit_breaker_reason);
+  // Espera declarada durante la planificación: la fase 00 PLAN es una única llamada
+  // de razonamiento y, mientras dura, no hay avance que enseñar. Callarlo hizo que la
+  // primera prueba real terminara en una cancelación humana de un análisis sano.
+  const planningHint = planningWaitHint({
+    events: events.data?.events ?? [],
+    rootStatus,
+  });
   const doneCount = stages.filter((s) => s.state === "done").length;
   const progress = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0;
 
@@ -260,6 +268,12 @@ export function AnalysisModal({
                     ))}
                   </ol>
                 )}
+
+                {planningHint ? (
+                  <p className="mt-3 text-[12.5px] leading-relaxed text-white/55">
+                    {planningHint}
+                  </p>
+                ) : null}
 
                 {cbEvent ? (
                   <div className="mt-4 rounded-[var(--radius-md)] bg-iusia-warning/12 px-4 py-3">

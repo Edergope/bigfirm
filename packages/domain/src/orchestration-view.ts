@@ -584,6 +584,56 @@ export interface ActiveAnalysisRef {
  * vista y aun así enterarse. Una lista `prev` vacía no genera avisos —el primer
  * sondeo tras cargar la aplicación no debe anunciar trabajo anterior.
  */
+/**
+ * Aviso de cierre de un análisis, según CÓMO terminó.
+ *
+ * El aviso de fondo decía siempre «El análisis de IUSIA terminó» en tono de éxito,
+ * incluso cuando el abogado acababa de detenerlo: la ventana decía «Análisis
+ * detenido» y el aviso, a la vez, que había terminado bien. Un sistema que se
+ * contradice sobre lo que acaba de pasar no es creíble en nada más.
+ */
+export function analysisCompletionNotice(status: string): {
+  title: string;
+  tone: "success" | "critical" | "navy";
+} {
+  if (status === "CANCELLED") {
+    return { title: "El análisis de IUSIA fue detenido", tone: "navy" };
+  }
+  if (status === "FAILED" || status === "BLOCKED") {
+    return { title: "El análisis de IUSIA no pudo completarse", tone: "critical" };
+  }
+  if (status === "COMPLETED") {
+    return { title: "El análisis de IUSIA terminó", tone: "success" };
+  }
+  // Estado desconocido o aún no terminal: se informa sin afirmar un desenlace.
+  return { title: "El análisis de IUSIA salió de los análisis en curso", tone: "navy" };
+}
+
+/**
+ * Espera declarada mientras el socio director planifica.
+ *
+ * La fase 00 PLAN es una sola llamada de razonamiento que en producción tarda entre
+ * medio minuto y algo más de dos. Mientras dura, el ledger emite `PLAN_MODEL_ATTEMPT`
+ * pero no hay avance que mostrar. Sin decir nada, la pantalla parecía congelada —y en
+ * la primera prueba real con un abogado, eso terminó en una cancelación humana de un
+ * análisis que estaba funcionando.
+ */
+export function planningWaitHint(args: {
+  events: readonly EventView[];
+  rootStatus: string;
+}): string | null {
+  if (isTerminalStatus(args.rootStatus)) return null;
+  const attempted = args.events.some(
+    (e) => e.type === "agent.milestone" && e.detail?.milestone === "PLAN_MODEL_ATTEMPT",
+  );
+  if (!attempted) return null;
+  const planned = args.events.some(
+    (e) => e.type === "agent.milestone" && e.detail?.milestone === "PLAN_COMPLETE",
+  );
+  if (planned) return null;
+  return "El socio director está estudiando el encargo para decidir qué especialistas intervienen. Suele tardar entre uno y dos minutos.";
+}
+
 export function diffFinishedAnalyses(
   prev: readonly ActiveAnalysisRef[],
   next: readonly ActiveAnalysisRef[],

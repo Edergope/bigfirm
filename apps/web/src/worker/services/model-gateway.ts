@@ -65,6 +65,29 @@ class ProviderCallError extends Error {
   }
 }
 
+/**
+ * Ganchos de observabilidad de una llamada al modelo.
+ *
+ * Existen porque una llamada de razonamiento puede durar más de dos minutos y el
+ * Execution Ledger sólo registraba su principio y su final: entre medias, el
+ * producto no tenía nada que mostrar. Estos ganchos emiten evidencia REAL de que la
+ * llamada está en curso; nunca alteran su resultado.
+ */
+export interface ModelCallHooks {
+  onAttempt?: (info: {
+    provider: string;
+    model: string;
+    attempt: number;
+    candidateIndex: number;
+  }) => void | Promise<void>;
+  onResponse?: (info: {
+    provider: string;
+    model: string;
+    attempt: number;
+    durationMs: number;
+  }) => void | Promise<void>;
+}
+
 /** Dependencias inyectables para poder probar sin red ni esperas reales. */
 export interface ModelGatewayDeps {
   fetch?: typeof fetch;
@@ -119,6 +142,7 @@ export class ModelGateway {
     policy: ModelPolicy,
     messages: readonly ModelMessage[],
     ctx: ModelCallContext,
+    hooks: ModelCallHooks = {},
   ): Promise<ModelResult> {
     // Falta de credenciales = ACTION_REQUIRED_SECRET, no un fallo de proveedor.
     if (!this.isConfigured()) {
@@ -138,8 +162,33 @@ export class ModelGateway {
       const label = `${candidate.provider}/${candidate.model}`;
       for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
         attempts++;
+        // Señal de vida ANTES de la llamada. Una llamada de planificación tarda de
+        // 30 a 130 segundos contra un modelo de razonamiento; sin esta señal el
+        // sistema quedaba mudo todo ese tiempo y el abogado sólo podía concluir que
+        // se había colgado. El hook no puede afectar a la llamada: si falla, se ignora.
+        try {
+          await hooks.onAttempt?.({
+            provider: candidate.provider,
+            model: candidate.model,
+            attempt,
+            candidateIndex: candidates.indexOf(candidate),
+          });
+        } catch {
+          // La observabilidad nunca rompe la ejecución jurídica.
+        }
+        const startedAt = Date.now();
         try {
           const result = await this.callOnce(policy, candidate, messages, ctx);
+          try {
+            await hooks.onResponse?.({
+              provider: result.provider,
+              model: result.model,
+              attempt,
+              durationMs: Date.now() - startedAt,
+            });
+          } catch {
+            // idem
+          }
           return { ...result, attempts };
         } catch (error) {
           const pce =
