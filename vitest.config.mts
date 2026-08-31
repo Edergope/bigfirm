@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
@@ -16,6 +17,18 @@ export default defineConfig({
           name: "node",
           include: ["packages/*/src/**/*.test.ts", "apps/web/src/worker/**/*.test.ts"],
           environment: "node",
+          alias: {
+            // El Workflow de orquestación sólo se podía probar por sus piezas sueltas
+            // porque su módulo importa `cloudflare:workers`, que no existe en Node.
+            // El stub aporta la clase base y nada más: el `step` lo inyecta el test,
+            // así que lo que se ejercita es el workflow REAL, no una reimplementación.
+            "cloudflare:workers": fileURLToPath(
+              new URL(
+                "./apps/web/src/worker/__tests__/stubs/cloudflare-workers.ts",
+                import.meta.url,
+              ),
+            ),
+          },
         },
       },
       {
