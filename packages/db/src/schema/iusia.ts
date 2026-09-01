@@ -44,6 +44,12 @@ export const matters = sqliteTable(
     riskRationale: text("risk_rationale"),
     openedAt: text("opened_at").notNull(),
     closedAt: text("closed_at"),
+    /**
+     * Identidad de la convocatoria que creó este expediente. Una acción humana es UNA
+     * operación lógica: el doble clic, el reintento de red y el re-submit tras una
+     * respuesta incierta comparten clave y devuelven el MISMO expediente.
+     */
+    creationRequestKey: text("creation_request_key"),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id),
@@ -52,6 +58,7 @@ export const matters = sqliteTable(
   },
   (t) => [
     uniqueIndex("matters_org_reference_uq").on(t.organizationId, t.reference),
+    uniqueIndex("matters_creation_request_key_uq").on(t.creationRequestKey),
     index("matters_org_status_idx").on(t.organizationId, t.status),
     index("matters_org_updated_idx").on(t.organizationId, t.updatedAt),
   ],

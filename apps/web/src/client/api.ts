@@ -180,8 +180,12 @@ export const api = {
     practice_areas: string[];
     jurisdiction: string;
     objective?: string;
+    /** Identidad de la convocatoria: un reintento devuelve el MISMO expediente. */
+    request_key?: string;
+    /** El abogado confirmó, viendo el candidato, que es un asunto distinto. */
+    confirm_different?: boolean;
   }) =>
-    request<{ matter: MatterSummary }>("/api/matters", {
+    request<{ matter: MatterSummary; created: boolean; resumed: boolean }>("/api/matters", {
       method: "POST",
       body: JSON.stringify(input),
     }),

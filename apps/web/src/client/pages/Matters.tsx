@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -20,7 +20,9 @@ import {
   practiceAreaLabel,
   riskTerm,
 } from "@iusia/ui";
+import type { DuplicateCandidateView } from "@iusia/domain";
 import { api, ApiError, type MatterSummary } from "../api.js";
+
 
 const PRACTICE_AREAS = [
   "CIVIL", "COMERCIAL_CONTRACTUAL", "SOCIETARIO_MA", "LABORAL", "TRIBUTARIO",
@@ -61,6 +63,7 @@ function relativeDays(iso: string): string {
 
 export function Matters() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const matters = useQuery({ queryKey: ["matters"], queryFn: api.listMatters });
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -232,6 +235,10 @@ export function Matters() {
             setOpen(false);
             void queryClient.invalidateQueries({ queryKey: ["matters"] });
           }}
+          onOpenExisting={(matterId) => {
+            setOpen(false);
+            navigate(`/casos/${matterId}`);
+          }}
         />
       </Drawer>
     </div>
@@ -342,7 +349,13 @@ function MatterRow({ matter: m }: { matter: MatterSummary }) {
   );
 }
 
-function NewMatterForm({ onCreated }: { onCreated: () => void }) {
+function NewMatterForm({
+  onCreated,
+  onOpenExisting,
+}: {
+  onCreated: () => void;
+  onOpenExisting: (matterId: string) => void;
+}) {
   const [title, setTitle] = useState("");
   const [clientName, setClientName] = useState("");
   const [jurisdiction, setJurisdiction] = useState("Colombia");
@@ -352,8 +365,13 @@ function NewMatterForm({ onCreated }: { onCreated: () => void }) {
   const [files, setFiles] = useState<File[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Identidad de este alta. Un doble clic o un reintento devuelven el MISMO
+  // expediente en lugar de abrir otro.
+  const [requestKey] = useState(() => crypto.randomUUID());
+  const [duplicate, setDuplicate] = useState<DuplicateCandidateView | null>(null);
+
   const create = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts: { confirmDifferent?: boolean } = {}) => {
       const res = await api.createMatter({
         title,
         client_name: clientName,
@@ -361,21 +379,28 @@ function NewMatterForm({ onCreated }: { onCreated: () => void }) {
         practice_areas: [area],
         jurisdiction,
         objective: objective || undefined,
+        request_key: requestKey,
+        confirm_different: opts.confirmDifferent,
       });
-      // Los documentos aportados en la creación se suben al expediente recién
-      // creado: crea su carpeta en Drive y quedan encolados para ingestión. Un fallo
-      // de subida no deshace el expediente —ya existe y es utilizable—; se informa.
+      // Los documentos aportados en la creación se incorporan al expediente recién
+      // creado y quedan encolados para su procesamiento. Un fallo de subida no
+      // deshace el expediente —ya existe y es utilizable—; se informa.
       if (files.length > 0) {
         await api.uploadDocuments(res.matter.id, files);
       }
       return res;
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.details?.reason === "POSSIBLE_DUPLICATE_MATTER") {
+        setDuplicate(error.details.candidate as DuplicateCandidateView);
+      }
     },
     onSuccess: onCreated,
   });
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    create.mutate();
+    create.mutate({});
   }
 
   return (
@@ -455,7 +480,34 @@ function NewMatterForm({ onCreated }: { onCreated: () => void }) {
         </div>
       </Field>
 
-      {create.error ? (
+      {duplicate ? (
+        <div
+          role="alert"
+          className="rounded-[10px] border border-iusia-gold/40 bg-iusia-gold/8 px-3.5 py-3"
+        >
+          <p className="text-[13px] font-medium text-iusia-navy">
+            Ya existe un expediente que parece corresponder a este asunto:
+          </p>
+          <p className="mt-1 text-[12.5px] text-iusia-mist-text">
+            <span className="tnum">{duplicate.reference}</span> — {duplicate.title}
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={() => onOpenExisting(duplicate.matter_id)}>
+              Abrir expediente existente
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setDuplicate(null);
+                create.mutate({ confirmDifferent: true });
+              }}
+            >
+              Es un asunto diferente
+            </Button>
+          </div>
+        </div>
+      ) : create.error ? (
         <p role="alert" className="text-[13.5px] text-iusia-critical">
           {create.error instanceof ApiError ? create.error.message : "Error al crear"}
         </p>

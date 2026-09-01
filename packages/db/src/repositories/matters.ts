@@ -29,16 +29,95 @@ export interface MatterRow {
 export class MatterRepository {
   constructor(private readonly db: IusiaDb) {}
 
+  /**
+   * Alta idempotente por convocatoria.
+   *
+   * `creationRequestKey` es la identidad de UNA acción humana. El doble clic, el
+   * reintento de red y el re-submit tras una respuesta incierta comparten clave y
+   * devuelven el MISMO expediente en lugar de abrir otro. Sin esto, tres pulsaciones
+   * produjeron IUS-2026-011, 012 y 013 con el mismo contrato dentro.
+   */
+  async createIdempotent(
+    organizationId: string,
+    userId: string,
+    input: CreateMatterInput,
+    reference: string,
+    creationRequestKey: string,
+  ): Promise<{ matterId: string; created: boolean }> {
+    const existing = await this.findByCreationRequestKey(organizationId, creationRequestKey);
+    if (existing) return { matterId: existing.id, created: false };
+
+    try {
+      const matterId = await this.create(
+        organizationId,
+        userId,
+        input,
+        reference,
+        this.scopedRequestKey(organizationId, creationRequestKey),
+      );
+      return { matterId, created: true };
+    } catch (error) {
+      // Carrera entre dos envíos simultáneos con la misma clave: gana el índice único
+      // y el perdedor recupera el expediente del ganador. Nunca se crea un segundo.
+      const winner = await this.findByCreationRequestKey(organizationId, creationRequestKey);
+      if (winner) return { matterId: winner.id, created: false };
+      throw error;
+    }
+  }
+
+  /**
+   * La clave se almacena SIEMPRE prefijada por organización. El índice único es
+   * global, así que sin el prefijo una firma podría —por colisión o por copiar la
+   * clave— bloquear o alcanzar el alta de otra. Una clave de convocatoria no es una
+   * credencial: fuera de su organización simplemente no significa nada.
+   */
+  private scopedRequestKey(organizationId: string, creationRequestKey: string): string {
+    return `${organizationId}:${creationRequestKey}`;
+  }
+
+  async findByCreationRequestKey(organizationId: string, creationRequestKey: string) {
+    const [row] = await this.db
+      .select()
+      .from(matters)
+      .where(
+        and(
+          eq(matters.organizationId, organizationId),
+          eq(matters.creationRequestKey, this.scopedRequestKey(organizationId, creationRequestKey)),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** Expedientes de la organización para el chequeo determinista de duplicados. */
+  async listForDuplicateCheck(organizationId: string, limit = 500) {
+    return this.db
+      .select({
+        id: matters.id,
+        reference: matters.reference,
+        title: matters.title,
+        clientName: matters.clientName,
+        status: matters.status,
+        createdAt: matters.createdAt,
+      })
+      .from(matters)
+      .where(eq(matters.organizationId, organizationId))
+      .orderBy(desc(matters.createdAt))
+      .limit(limit);
+  }
+
   async create(
     organizationId: string,
     userId: string,
     input: CreateMatterInput,
     reference: string,
+    creationRequestKey?: string | null,
   ): Promise<string> {
     const id = newId("matter");
     const now = new Date().toISOString();
     await this.db.insert(matters).values({
       id,
+      creationRequestKey: creationRequestKey ?? null,
       organizationId,
       reference,
       title: input.title,

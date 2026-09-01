@@ -139,7 +139,12 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
 
   const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
 
-  const results: Array<{ document_id: string; name: string; status: string }> = [];
+  const results: Array<{
+    document_id: string;
+    name: string;
+    status: string;
+    deduplicated?: boolean;
+  }> = [];
   for (const file of files) {
     if (file.size > MAX_FILE_BYTES) {
       results.push({ document_id: "", name: file.name, status: "UPLOAD_FAILED" });
@@ -153,6 +158,24 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
     try {
       const bytes = await file.arrayBuffer();
       const ingestionStatus = initialIngestionStatus(mime);
+
+      // Un REINTENTO TÉCNICO no incorpora el documento dos veces. Se compara el
+      // binario por checksum contra lo que el expediente ya tiene: si es el mismo
+      // archivo, se devuelve el documento existente en vez de subirlo otra vez.
+      // Volver a aportar el mismo archivo a propósito es una acción distinta —crear
+      // una versión nueva— y tiene su propia ruta.
+      const fileChecksum = await checksum(bytes);
+      const alreadyThere = await documents.findByChecksum(organizationId, matterId, fileChecksum);
+      if (alreadyThere) {
+        results.push({
+          document_id: alreadyThere.documentId,
+          name: alreadyThere.filename,
+          status: alreadyThere.ingestionStatus,
+          deduplicated: true,
+        });
+        continue;
+      }
+
       const meta = await drive.uploadFile({
         name: file.name,
         parentId: uploadedFolder,
@@ -168,7 +191,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
         classification: "FUENTE",
         linkedBy: userId,
         sizeBytes: file.size,
-        checksum: await checksum(bytes),
+        checksum: fileChecksum,
         ingestionStatus,
       });
       if (ingestionStatus === "PROCESSING") {

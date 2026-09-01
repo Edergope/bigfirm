@@ -529,7 +529,7 @@ function Documentos({ data }: { data: MatterDetail }) {
   );
 }
 
-/** Una de las dos carpetas del expediente, con enlace a Drive por documento. */
+/** Una de las dos secciones documentales del expediente. */
 function DocFolder({
   title,
   subtitle,
@@ -591,7 +591,7 @@ function DocFolder({
 
 /**
  * Generación de un entregable oficial: elige plantilla, IUSIA propone el contenido
- * desde el análisis del expediente, y produce DOCX + PDF en Drive. El abogado no
+ * desde el análisis del expediente, y produce DOCX + PDF en el expediente. El abogado no
  * maqueta: revisa el contenido y genera.
  */
 function GenerateDrawer({

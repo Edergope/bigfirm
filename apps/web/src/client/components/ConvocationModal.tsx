@@ -13,7 +13,14 @@ import {
   practiceAreaLabel,
   useCanAnimate,
 } from "@iusia/ui";
+import {
+  convocationErrorCopy,
+  documentsReadyForAnalysis,
+  type ConvocationStage,
+  type DuplicateCandidateView,
+} from "@iusia/domain";
 import { api, ApiError } from "../api.js";
+
 import { HERO_SPECIALISTS } from "./IusiaHero.js";
 
 /** Centinela del selector: crear un expediente nuevo en el mismo flujo. */
@@ -24,24 +31,6 @@ const PRACTICE_AREAS = [
   "PROPIEDAD_INTELECTUAL", "INSOLVENCIA", "MIGRATORIO", "FINANCIERO", "COMPLIANCE", "OTRO",
 ];
 const MATERIALITIES = ["SIMPLE", "MATERIAL", "HIGH_STAKES"];
-
-/**
- * Espera determinista a que los documentos aportados estén disponibles para el
- * análisis: mientras alguno siga PENDIENTE/PROCESSING, el RAG no los vería. Se
- * consulta el workspace real (no sleeps) con un tope de intentos; si al cabo del
- * tope siguen sin indexar, falla cerrado y no arranca la orquestación.
- */
-async function waitForIngestion(matterId: string, expected: number): Promise<void> {
-  const NOT_READY = new Set(["PENDIENTE", "PROCESSING"]);
-  for (let i = 0; i < 12; i++) {
-    const ws = await api.matterWorkspace(matterId).catch(() => null);
-    const uploaded = ws?.uploaded ?? [];
-    const ready = uploaded.filter((d) => !NOT_READY.has(d.status)).length;
-    if (uploaded.length >= expected && ready >= expected) return;
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error("INGESTION_PENDING");
-}
 
 /**
  * Convocatoria de IUSIA.
@@ -83,38 +72,92 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
     else if (matters.isSuccess) setMatterId(NEW_MATTER);
   }, [rows, matterId, matters.isSuccess]);
 
+  /**
+   * Identidad de ESTA convocatoria. Se genera una vez por intento lógico y sobrevive
+   * a reintentos, dobles clics y respuestas inciertas: el servidor devuelve el mismo
+   * expediente en lugar de abrir otro. Sólo cambia cuando el abogado decide
+   * deliberadamente abrir un asunto distinto.
+   */
+  const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
+  // Expediente ya creado por esta convocatoria. Si algo falla después, se reanuda
+  // sobre él en lugar de volver a empezar.
+  const [createdMatterId, setCreatedMatterId] = useState("");
+  const [duplicate, setDuplicate] = useState<DuplicateCandidateView | null>(null);
+  const [stage, setStage] = useState<ConvocationStage | null>(null);
+
   const start = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts: { confirmDifferent?: boolean } = {}) => {
+      setStage(null);
       // Modo nuevo: crear el expediente ANTES de nada. El resto del flujo se liga
       // inequívocamente a ese matterId, nunca a otro seleccionado.
-      let targetId = matterId;
-      if (isNew) {
-        const created = await api.createMatter({
-          title: title.trim(),
-          client_name: clientName.trim(),
-          materiality,
-          practice_areas: [area],
-          jurisdiction: jurisdiction.trim(),
-          objective: objective.trim() || undefined,
-        });
-        targetId = created.matter.id;
+      let targetId = createdMatterId || matterId;
+      if (isNew && !createdMatterId) {
+        try {
+          const created = await api.createMatter({
+            title: title.trim(),
+            client_name: clientName.trim(),
+            materiality,
+            practice_areas: [area],
+            jurisdiction: jurisdiction.trim(),
+            objective: objective.trim() || undefined,
+            request_key: requestKey,
+            confirm_different: opts.confirmDifferent,
+          });
+          targetId = created.matter.id;
+          setCreatedMatterId(targetId);
+        } catch (error) {
+          const candidate =
+            error instanceof ApiError && error.details?.reason === "POSSIBLE_DUPLICATE_MATTER"
+              ? (error.details.candidate as DuplicateCandidateView)
+              : null;
+          if (candidate) {
+            setDuplicate(candidate);
+            setStage("POSSIBLE_DUPLICATE_MATTER");
+            throw error;
+          }
+          setStage("MATTER_CREATION_FAILED");
+          throw error;
+        }
       }
 
-      // Adjuntos → "01 Documentos aportados" → cola de ingestión.
+      // Adjuntos → carpeta de documentos aportados del expediente → cola de ingestión.
+      // Un reintento con el mismo archivo NO lo incorpora dos veces: el servidor lo
+      // reconoce por su contenido.
       if (files.length > 0) {
-        await api.uploadDocuments(targetId, files);
-        // No analizar antes de que los documentos estén disponibles para el RAG.
-        await waitForIngestion(targetId, files.length);
+        try {
+          await api.uploadDocuments(targetId, files);
+        } catch (error) {
+          setStage("DOCUMENT_UPLOAD_FAILED");
+          throw error;
+        }
       }
-      const res = await api.startOrchestration(targetId, objective.trim());
-      return { targetId, root: res.root_execution_id };
+
+      // La creación NO espera a la indexación. Si los documentos siguen procesándose,
+      // se entrega el expediente y el análisis se inicia desde él cuando estén listos.
+      const workspace = await api.matterWorkspace(targetId).catch(() => null);
+      const ready =
+        files.length === 0 ||
+        (workspace !== null && documentsReadyForAnalysis(workspace.uploaded, files.length));
+      if (!ready) return { targetId, root: null, pending: true };
+
+      try {
+        const res = await api.startOrchestration(targetId, objective.trim());
+        return { targetId, root: res.root_execution_id, pending: false };
+      } catch (error) {
+        setStage("ORCHESTRATION_START_FAILED");
+        throw error;
+      }
     },
-    onSuccess: ({ targetId, root }) => {
+    onSuccess: ({ targetId, root, pending }) => {
       const go = () => {
         onClose();
-        navigate(`/casos/${targetId}?analisis=${root}`);
+        // Sin análisis todavía: se abre el expediente, que es donde el abogado ve el
+        // estado real de sus documentos y puede iniciar el análisis cuando estén listos.
+        navigate(
+          root ? `/casos/${targetId}?analisis=${root}` : `/casos/${targetId}?documentos=procesando`,
+        );
       };
-      if (still) go();
+      if (still || pending) go();
       else setTimeout(go, 900);
     },
   });
@@ -244,7 +287,7 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                       </Select>
                       <p className="mt-1.5 text-[12px] leading-snug text-iusia-mist-text">
                         {isNew
-                          ? "Se creará el expediente y su carpeta en Drive antes de analizar."
+                          ? "Se creará el expediente antes de analizar."
                           : "IUSIA trabajará sobre los documentos y hechos de este expediente."}
                       </p>
                     </label>
@@ -335,12 +378,9 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                   ) : null}
 
                   {/*
-                    Adjuntos. La UI está lista y el contrato es explícito, pero el
-                    envío todavía NO existe: el Document Pipeline —carpeta del
-                    expediente en Drive, subcarpeta de documentos aportados,
-                    subcarpeta de documentos generados por IUSIA, cola, R2 e
-                    indexación— es el sprint siguiente. Se dice aquí, en la
-                    interfaz, en lugar de aceptar archivos que se perderían.
+                    Adjuntos. Se incorporan al expediente y entran al pipeline
+                    documental. El almacenamiento es infraestructura de IUSIA y no se
+                    nombra en la experiencia del abogado.
                   */}
                   <div className="mt-4">
                     <span className="mb-1.5 block text-[12px] font-semibold uppercase tracking-[0.07em] text-iusia-mist-text">
@@ -410,20 +450,70 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                       <p className="mt-3 flex items-start gap-2 text-[12px] leading-snug text-iusia-mist-text">
                         <FolderTree size={13} className="mt-0.5 shrink-0" aria-hidden />
                         <span>
-                          Se guardarán en la carpeta del expediente en Drive, separando lo
-                          que aportas tú de lo que genere IUSIA, y quedarán disponibles para
-                          el análisis.
+                          Se incorporarán al expediente, separados de lo que genere
+                          IUSIA, y quedarán disponibles para el análisis en cuanto
+                          terminen de procesarse.
                         </span>
                       </p>
                     </div>
                   </div>
 
-                  {start.error ? (
-                    <p role="alert" className="mt-3 text-[13px] text-iusia-critical">
-                      {start.error instanceof ApiError
-                        ? start.error.message
-                        : "No fue posible convocar al equipo."}
-                    </p>
+                  {duplicate ? (
+                    <div
+                      role="alert"
+                      className="mt-3 rounded-[10px] border border-iusia-gold/40 bg-iusia-gold/8 px-3.5 py-3"
+                    >
+                      <p className="text-[13px] font-medium text-iusia-navy">
+                        Ya existe un expediente que parece corresponder a este asunto:
+                      </p>
+                      <p className="mt-1 text-[12.5px] text-iusia-mist-text">
+                        <span className="tnum">{duplicate.reference}</span> — {duplicate.title}
+                      </p>
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            onClose();
+                            navigate(`/casos/${duplicate.matter_id}`);
+                          }}
+                        >
+                          Abrir expediente existente
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setDuplicate(null);
+                            // Otro asunto es otra convocatoria: identidad nueva.
+                            setRequestKey(crypto.randomUUID());
+                            start.mutate({ confirmDifferent: true });
+                          }}
+                        >
+                          Es un asunto diferente
+                        </Button>
+                      </div>
+                    </div>
+                  ) : start.error ? (
+                    <div role="alert" className="mt-3">
+                      <p className="text-[13px] text-iusia-critical">
+                        {convocationErrorCopy(stage ?? "TEMPORARY_SERVICE_FAILURE", Boolean(createdMatterId)).message}
+                      </p>
+                      {createdMatterId ? (
+                        <div className="mt-2.5 flex flex-wrap gap-2">
+                          <Button variant="secondary" onClick={() => start.mutate({})}>
+                            Reintentar
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => {
+                              onClose();
+                              navigate(`/casos/${createdMatterId}`);
+                            }}
+                          >
+                            Abrir expediente
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : null}
                 </>
               )}
@@ -438,7 +528,7 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                       : "Puedes cerrar en cuanto empiece: seguirá trabajando."
                     : "IUSIA elegirá por sí misma qué especialistas intervienen."}
                 </p>
-                <Button onClick={() => start.mutate()} disabled={!canStart}>
+                <Button onClick={() => start.mutate({})} disabled={!canStart}>
                   {start.isPending
                     ? isNew
                       ? "Creando…"

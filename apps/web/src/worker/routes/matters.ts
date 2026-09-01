@@ -1,5 +1,11 @@
 import { Hono } from "hono";
-import { CreateMatterInput, IusiaError, MatterRole } from "@iusia/domain";
+import {
+  CreateMatterInput,
+  IusiaError,
+  MatterRole,
+  findDuplicateCandidate,
+  newId,
+} from "@iusia/domain";
 import { z } from "zod";
 import type { AppBindings } from "../context.js";
 
@@ -30,33 +36,108 @@ mattersRoutes.get("/", async (c) => {
   return c.json({ matters: rows, scope: supervises ? "FIRM" : "ASSIGNED" });
 });
 
+/** Envoltorio de la convocatoria: el contrato del expediente más su control de alta. */
+const CreateMatterRequest = z.object({
+  /**
+   * Identidad de ESTA acción humana, generada por el cliente y estable a través de
+   * reintentos. Es lo único que distingue "el usuario quiere otro expediente" de
+   * "el navegador reintentó".
+   */
+  request_key: z.string().min(8).max(120).optional(),
+  /** El abogado confirmó, viendo el candidato, que se trata de un asunto distinto. */
+  confirm_different: z.boolean().optional(),
+});
+
 mattersRoutes.post("/", async (c) => {
   const { matters, audit } = c.get("ctx");
   const { organizationId, userId } = c.get("session");
 
-  const parsed = CreateMatterInput.safeParse(await c.req.json());
+  const raw = await c.req.json();
+  const parsed = CreateMatterInput.safeParse(raw);
   if (!parsed.success) {
     throw new IusiaError("VALIDATION_FAILED", "Datos de expediente inválidos", {
       issues: parsed.error.issues,
     });
   }
+  const control = CreateMatterRequest.parse(raw);
+
+  // 1. IDEMPOTENCIA. Si esta convocatoria ya creó un expediente, se devuelve ese
+  //    mismo. Precede a todo lo demás: un reintento no vuelve a preguntar nada.
+  if (control.request_key) {
+    const already = await matters.findByCreationRequestKey(organizationId, control.request_key);
+    if (already) {
+      return c.json({ matter: already, created: false, resumed: true }, 200);
+    }
+  }
+
+  // 2. DUPLICADO FUNCIONAL. Determinista y ANTES de crear identidad o almacenamiento:
+  //    una carpeta creada ya no se puede "des-crear" preguntando después.
+  if (!control.confirm_different) {
+    const candidate = findDuplicateCandidate(
+      { title: parsed.data.title, clientName: parsed.data.client_name },
+      await matters.listForDuplicateCheck(organizationId),
+    );
+    if (candidate) {
+      await audit.record({
+        organizationId,
+        matterId: candidate.matter_id,
+        actorUserId: userId,
+        action: "matter.duplicate_warning_shown",
+        resourceType: "matter",
+        resourceId: candidate.matter_id,
+        outcome: "ALLOWED",
+        reason: candidate.reason,
+        detail: { title: parsed.data.title, client_name: parsed.data.client_name },
+      });
+      // 409: la petición es válida, pero entra en conflicto con lo que la firma ya
+      // tiene abierto. NO se crea nada hasta que una persona decida.
+      throw new IusiaError(
+        "CONFLICT",
+        "Ya existe un expediente que parece corresponder a este asunto.",
+        { reason: "POSSIBLE_DUPLICATE_MATTER", candidate },
+      );
+    }
+  }
 
   const reference = parsed.data.reference ?? (await matters.nextReference(organizationId));
-  const matterId = await matters.create(organizationId, userId, parsed.data, reference);
-
-  await audit.record({
+  const requestKey = control.request_key ?? `manual:${newId("matter")}`;
+  const { matterId, created } = await matters.createIdempotent(
     organizationId,
-    matterId,
-    actorUserId: userId,
-    action: "matter.create",
-    resourceType: "matter",
-    resourceId: matterId,
-    outcome: "SUCCESS",
-    detail: { reference },
-  });
+    userId,
+    parsed.data,
+    reference,
+    requestKey,
+  );
+
+  if (created) {
+    await audit.record({
+      organizationId,
+      matterId,
+      actorUserId: userId,
+      action: "matter.create",
+      resourceType: "matter",
+      resourceId: matterId,
+      outcome: "SUCCESS",
+      detail: { reference, duplicate_override: control.confirm_different === true },
+    });
+    if (control.confirm_different) {
+      // La decisión humana de abrir un asunto parecido queda trazada con su autor.
+      await audit.record({
+        organizationId,
+        matterId,
+        actorUserId: userId,
+        action: "matter.duplicate_override",
+        resourceType: "matter",
+        resourceId: matterId,
+        outcome: "ALLOWED",
+        reason: "CONFIRMED_DIFFERENT_MATTER_BY_USER",
+        detail: { reference },
+      });
+    }
+  }
 
   const matter = await matters.findById(organizationId, matterId);
-  return c.json({ matter }, 201);
+  return c.json({ matter, created, resumed: !created }, created ? 201 : 200);
 });
 
 mattersRoutes.get("/:matterId", async (c) => {

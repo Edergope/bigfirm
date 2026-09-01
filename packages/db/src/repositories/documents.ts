@@ -115,6 +115,33 @@ export class DocumentRepository {
     return existing.id;
   }
 
+  /**
+   * Documento VIGENTE del expediente cuyo binario coincide exactamente con un
+   * checksum. Es lo que impide que un reintento técnico de la subida incorpore dos
+   * veces el mismo archivo: el contenido, no el nombre ni el id del proveedor, es lo
+   * que decide si ya está.
+   */
+  async findByChecksum(organizationId: string, matterId: string, checksum: string) {
+    const [row] = await this.db
+      .select({
+        documentId: documentVersions.documentId,
+        filename: documentVersions.filename,
+        ingestionStatus: documents.ingestionStatus,
+      })
+      .from(documentVersions)
+      .innerJoin(documents, eq(documents.id, documentVersions.documentId))
+      .where(
+        and(
+          eq(documentVersions.organizationId, organizationId),
+          eq(documentVersions.matterId, matterId),
+          eq(documentVersions.checksum, checksum),
+          isNull(documents.retiredAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
   async listForMatter(organizationId: string, matterId: string) {
     return this.db
       .select()

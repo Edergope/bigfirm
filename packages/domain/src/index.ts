@@ -1,6 +1,7 @@
 export * from "./ids.js";
 export * from "./authz.js";
 export * from "./matter.js";
+export * from "./matter-identity.js";
 export * from "./ledgers.js";
 export * from "./work-package.js";
 export * from "./execution.js";
@@ -8,6 +9,7 @@ export * from "./events.js";
 export * from "./credits.js";
 export * from "./deadlines.js";
 export * from "./case-brief.js";
+export * from "./convocation.js";
 export * from "./templates.js";
 export * from "./billing.js";
 export * from "./notifications.js";
