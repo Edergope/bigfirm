@@ -2,12 +2,13 @@ import { Agent } from "agents";
 import {
   IusiaError,
   applyRouting,
+  attemptIdempotencyKey,
   routeModel,
   creditsForCost,
   extractLedgerEntries,
-  providerCostUsd,
   renderWorkPackage,
   type ExecutionStatus,
+  type ProviderAttempt,
   type WorkPackage,
 } from "@iusia/domain";
 import { getAgentDefinition, PromptLoader, R2PromptSource } from "@iusia/agents";
@@ -21,7 +22,7 @@ import {
   createDb,
 } from "@iusia/db";
 import type { Env } from "../env.js";
-import { ModelGateway, rateFor } from "../services/model-gateway.js";
+import { ModelGateway } from "../services/model-gateway.js";
 import { UNTRUSTED_SYSTEM_GUARD } from "./guards.js";
 
 /** Nodo integrador del DAG. Las aristas del grafo convergen y salen de él. */
@@ -153,35 +154,53 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
             }),
           )
         : def.model_policy;
-      const result = await gateway.complete(policy, messages, {
-        organization_id: execution.organizationId,
-        matter_id: execution.matterId,
-        agent_id: def.agent_id,
-        execution_id: execution.id,
-      });
+      // Cada intento REAL se contabiliza en cuanto ocurre, sirva o no su resultado.
+      // Un fallo funcional que consumió tokens de razonamiento costó dinero: dejarlo
+      // sin registrar fue el defecto que permitió nueve minutos de gasto invisible.
+      const settleAttempt = async (attempt: ProviderAttempt) => {
+        await this.chargeAttempt(credits, execution, attempt);
+        await events.append({
+          ...eventBase,
+          type: "agent.tool.called",
+          status: attempt.outcome === "SUCCESS" ? "RUNNING" : "FAILED",
+          detail: {
+            tool: "model.attempt",
+            provider: attempt.provider,
+            model: attempt.model,
+            outcome: attempt.outcome,
+            latency_ms: attempt.latency_ms,
+            input_tokens: attempt.usage?.input_tokens ?? 0,
+            output_tokens: attempt.usage?.output_tokens ?? 0,
+            reasoning_tokens: attempt.usage?.reasoning_tokens ?? 0,
+            cost_known: attempt.provider_cost_usd !== null,
+            provider_cost_usd: attempt.provider_cost_usd ?? 0,
+          },
+        });
+      };
 
-      // 4. COBRAR. El proveedor ya facturó esta llamada, así que el débito precede a
-      //    cualquier persistencia que pueda fallar: si el guardado en R2 fallaba, la
-      //    ejecución terminaba en FAILED con 0 créditos y el costo real quedaba sin
-      //    registrar. Idempotente por `execution_id`, de modo que un reintento sobre
-      //    la MISMA ejecución lógica no vuelve a cobrar.
-      const rate = rateFor(result.provider, result.model);
-      const costUsd = providerCostUsd(rate, result.usage);
-      const creditsUsed = creditsForCost(costUsd);
-      await credits.post({
-        organizationId: execution.organizationId,
-        kind: "CONSUMPTION",
-        amount: -creditsUsed,
-        idempotencyKey: `execution:${execution.id}`,
-        matterId: execution.matterId,
-        executionId: execution.id,
-        userId: execution.startedBy,
-        provider: result.provider,
-        model: result.model,
-        providerCostUsd: costUsd,
-        // El saldo ya se verificó antes de despachar; no se aborta un trabajo hecho.
-        allowNegative: true,
-      });
+      const result = await gateway.complete(
+        policy,
+        messages,
+        {
+          organization_id: execution.organizationId,
+          matter_id: execution.matterId,
+          agent_id: def.agent_id,
+          execution_id: execution.id,
+        },
+        { onSettled: settleAttempt },
+      );
+
+      // 4. El cobro YA ocurrió, intento a intento, dentro de `settleAttempt`. Aquí
+      //    sólo se totaliza lo consumido por esta ejecución —éxitos y fallos— para
+      //    dejarlo en la fila del ledger.
+      const costUsd = result.attempts_detail.reduce(
+        (sum, a) => sum + (a.provider_cost_usd ?? 0),
+        0,
+      );
+      const creditsUsed = result.attempts_detail.reduce(
+        (sum, a) => sum + (a.provider_cost_usd === null ? 0 : creditsForCost(a.provider_cost_usd)),
+        0,
+      );
 
       // 5. Persistir la salida en R2. La tabla sólo guarda el puntero.
       const outputRef = `executions/${execution.organizationId}/${execution.matterId}/${execution.id}.json`;
@@ -333,6 +352,38 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
         error: { code, message },
       };
     }
+  }
+
+  /**
+   * Cobra UN intento de proveedor.
+   *
+   * Con usage real se debita el costo observado. Sin usage —timeout, corte de red— se
+   * registra un asiento de costo DESCONOCIDO (`providerCostUsd: null`) sin debitar
+   * créditos: no se inventa una cifra, pero tampoco se afirma que costó cero. La
+   * clave de idempotencia es la identidad de la petición real, de modo que reejecutar
+   * la contabilización no cobra dos veces y una petición NUEVA sí se cobra.
+   */
+  private async chargeAttempt(
+    credits: CreditRepository,
+    execution: { id: string; organizationId: string; matterId: string; startedBy: string | null },
+    attempt: ProviderAttempt,
+  ): Promise<void> {
+    const key = attemptIdempotencyKey(execution.id, attempt);
+    const known = attempt.provider_cost_usd !== null;
+    await credits.post({
+      organizationId: execution.organizationId,
+      kind: "CONSUMPTION",
+      amount: known ? -creditsForCost(attempt.provider_cost_usd!) : 0,
+      idempotencyKey: key,
+      matterId: execution.matterId,
+      executionId: execution.id,
+      userId: execution.startedBy,
+      provider: attempt.provider,
+      model: attempt.model,
+      providerCostUsd: attempt.provider_cost_usd,
+      // El saldo ya se verificó antes de despachar; no se aborta un trabajo hecho.
+      allowNegative: true,
+    });
   }
 
   /**

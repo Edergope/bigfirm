@@ -95,3 +95,116 @@ export function creditsForCost(
     Math.ceil(costUsd * policy.credits_per_usd),
   );
 }
+
+// ─────────────────── Contabilidad por INTENTO de proveedor ───────────────────
+
+/**
+ * Un intento REAL contra un proveedor, con su economía, haya servido o no.
+ *
+ * Regla contable no negociable: UN FALLO NO ES UNA LLAMADA GRATIS. La
+ * documentación oficial de OpenAI lo dice sin rodeos para los modelos de
+ * razonamiento — «you could incur costs for input and reasoning tokens without
+ * receiving a visible response»— y eso es exactamente lo que ocurrió el 1 de
+ * septiembre: ocho llamadas reales, dinero gastado, y el ledger anotando cero.
+ *
+ * El resultado FUNCIONAL de la llamada y su COSTO son dos cosas distintas y se
+ * registran por separado.
+ */
+export type ProviderAttemptOutcome =
+  | "SUCCESS"
+  | "OUTPUT_BUDGET_EXHAUSTED"
+  | "EMPTY"
+  | "HTTP_ERROR"
+  | "TIMEOUT"
+  | "NETWORK_ERROR"
+  | "INVALID_STRUCTURED_OUTPUT";
+
+export interface ProviderUsage {
+  input_tokens: number;
+  cached_input_tokens: number;
+  /** Total de salida facturable. YA incluye los tokens de razonamiento. */
+  output_tokens: number;
+  /**
+   * Porción de `output_tokens` dedicada a razonar. Sólo observabilidad: sumarla
+   * al total sería cobrarla dos veces.
+   */
+  reasoning_tokens?: number;
+}
+
+export interface ProviderAttempt {
+  provider: string;
+  model: string;
+  attempt: number;
+  outcome: ProviderAttemptOutcome;
+  finish_reason?: string | null;
+  http_status?: number | null;
+  /**
+   * `null` significa COSTO DESCONOCIDO, no costo cero. Un timeout de red no
+   * devuelve usage y no podemos afirmar que no costó nada.
+   */
+  usage: ProviderUsage | null;
+  provider_cost_usd: number | null;
+  /** Id del log del gateway: identidad natural de la petición real. */
+  gateway_log_id: string | null;
+  started_at: string;
+  latency_ms: number;
+  error_message?: string;
+}
+
+export function attemptHasKnownCost(attempt: ProviderAttempt): boolean {
+  return attempt.usage !== null && attempt.provider_cost_usd !== null;
+}
+
+/**
+ * Estimación conservadora del costo de un intento ANTES de hacerlo.
+ *
+ * Existe para que una cadena de fallos sin usage —timeouts, cortes de red— no
+ * pueda gastar sin límite: si no se puede medir, se reserva.
+ *
+ * El factor de salida sale de la medición real: la planificación que funcionó
+ * consumió 8.528 tokens de un techo de 16.000, es decir el 53 %. Se reserva el
+ * 60 % del techo, no el 100 %: reservar el máximo teórico haría imposible
+ * cualquier ejecución normal dentro del presupuesto.
+ */
+export const RESERVED_OUTPUT_FRACTION = 0.6;
+
+export function estimateAttemptCostUsd(
+  rate: ModelRate,
+  args: { inputTokens: number; maxOutputTokens: number },
+): number {
+  return providerCostUsd(rate, {
+    input_tokens: args.inputTokens,
+    output_tokens: Math.ceil(args.maxOutputTokens * RESERVED_OUTPUT_FRACTION),
+    cached_input_tokens: 0,
+  });
+}
+
+/**
+ * Costo con el que un intento impacta el presupuesto de la raíz.
+ *
+ * Con usage real se usa el costo observado. Sin usage se conserva la reserva
+ * conservadora: lo desconocido nunca vale cero.
+ */
+export function attemptBudgetImpactUsd(
+  attempt: ProviderAttempt,
+  reservedUsd: number,
+): number {
+  return attempt.provider_cost_usd ?? reservedUsd;
+}
+
+/**
+ * Clave de idempotencia de un intento.
+ *
+ * La identidad natural de una petición real es el id de log del gateway: si el
+ * Workflow reejecuta un step y reenvía la petición, hay OTRO id y otro cargo —
+ * porque efectivamente se gastó otra vez—; si lo que se repite es la
+ * contabilización de la MISMA petición, la clave coincide y no se cobra doble.
+ */
+export function attemptIdempotencyKey(executionId: string, attempt: ProviderAttempt): string {
+  if (attempt.gateway_log_id) return `execution:${executionId}:call:${attempt.gateway_log_id}`;
+  const usage = attempt.usage;
+  if (usage) {
+    return `execution:${executionId}:call:${attempt.provider}/${attempt.model}:${usage.input_tokens}:${usage.output_tokens}`;
+  }
+  return `execution:${executionId}:call:${attempt.provider}/${attempt.model}:${attempt.outcome}:${attempt.started_at}`;
+}

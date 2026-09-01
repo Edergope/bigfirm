@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { IusiaError, newId, type CreditTxKind } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { creditTransactions, creditWallets } from "../schema/iusia.js";
@@ -43,6 +43,7 @@ export class CreditRepository {
     userId?: string | null;
     provider?: string | null;
     model?: string | null;
+    /** `null` = costo DESCONOCIDO. Nunca se representa como cero silencioso. */
     providerCostUsd?: number | null;
     allowNegative?: boolean;
   }): Promise<{ balance: number; applied: boolean }> {
@@ -123,6 +124,39 @@ export class CreditRepository {
       .where(eq(creditTransactions.id, txId));
 
     return { balance: next, applied: true };
+  }
+
+  /**
+   * Costo de proveedor REALMENTE consumido por un conjunto de ejecuciones,
+   * incluidos los intentos que fallaron. Es lo que el presupuesto de la raíz debe
+   * mirar: un fallo que gastó dinero tiene que agotar presupuesto igual que un éxito.
+   *
+   * Devuelve además cuántos asientos quedaron con costo DESCONOCIDO, para que el
+   * caller pueda aplicar su política conservadora en vez de asumir cero.
+   */
+  async providerCostForExecutions(
+    organizationId: string,
+    executionIds: readonly string[],
+  ): Promise<{ knownUsd: number; unknownAttempts: number }> {
+    if (executionIds.length === 0) return { knownUsd: 0, unknownAttempts: 0 };
+    const rows = await this.db
+      .select({
+        cost: creditTransactions.providerCostUsd,
+      })
+      .from(creditTransactions)
+      .where(
+        and(
+          eq(creditTransactions.organizationId, organizationId),
+          inArray(creditTransactions.executionId, [...executionIds]),
+        ),
+      );
+    let knownUsd = 0;
+    let unknownAttempts = 0;
+    for (const row of rows) {
+      if (row.cost === null) unknownAttempts += 1;
+      else knownUsd += row.cost;
+    }
+    return { knownUsd, unknownAttempts };
   }
 
   /**

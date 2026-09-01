@@ -1,4 +1,9 @@
-import { IusiaError } from "@iusia/domain";
+import {
+  IusiaError,
+  providerCostUsd,
+  type ProviderAttempt,
+  type ProviderUsage,
+} from "@iusia/domain";
 import type { ModelPolicy } from "@iusia/agents";
 import type { Env } from "../env.js";
 
@@ -34,6 +39,8 @@ export interface ModelResult {
   provider: string;
   model: string;
   text: string;
+  /** Todos los intentos reales de esta llamada, incluidos los fallidos. */
+  attempts_detail: ProviderAttempt[];
   usage: { input_tokens: number; output_tokens: number; cached_input_tokens: number };
   /** Id del log del gateway; permite correlacionar costo real sin guardar payload. */
   gateway_log_id: string | null;
@@ -63,6 +70,8 @@ class ProviderCallError extends Error {
     readonly kind: ProviderFailureKind,
     message: string,
     readonly status?: number,
+    /** Intento contabilizable asociado, cuando existe. Un fallo no es gratis. */
+    readonly attempt?: ProviderAttempt,
   ) {
     super(message);
     this.name = "ProviderCallError";
@@ -82,6 +91,11 @@ class ProviderCallError extends Error {
  * llamada está en curso; nunca alteran su resultado.
  */
 export interface ModelCallHooks {
+  /**
+   * Se invoca tras CADA intento real, con éxito o sin él, para que el caller lo
+   * contabilice. Es el punto por el que una llamada fallida deja de ser gratis.
+   */
+  onSettled?: (attempt: ProviderAttempt) => void | Promise<void>;
   onAttempt?: (info: {
     provider: string;
     model: string;
@@ -130,6 +144,15 @@ export class ModelGateway {
     this.requestTimeoutMs = deps.requestTimeoutMs ?? 300_000;
   }
 
+  /** Liquida un intento sin que un fallo de observabilidad rompa la ejecución. */
+  private async settle(hooks: ModelCallHooks, attempt: ProviderAttempt): Promise<void> {
+    try {
+      await hooks.onSettled?.(attempt);
+    } catch {
+      // La contabilidad no puede tumbar el trabajo jurídico; el fallo se ve en el log.
+    }
+  }
+
   /** True si faltan secretos para operar contra el gateway. */
   isConfigured(): boolean {
     return Boolean(this.env.CLOUDFLARE_ACCOUNT_ID);
@@ -163,6 +186,8 @@ export class ModelGateway {
 
     const candidates = [policy.preferred, ...policy.fallback];
     const failures: Array<{ candidate: string; kind: ProviderFailureKind; message: string }> = [];
+    /** Todos los intentos reales, para que ninguno se pierda al fallar. */
+    const settled: ProviderAttempt[] = [];
     let attempts = 0;
     let sawTimeout = false;
 
@@ -186,23 +211,56 @@ export class ModelGateway {
         }
         const startedAt = Date.now();
         try {
-          const result = await this.callOnce(policy, candidate, messages, ctx);
+          const { attempt: record, text } = await this.callOnce(
+            policy,
+            candidate,
+            messages,
+            ctx,
+            attempt,
+          );
+          settled.push(record);
+          await this.settle(hooks, record);
+          if (text === null) {
+            const kind: ProviderFailureKind =
+              record.outcome === "OUTPUT_BUDGET_EXHAUSTED" ? "output_budget_exhausted" : "empty";
+            throw new ProviderCallError(
+              kind,
+              record.outcome === "OUTPUT_BUDGET_EXHAUSTED"
+                ? `${label} agotó max_completion_tokens=${policy.max_output_tokens} sin emitir contenido: en un modelo de razonamiento ese techo incluye los tokens de razonamiento`
+                : `respuesta vacía del proveedor (finish_reason=${String(record.finish_reason ?? "desconocido")})`,
+              record.http_status ?? undefined,
+              record,
+            );
+          }
           try {
             await hooks.onResponse?.({
-              provider: result.provider,
-              model: result.model,
+              provider: record.provider,
+              model: record.model,
               attempt,
               durationMs: Date.now() - startedAt,
             });
           } catch {
             // idem
           }
-          return { ...result, attempts };
+          return {
+            provider: record.provider,
+            model: record.model,
+            text,
+            usage: record.usage ?? { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 },
+            gateway_log_id: record.gateway_log_id,
+            attempts,
+            attempts_detail: settled,
+          };
         } catch (error) {
           const pce =
             error instanceof ProviderCallError
               ? error
               : new ProviderCallError("network", errMsg(error));
+          // Un intento que no pasó por `callOnce` (red, timeout) también se liquida.
+          if (pce.attempt && !settled.includes(pce.attempt)) {
+            settled.push(pce.attempt);
+            await this.settle(hooks, pce.attempt);
+          }
           if (pce.kind === "timeout") sawTimeout = true;
           failures.push({ candidate: label, kind: pce.kind, message: pce.message });
 
@@ -221,16 +279,34 @@ export class ModelGateway {
     throw new IusiaError(
       code,
       "Todos los proveedores configurados para este agente fallaron",
-      { agent_id: ctx.agent_id, attempts: failures },
+      {
+        agent_id: ctx.agent_id,
+        attempts: failures,
+        // Los intentos YA quedaron contabilizados por `onSettled`; se exponen para
+        // que el caller pueda cerrar la ejecución sabiendo cuánto costó fallar.
+        settled_attempts: settled.length,
+        settled_cost_usd: settled.reduce((sum, a) => sum + (a.provider_cost_usd ?? 0), 0),
+        unknown_cost_attempts: settled.filter((a) => a.provider_cost_usd === null).length,
+      },
     );
   }
 
+  /**
+   * Una petición real al proveedor. Devuelve SIEMPRE un intento contabilizable.
+   *
+   * El orden importa y antes estaba invertido: se validaba el contenido y se lanzaba
+   * ANTES de mirar el `usage`, de modo que una respuesta con `finish_reason=length`
+   * —que sí consumió tokens de razonamiento facturables— se descartaba entera y
+   * quedaba registrada como cero. Ahora se captura el usage, se cuesta el intento y
+   * sólo después se decide si el resultado sirve.
+   */
   private async callOnce(
     policy: ModelPolicy,
     candidate: { provider: string; model: string },
     messages: readonly ModelMessage[],
     ctx: ModelCallContext,
-  ): Promise<Omit<ModelResult, "attempts">> {
+    attemptNumber: number,
+  ): Promise<{ attempt: ProviderAttempt; text: string | null }> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       // Telemetría de costo mapeada a org/matter/agente/ejecución (Blueprint §11 regla 10).
@@ -242,6 +318,30 @@ export class ModelGateway {
     if (this.env.AI_GATEWAY_TOKEN) {
       headers["cf-aig-authorization"] = `Bearer ${this.env.AI_GATEWAY_TOKEN}`;
     }
+
+    const startedAt = new Date().toISOString();
+    const startedMs = Date.now();
+    const base = {
+      provider: candidate.provider,
+      model: candidate.model,
+      attempt: attemptNumber,
+      started_at: startedAt,
+    };
+    /** Intento sin usage: costo DESCONOCIDO, jamás cero. */
+    const unmeasured = (
+      outcome: ProviderAttempt["outcome"],
+      message: string,
+      httpStatus?: number,
+    ): ProviderAttempt => ({
+      ...base,
+      outcome,
+      usage: null,
+      provider_cost_usd: null,
+      gateway_log_id: null,
+      http_status: httpStatus ?? null,
+      latency_ms: Date.now() - startedMs,
+      error_message: message,
+    });
 
     // Timeout del lado del cliente: no dependemos sólo del header del gateway.
     const controller = new AbortController();
@@ -261,52 +361,108 @@ export class ModelGateway {
         signal: controller.signal,
       });
     } catch (error) {
-      if (controller.signal.aborted) {
-        throw new ProviderCallError("timeout", `timeout tras ${this.requestTimeoutMs}ms`);
-      }
-      throw new ProviderCallError("network", errMsg(error));
+      const aborted = controller.signal.aborted;
+      throw new ProviderCallError(
+        aborted ? "timeout" : "network",
+        aborted ? `timeout tras ${this.requestTimeoutMs}ms` : errMsg(error),
+        undefined,
+        unmeasured(aborted ? "TIMEOUT" : "NETWORK_ERROR", aborted ? "timeout" : errMsg(error)),
+      );
     } finally {
       clearTimeout(timer);
     }
 
+    const rawBody = await response.text().catch(() => "");
+    const body = parseBody(rawBody);
+    const usage = extractUsage(body);
+    const gatewayLogId = response.headers.get("cf-aig-log-id");
+
     if (!response.ok) {
       const kind: ProviderFailureKind = response.status >= 500 ? "http_5xx" : "http_4xx";
-      throw new ProviderCallError(kind, `HTTP ${response.status}`, response.status);
-    }
-
-    const body = (await response.json().catch(() => null)) as {
-      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
-      usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        prompt_tokens_details?: { cached_tokens?: number };
+      // Algunos errores devuelven usage: si lo hacen, se cuesta igualmente.
+      const attempt: ProviderAttempt = {
+        ...base,
+        outcome: "HTTP_ERROR",
+        usage,
+        provider_cost_usd: usage
+          ? providerCostUsd(rateFor(candidate.provider, candidate.model), usage)
+          : null,
+        gateway_log_id: gatewayLogId,
+        http_status: response.status,
+        latency_ms: Date.now() - startedMs,
+        error_message: `HTTP ${response.status}`,
       };
-    } | null;
-
-    const text = body?.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || text.length === 0) {
-      const finishReason = body?.choices?.[0]?.finish_reason;
-      if (finishReason === "length") {
-        throw new ProviderCallError(
-          "output_budget_exhausted",
-          `${candidate.provider}/${candidate.model} agotó max_completion_tokens=${policy.max_output_tokens} sin emitir contenido: en un modelo de razonamiento ese techo incluye los tokens de razonamiento`,
-        );
-      }
-      throw new ProviderCallError("empty", `respuesta vacía del proveedor (finish_reason=${String(finishReason ?? "desconocido")})`);
+      throw new ProviderCallError(kind, `HTTP ${response.status}`, response.status, attempt);
     }
 
-    return {
-      provider: candidate.provider,
-      model: candidate.model,
-      text,
-      usage: {
-        input_tokens: body?.usage?.prompt_tokens ?? 0,
-        output_tokens: body?.usage?.completion_tokens ?? 0,
-        cached_input_tokens: body?.usage?.prompt_tokens_details?.cached_tokens ?? 0,
-      },
-      gateway_log_id: response.headers.get("cf-aig-log-id"),
+    const finishReason = body?.choices?.[0]?.finish_reason ?? null;
+    const text = body?.choices?.[0]?.message?.content;
+    const hasText = typeof text === "string" && text.length > 0;
+    const outcome: ProviderAttempt["outcome"] = hasText
+      ? "SUCCESS"
+      : finishReason === "length"
+        ? "OUTPUT_BUDGET_EXHAUSTED"
+        : "EMPTY";
+
+    const attempt: ProviderAttempt = {
+      ...base,
+      outcome,
+      finish_reason: finishReason,
+      usage,
+      // El costo se calcula SIEMPRE que haya usage, sirva o no la respuesta.
+      provider_cost_usd: usage
+        ? providerCostUsd(rateFor(candidate.provider, candidate.model), usage)
+        : null,
+      gateway_log_id: gatewayLogId,
+      http_status: response.status,
+      latency_ms: Date.now() - startedMs,
     };
+
+    return { attempt, text: hasText ? text : null };
   }
+}
+
+/** Cuerpo JSON del endpoint compatible. Un cuerpo ilegible no rompe la contabilidad. */
+function parseBody(raw: string): ProviderResponseBody | null {
+  try {
+    return JSON.parse(raw) as ProviderResponseBody;
+  } catch {
+    return null;
+  }
+}
+
+interface ProviderResponseBody {
+  choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
+}
+
+/**
+ * Normaliza el usage del proveedor.
+ *
+ * Los tokens de razonamiento YA están contenidos en `completion_tokens` y se facturan
+ * como salida (documentación oficial de OpenAI, consultada el 2026-09-01). Se capturan
+ * aparte SÓLO para observabilidad: sumarlos al total sería cobrarlos dos veces.
+ *
+ * Devuelve `null` cuando el proveedor no informó consumo: eso es costo DESCONOCIDO,
+ * que no es lo mismo que costo cero.
+ */
+export function extractUsage(body: ProviderResponseBody | null): ProviderUsage | null {
+  const usage = body?.usage;
+  if (!usage || (usage.prompt_tokens === undefined && usage.completion_tokens === undefined)) {
+    return null;
+  }
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens;
+  return {
+    input_tokens: usage.prompt_tokens ?? 0,
+    output_tokens: usage.completion_tokens ?? 0,
+    cached_input_tokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+    ...(reasoning === undefined ? {} : { reasoning_tokens: reasoning }),
+  };
 }
 
 function errMsg(error: unknown): string {

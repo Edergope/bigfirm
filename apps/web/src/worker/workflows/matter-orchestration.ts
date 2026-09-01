@@ -9,9 +9,9 @@ import {
   deriveConclusionText,
   buildLawyerContext,
   applyRouting,
+  attemptIdempotencyKey,
   routeModel,
   newId,
-  providerCostUsd,
   ExecutionSafetyLedger,
   type CircuitBreakerReason,
   type DocumentExcerpt,
@@ -53,7 +53,7 @@ import type { LegalWorker, RunResult } from "../agents/legal-worker.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import { collectMatterEvidence } from "./rag-evidence.js";
 import { NotificationService } from "../services/notifications.js";
-import { ModelGateway, rateFor } from "../services/model-gateway.js";
+import { ModelGateway } from "../services/model-gateway.js";
 import { planTeam, type MatterBrief } from "../services/team-planner.js";
 
 export interface MatterOrchestrationParams {
@@ -77,6 +77,17 @@ const DEFAULT_ROOT_CREDIT_LIMIT = 5000;
  * modelo sin tarifa registrada además computaba cero.
  */
 const DEFAULT_ROOT_PROVIDER_COST_BUDGET_USD = 1.5;
+
+/**
+ * Reserva por intento de costo DESCONOCIDO (timeout, corte de red: el proveedor no
+ * devolvió usage). No es una cifra inventada de gasto —el ledger conserva ese asiento
+ * como desconocido—, es lo que ese intento consume del PRESUPUESTO para que una
+ * cadena de fallos inmedibles no pueda correr indefinidamente.
+ *
+ * Calibrada sobre el costo observado de una llamada de planificación real
+ * (~0,02 USD con gpt-5-mini): conservadora sin volver imposible una ejecución normal.
+ */
+const UNKNOWN_ATTEMPT_RESERVE_USD = 0.05;
 
 type DagResult = { root_execution_id: string; completed: string[]; failed: string[] };
 
@@ -596,6 +607,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       let usage = { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 };
       let provider = "";
       let model = "";
+      /** Costo REAL de la fase, incluidos los intentos que no sirvieron. */
+      let settledCostUsd = 0;
       const result = await planTeam({
         objective: params.objective,
         brief,
@@ -615,6 +628,46 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
               execution_id: planExecutionId,
             },
             {
+              // Cada intento real del planner se cobra en cuanto ocurre. Los ocho
+              // intentos fallidos del 1-sep no dejaron rastro económico porque el
+              // costo sólo se registraba al completar.
+              onSettled: async (settledAttempt) => {
+                await credits.post({
+                  organizationId: params.organization_id,
+                  kind: "CONSUMPTION",
+                  amount:
+                    settledAttempt.provider_cost_usd === null
+                      ? 0
+                      : -creditsForCost(settledAttempt.provider_cost_usd),
+                  idempotencyKey: attemptIdempotencyKey(planExecutionId, settledAttempt),
+                  matterId: params.matter_id,
+                  executionId: planExecutionId,
+                  userId: params.started_by,
+                  provider: settledAttempt.provider,
+                  model: settledAttempt.model,
+                  providerCostUsd: settledAttempt.provider_cost_usd,
+                  allowNegative: true,
+                });
+                settledCostUsd += settledAttempt.provider_cost_usd ?? 0;
+                await events.append({
+                  ...eventBase,
+                  executionId: planExecutionId,
+                  type: "agent.tool.called",
+                  status: settledAttempt.outcome === "SUCCESS" ? "RUNNING" : "FAILED",
+                  detail: {
+                    tool: "model.attempt",
+                    phase: "plan",
+                    provider: settledAttempt.provider,
+                    model: settledAttempt.model,
+                    outcome: settledAttempt.outcome,
+                    latency_ms: settledAttempt.latency_ms,
+                    output_tokens: settledAttempt.usage?.output_tokens ?? 0,
+                    reasoning_tokens: settledAttempt.usage?.reasoning_tokens ?? 0,
+                    cost_known: settledAttempt.provider_cost_usd !== null,
+                    provider_cost_usd: settledAttempt.provider_cost_usd ?? 0,
+                  },
+                });
+              },
               // Evidencia de vida durante la planificación: sin esto el ledger
               // callaba entre PLAN_START y PLAN_LLM_COMPLETE, y la UI se quedaba
               // clavada en "Identificando los especialistas" durante minutos.
@@ -706,22 +759,10 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         JSON.stringify({ kind: "team_plan", plan_source: result.source, plan: result.plan }),
         { httpMetadata: { contentType: "application/json" } },
       );
-      const rate = rateFor(provider, model);
-      const costUsd = providerCostUsd(rate, usage);
+      // El cobro ya ocurrió intento a intento en `onSettled`; aquí sólo se totaliza
+      // lo que consumió la fase, éxitos y fallos incluidos.
+      const costUsd = settledCostUsd;
       const creditsUsed = creditsForCost(costUsd);
-      await credits.post({
-        organizationId: params.organization_id,
-        kind: "CONSUMPTION",
-        amount: -creditsUsed,
-        idempotencyKey: `execution:${planExecutionId}`,
-        matterId: params.matter_id,
-        executionId: planExecutionId,
-        userId: params.started_by,
-        provider,
-        model,
-        providerCostUsd: costUsd,
-        allowNegative: true,
-      });
       await executions.transition(planExecutionId, "RUNNING");
       await executions.transition(planExecutionId, "COMPLETED", {
         provider,
@@ -792,10 +833,22 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     const providerCostBudgetUsd = Number(
       this.env.ROOT_PROVIDER_COST_BUDGET_USD ?? DEFAULT_ROOT_PROVIDER_COST_BUDGET_USD,
     );
-    /** Costo de proveedor ya facturado por esta raíz, leído del ledger. */
+    /**
+     * Costo de proveedor YA consumido por esta raíz, según el Credit Ledger — que
+     * ahora incluye los intentos fallidos. Leerlo de `executions.provider_cost_usd`
+     * dejaba fuera precisamente lo que hay que vigilar: el dinero gastado en fallar.
+     *
+     * Los asientos de costo DESCONOCIDO (timeout, corte de red) no se ignoran: cada
+     * uno computa una reserva conservadora, de modo que una cadena de fallos sin
+     * usage tampoco puede gastar sin límite.
+     */
     const providerCostSoFar = async (): Promise<number> => {
       const rows = await executions.listByRoot(params.root_execution_id);
-      return rows.reduce((sum, r) => sum + (r.providerCostUsd ?? 0), 0);
+      const { knownUsd, unknownAttempts } = await credits.providerCostForExecutions(
+        params.organization_id,
+        rows.map((r) => r.id),
+      );
+      return knownUsd + unknownAttempts * UNKNOWN_ATTEMPT_RESERVE_USD;
     };
 
     const nodes = teamPlanToDag(plan);
