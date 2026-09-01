@@ -13,6 +13,7 @@ import {
 } from "@iusia/ui";
 import {
   deriveProgressStages,
+  humanizeAgentId,
   groundingNotice,
   shouldKeepPolling,
   shouldRefreshHistory,
@@ -52,7 +53,11 @@ const AGENT_STAGE_LABEL: Record<string, string> = {
 
 function stageLabel(stage: ProgressStage, agentNames: Map<string, string>): string {
   if (stage.agentId) {
-    return AGENT_STAGE_LABEL[stage.agentId] ?? agentNames.get(stage.agentId) ?? stage.agentId;
+    return (
+      AGENT_STAGE_LABEL[stage.agentId] ??
+      agentNames.get(stage.agentId) ??
+      humanizeAgentId(stage.agentId)
+    );
   }
   return STAGE_LABEL[stage.key] ?? stage.key;
 }

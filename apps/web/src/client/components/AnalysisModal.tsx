@@ -6,6 +6,7 @@ import { OrchestrationNetwork, Skeleton, useCanAnimate } from "@iusia/ui";
 import {
   deriveConstellation,
   deriveProgressStages,
+  humanizeAgentId,
   planningWaitHint,
   shouldKeepPolling,
   shouldRefreshHistory,
@@ -351,13 +352,13 @@ function StageRow({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, delay: Math.min(index * 0.04, 0.24) }}
       className={
-        "flex items-center gap-3 rounded-[10px] px-2.5 py-1.5 text-[13.5px] " +
+        "flex items-start gap-3 rounded-[10px] px-2.5 py-1.5 text-[13.5px] " +
         (stage.state === "active" ? "bg-white/[0.06] font-medium" : "") +
         " " +
         tone[stage.state]
       }
     >
-      <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+      <span className="relative mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center">
         {stage.state === "done" ? (
           <svg viewBox="0 0 16 16" className="h-4 w-4" aria-hidden>
             <circle cx="8" cy="8" r="7" fill="none" stroke="#34D399" strokeOpacity="0.5" />
@@ -385,7 +386,14 @@ function StageRow({
           <span className="h-1.5 w-1.5 rounded-full bg-white/25" />
         )}
       </span>
-      {label}
+      {/*
+        El nombre iba suelto en el flex, sin `min-w-0`: un nombre largo empujaba la
+        fila y se salía del panel. Ahora ocupa el ancho restante, parte por palabras
+        y se corta a las dos líneas que caben, que es donde deja de ser legible.
+      */}
+      <span className="min-w-0 flex-1 [overflow-wrap:anywhere] leading-snug line-clamp-2" title={label}>
+        {label}
+      </span>
     </motion.li>
   );
 }
@@ -428,7 +436,11 @@ function terminalCopy(status: string): {
 
 function stageLabel(stage: ProgressStage, agentNames: Map<string, string>): string {
   if (stage.agentId) {
-    return AGENT_STAGE_LABEL[stage.agentId] ?? agentNames.get(stage.agentId) ?? stage.agentId;
+    return (
+      AGENT_STAGE_LABEL[stage.agentId] ??
+      agentNames.get(stage.agentId) ??
+      humanizeAgentId(stage.agentId)
+    );
   }
   return STAGE_LABEL[stage.key] ?? stage.key;
 }

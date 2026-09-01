@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveOutcome, groundingNotice } from "../orchestration-view.js";
+import { deriveOutcome, groundingNotice, humanizeAgentId } from "../orchestration-view.js";
 
 /**
  * Regresión del incidente «los agentes trabajaron pero el abogado no recibe el
@@ -79,5 +79,26 @@ describe("deriveOutcome sigue distinguiendo el caso sin fundamentación", () => 
     expect(sinDocs.detail).not.toBeNull();
     expect(conDocs.detail).not.toBeNull();
     expect(conDocs.detail).not.toBe(sinDocs.detail);
+  });
+});
+
+/**
+ * Nombre legible cuando el registro no resuelve el agente. El último recurso era el
+ * `agent_id` crudo, que no es un nombre sino un identificador de sistema.
+ */
+describe("humanizeAgentId", () => {
+  it("conserva el código de nodo y hace legible el resto", () => {
+    expect(humanizeAgentId("03-investigador-normativo-jurisprudencial")).toBe(
+      "03 · Investigador normativo jurisprudencial",
+    );
+  });
+
+  it("funciona sin código de nodo", () => {
+    expect(humanizeAgentId("pisoso-orquestador-juridico")).toBe("Pisoso orquestador juridico");
+  });
+
+  it("no rompe con una entrada degenerada", () => {
+    expect(humanizeAgentId("")).toBe("");
+    expect(humanizeAgentId("08")).toBe("08");
   });
 });

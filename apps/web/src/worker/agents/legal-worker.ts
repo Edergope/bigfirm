@@ -5,9 +5,16 @@ import {
   attemptIdempotencyKey,
   routeModel,
   creditsForCost,
-  extractLedgerEntries,
+  authorizedRefsOf,
+  envelopeFieldsFor,
+  extractEnvelope,
+  projectEnvelope,
   renderWorkPackage,
+  riskLevelFrom,
+  stripEnvelope,
   type ExecutionStatus,
+  type ExtractedEnvelope,
+  type ProjectionResult,
   type ProviderAttempt,
   type WorkPackage,
 } from "@iusia/domain";
@@ -19,6 +26,8 @@ import {
   ExecutionEventRepository,
   ExecutionRepository,
   FactRepository,
+  MatterRepository,
+  TaskRepository,
   createDb,
 } from "@iusia/db";
 import type { Env } from "../env.js";
@@ -117,11 +126,20 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
       const prompt = await loader.load(def);
 
       // 2. Componer los mensajes manteniendo las cuatro capas separadas.
+      //
+      //    El contrato del Structured Execution Envelope se pide AQUÍ, en el
+      //    WorkPackage, y no en el prompt: el `agent.md` canónico sigue inyectándose
+      //    íntegro y verificado por SHA. Qué campos se piden lo decide el
+      //    `runtime_role` del registry —a un agente de intake no se le piden
+      //    autoridades, que es invitarlo a inventarlas— y todo viaja en la MISMA
+      //    llamada, sin una segunda pasada de modelo sobre la prosa.
+      const envelopeFields = envelopeFieldsFor(def.runtime_role);
+      const dispatched: WorkPackage = { ...workPackage, envelope_fields: [...envelopeFields] };
       const messages = [
         { role: "system" as const, content: UNTRUSTED_SYSTEM_GUARD },
         // El agent.md canónico se inyecta íntegro y sin modificaciones.
         { role: "system" as const, content: prompt.text },
-        { role: "user" as const, content: renderWorkPackage(workPackage) },
+        { role: "user" as const, content: renderWorkPackage(dispatched) },
       ];
 
       await events.append({
@@ -204,6 +222,11 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
 
       // 5. Persistir la salida en R2. La tabla sólo guarda el puntero.
       const outputRef = `executions/${execution.organizationId}/${execution.matterId}/${execution.id}.json`;
+      // El bloque estructurado se separa de la prosa: el abogado lee un dictamen, no un
+      // apéndice de JSON con identificadores internos. `text` queda narrativo puro y el
+      // envelope viaja aparte, disponible para proyección y auditoría.
+      const extracted = extractEnvelope(result.text);
+      const narrative = extracted.present ? stripEnvelope(result.text) : result.text;
       await this.env.ARTIFACTS.put(
         outputRef,
         JSON.stringify({
@@ -211,7 +234,8 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
           agent_id: def.agent_id,
           execution_id: execution.id,
           output_type: def.output_type,
-          text: result.text,
+          text: narrative,
+          envelope: extracted.envelope,
           provenance: {
             produced_by: def.agent_id,
             execution_id: execution.id,
@@ -230,17 +254,27 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
       //    del modelo nunca se convierte en un hecho del expediente. Sin este paso,
       //    el Fact Ledger quedaba permanentemente vacío y el Case Brief —que alimenta
       //    la redacción de entregables— no tenía nada que aportar.
-      const ledgers = await this.persistLedgers(db, execution, result.text);
-      if (ledgers.facts > 0 || ledgers.authorities > 0 || ledgers.rejected > 0) {
+      const ledgers = await this.persistLedgers(db, execution, extracted, dispatched);
+      if (ledgers.touched) {
         await events.append({
           ...eventBase,
           type: "agent.output.received",
           toAgentId: def.agent_id,
           status: "RUNNING",
           detail: {
+            envelope_present: extracted.present,
+            envelope_rejected: extracted.rejected,
             ledger_facts: ledgers.facts,
             ledger_authorities: ledgers.authorities,
-            ledger_rejected: ledgers.rejected,
+            projected_tasks: ledgers.tasks,
+            projected_risk: ledgers.risk ?? "",
+            // Por qué NO se proyectó lo demás. Es lo que hace auditable el filtro:
+            // un cero en hechos con `dropped_unsourced` alto significa que el agente
+            // afirmó sin citar, no que el sistema se haya quedado callado.
+            dropped_unsourced: ledgers.dropped.unsourced,
+            dropped_duplicate: ledgers.dropped.duplicate,
+            dropped_unknown_refs: ledgers.dropped.unknown_refs,
+            dropped_over_cap: ledgers.dropped.over_cap,
           },
         });
       }
@@ -401,37 +435,116 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
    */
   private async persistLedgers(
     db: ReturnType<typeof createDb>,
-    execution: { id: string; organizationId: string; matterId: string },
-    text: string,
-  ): Promise<{ facts: number; authorities: number; rejected: number }> {
+    execution: {
+      id: string;
+      organizationId: string;
+      matterId: string;
+      startedBy: string | null;
+    },
+    extracted: ExtractedEnvelope,
+    workPackage: WorkPackage,
+  ): Promise<{
+    touched: boolean;
+    facts: number;
+    authorities: number;
+    tasks: number;
+    risk: string | null;
+    dropped: ProjectionResult["dropped"];
+  }> {
+    const empty = {
+      touched: extracted.rejected > 0,
+      facts: 0,
+      authorities: 0,
+      tasks: 0,
+      risk: null,
+      dropped: { unsourced: 0, duplicate: 0, over_cap: 0, unknown_refs: 0 },
+    };
+    if (!extracted.envelope) return empty;
+
     try {
-      const extracted = extractLedgerEntries(text);
-      if (extracted.facts.length === 0 && extracted.authorities.length === 0) {
-        return { facts: 0, authorities: 0, rejected: extracted.rejected };
-      }
-      const facts = new FactRepository(db);
-      const authorities = new AuthorityRepository(db);
+      const tasks = new TaskRepository(db);
+      const matters = new MatterRepository(db);
+      const existing = await tasks.listForMatter(execution.organizationId, execution.matterId);
+
+      // Las referencias que se aceptan al proyectar son EXACTAMENTE las que se
+      // entregaron en el WorkPackage. Se recalculan de la misma fuente que las
+      // renderizó, así que el agente no puede citar nada que el servidor no le diera.
+      const projection = projectEnvelope({
+        envelope: extracted.envelope,
+        authorizedRefs: authorizedRefsOf(workPackage),
+        existingTaskTitles: existing.map((t) => t.title),
+      });
+
+      const factRepo = new FactRepository(db);
+      const authorityRepo = new AuthorityRepository(db);
       const [factCount, authorityCount] = await Promise.all([
-        facts.upsertMany(
-          execution.organizationId,
-          execution.matterId,
-          extracted.facts,
-          execution.id,
-        ),
-        authorities.upsertMany(
-          execution.organizationId,
-          execution.matterId,
-          extracted.authorities,
-          execution.id,
-        ),
+        projection.facts.length
+          ? factRepo.upsertMany(
+              execution.organizationId,
+              execution.matterId,
+              projection.facts,
+              execution.id,
+            )
+          : Promise.resolve(0),
+        projection.authorities.length
+          ? authorityRepo.upsertMany(
+              execution.organizationId,
+              execution.matterId,
+              projection.authorities,
+              execution.id,
+            )
+          : Promise.resolve(0),
       ]);
-      return { facts: factCount, authorities: authorityCount, rejected: extracted.rejected };
+
+      // Tareas: se atribuyen al abogado que pidió el análisis, porque se generan por
+      // encargo suyo. Quedan PENDIENTE y sin responsable: IUSIA propone trabajo, no
+      // se lo asigna a nadie.
+      // Sin autor no se crean tareas: una tarea del expediente responde a alguien, y
+      // atribuirla a un usuario inventado sería peor que no crearla.
+      const author = execution.startedBy;
+      let taskCount = 0;
+      for (const t of author ? projection.tasks : []) {
+        await tasks.create({
+          organizationId: execution.organizationId,
+          matterId: execution.matterId,
+          title: t.title,
+          description: `${t.description}\n\nPrioridad sugerida: ${t.priority}. Origen: análisis de IUSIA (${execution.id}), fuentes: ${t.source_refs.join(", ")}.`,
+          createdBy: author!,
+        });
+        taskCount += 1;
+      }
+
+      // Riesgo: NUNCA se pisa una calificación humana. Sólo se escribe donde nadie ha
+      // decidido todavía; si el abogado ya calificó el expediente, su criterio manda.
+      let risk: string | null = null;
+      const proposed = riskLevelFrom(projection.risks);
+      if (proposed) {
+        const matter = await matters.findById(execution.organizationId, execution.matterId);
+        if (matter && matter.riskLevel === "UNASSESSED") {
+          await matters.setRisk(
+            execution.organizationId,
+            execution.matterId,
+            proposed.level,
+            proposed.rationale,
+          );
+          risk = proposed.level;
+        }
+      }
+
+      return {
+        touched: true,
+        facts: factCount,
+        authorities: authorityCount,
+        tasks: taskCount,
+        risk,
+        dropped: projection.dropped,
+      };
     } catch (error) {
       console.warn("ledger_persist_failed", {
         execution_id: execution.id,
         safe_message: error instanceof Error ? error.message.slice(0, 200) : "unknown",
       });
-      return { facts: 0, authorities: 0, rejected: 0 };
+      return empty;
     }
   }
 }

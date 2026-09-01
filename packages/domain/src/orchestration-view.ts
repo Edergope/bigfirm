@@ -84,6 +84,26 @@ export function deriveOutcome(args: {
   return evidenceChunkCount > 0 ? "COMPLETED" : "INSUFFICIENT_EVIDENCE";
 }
 
+/**
+ * Nombre legible de un agente cuando el registro no lo resuelve.
+ *
+ * El último recurso era mostrar el `agent_id` crudo —
+ * `03-investigador-normativo-jurisprudencial`— en una fila que el abogado lee mientras
+ * espera. Un identificador de sistema con guiones no es un nombre: aquí se convierte en
+ * uno, conservando el código de nodo, que sí significa algo en el método del despacho.
+ *
+ * No inventa: reordena lo que el propio id ya dice.
+ */
+export function humanizeAgentId(agentId: string): string {
+  const parts = agentId.split("-").filter((p) => p.length > 0);
+  if (parts.length === 0) return agentId;
+  const code = /^\d+$/.test(parts[0]!) ? parts.shift()! : null;
+  if (parts.length === 0) return agentId;
+  const words = parts.join(" ");
+  const name = words.charAt(0).toUpperCase() + words.slice(1);
+  return code ? `${code} · ${name}` : name;
+}
+
 export interface GroundingNotice {
   /** Etiqueta corta junto al título de la conclusión. */
   label: string;

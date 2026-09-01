@@ -17,6 +17,8 @@ export * from "./notifications.js";
 export * from "./document-storage.js";
 export * from "./document-workspace.js";
 export * from "./orchestration-view.js";
+export * from "./execution-envelope.js";
+export * from "./envelope-projection.js";
 export * from "./orchestration-safety.js";
 export * from "./team-plan.js";
 export * from "./errors.js";

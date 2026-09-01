@@ -94,3 +94,52 @@ describe("renderizado del WorkPackage", () => {
     expect(rendered).not.toContain("<external_document");
   });
 });
+
+/**
+ * El contrato del envelope viaja en el WorkPackage —dato de ejecución— y NUNCA en el
+ * `agent.md`, que se inyecta íntegro y verificado por SHA. Esto es lo que permite pedir
+ * estructura sin tocar el árbol canónico de agentes.
+ */
+describe("contrato del envelope dentro del WorkPackage", () => {
+  it("no aparece cuando no se piden campos", () => {
+    const rendered = renderWorkPackage(baseWorkPackage());
+    expect(rendered).not.toContain("<output_envelope_contract>");
+  });
+
+  it("aparece con exactamente las referencias que se entregaron", () => {
+    const rendered = renderWorkPackage(
+      baseWorkPackage({
+        envelope_fields: ["conclusion_brief", "facts"],
+        lawyer_provided_context: "El cliente firmó en marzo de 2025.",
+        document_excerpts: [
+          { ref_id: "doc_1#1", document_name: "Contrato.pdf", content: "Cláusula primera…" },
+        ],
+      }),
+    );
+    expect(rendered).toContain("<output_envelope_contract>");
+    expect(rendered).toContain("LAWYER_CONTEXT");
+    expect(rendered).toContain("doc_1#1");
+    expect(rendered).toContain('"facts"');
+    // No se le pide lo que su rol no produce.
+    expect(rendered).not.toContain('"authorities": [{');
+  });
+
+  it("va dentro del work_package, separado del contenido no confiable", () => {
+    const rendered = renderWorkPackage(
+      baseWorkPackage({
+        envelope_fields: ["conclusion_brief"],
+        document_excerpts: [
+          { ref_id: "doc_1#1", document_name: "Contrato.pdf", content: "Cláusula primera…" },
+        ],
+      }),
+    );
+    // El contrato es instrucción del servidor: cierra ANTES de que empiece la
+    // evidencia del cliente, que es la capa que nunca puede dar órdenes.
+    expect(rendered.indexOf("</work_package>")).toBeLessThan(
+      rendered.indexOf(UNTRUSTED_CONTENT_NOTICE),
+    );
+    expect(rendered.indexOf("<output_envelope_contract>")).toBeLessThan(
+      rendered.indexOf("</work_package>"),
+    );
+  });
+});

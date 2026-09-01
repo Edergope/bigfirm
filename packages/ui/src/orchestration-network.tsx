@@ -279,22 +279,55 @@ export function OrchestrationNetwork({
           ) : (
             <circle cx={p.x} cy={p.y} r={3.4} fill={STATE_STROKE[p.state]} fillOpacity={0.9} />
           )}
-          <text
-            x={p.vertical ? p.x : p.right ? p.x + 19 : p.x - 19}
-            y={p.vertical ? (p.above ? p.y - 26 : p.y + 30) : p.y - 1}
-            textAnchor={p.vertical ? "middle" : p.right ? "start" : "end"}
-            style={{ fontSize: 11, fontWeight: 500, fill: "#FFFFFF" }}
-          >
-            {truncate(p.label)}
-          </text>
-          <text
-            x={p.vertical ? p.x : p.right ? p.x + 19 : p.x - 19}
-            y={p.vertical ? (p.above ? p.y - 14 : p.y + 42) : p.y + 11}
-            textAnchor={p.vertical ? "middle" : p.right ? "start" : "end"}
-            style={{ fontSize: 9.5, fill: STATE_STROKE[p.state], fillOpacity: 0.85 }}
-          >
-            {STATE_WORD[p.state]}
-          </text>
+          {(() => {
+            // El nombre se ENVUELVE hasta en dos líneas en vez de cortarse a 22
+            // caracteres: "03 · Investigador normativo jurisprudencial" quedaba en
+            // "03 · Investigador nor…", que no identifica a nadie. El presupuesto por
+            // línea depende de la orientación porque el espacio real es distinto: a
+            // los lados quedan ~80px hasta el borde, arriba y abajo el nodo está
+            // centrado y hay sitio de sobra.
+            const lines = wrapLabel(p.label, p.vertical ? 28 : 16);
+            const anchor = p.vertical ? "middle" : p.right ? "start" : "end";
+            const x = p.vertical ? p.x : p.right ? p.x + 19 : p.x - 19;
+            // El bloque de nombre crece HACIA ARRIBA y la palabra de estado se queda
+            // donde estaba: así una segunda línea nunca empuja el estado sobre el nodo.
+            const firstY = p.vertical
+              ? p.above
+                ? p.y - 26 - (lines.length - 1) * LINE_H
+                : p.y + 30
+              : p.y - 1 - (lines.length - 1) * LINE_H;
+            const statusY = p.vertical
+              ? p.above
+                ? p.y - 14
+                : p.y + 42 + (lines.length - 1) * LINE_H
+              : p.y + 11;
+            return (
+              <>
+                <text
+                  x={x}
+                  y={firstY}
+                  textAnchor={anchor}
+                  style={{ fontSize: 11, fontWeight: 500, fill: "#FFFFFF" }}
+                >
+                  {lines.map((line, i) => (
+                    <tspan key={line + i} x={x} dy={i === 0 ? 0 : LINE_H}>
+                      {line}
+                    </tspan>
+                  ))}
+                  {/* El nombre completo queda disponible aunque la envoltura lo acorte. */}
+                  <title>{p.label}</title>
+                </text>
+                <text
+                  x={x}
+                  y={statusY}
+                  textAnchor={anchor}
+                  style={{ fontSize: 9.5, fill: STATE_STROKE[p.state], fillOpacity: 0.85 }}
+                >
+                  {STATE_WORD[p.state]}
+                </text>
+              </>
+            );
+          })()}
         </g>
       ))}
     </svg>
@@ -309,6 +342,40 @@ const STATE_WORD: Record<NetworkNodeState, string> = {
   failed: "con incidencia",
 };
 
-function truncate(s: string, max = 22): string {
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+/** Alto de línea del nombre, en unidades del viewBox. */
+const LINE_H = 11.5;
+
+/**
+ * Parte un nombre en como mucho `maxLines` líneas sin cortar palabras.
+ *
+ * Antes se truncaba a 22 caracteres con puntos suspensivos y todos los nombres largos
+ * terminaban siendo el mismo prefijo ilegible. Aquí sólo se recorta si NI SIQUIERA en
+ * dos líneas cabe, y el recorte cae sobre la última, nunca sobre la primera.
+ *
+ * Exportada porque su comportamiento es lo que se prueba: el layout SVG no lo es.
+ */
+export function wrapLabel(label: string, maxPerLine: number, maxLines = 2): string[] {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxPerLine) {
+      current = candidate;
+      continue;
+    }
+    if (current) lines.push(current);
+    if (lines.length === maxLines) {
+      // Ya no hay líneas disponibles: lo que falta se resume en la última.
+      const last = lines[maxLines - 1]!;
+      lines[maxLines - 1] = last.length > maxPerLine - 1 ? `${last.slice(0, maxPerLine - 1)}…` : `${last}…`;
+      return lines;
+    }
+    // Una palabra sola más larga que la línea (una cita, un identificador) se parte.
+    current = word.length > maxPerLine ? `${word.slice(0, maxPerLine - 1)}…` : word;
+  }
+  if (current) lines.push(current);
+  return lines.slice(0, maxLines);
 }

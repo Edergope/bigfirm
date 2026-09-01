@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  LAWYER_CONTEXT_REF,
+  renderEnvelopeContract,
+  type EnvelopeField,
+} from "./execution-envelope.js";
 import { ExecutionId, MatterId } from "./ids.js";
 
 /**
@@ -147,6 +152,15 @@ export const WorkPackage = z.object({
    */
   task_class: z.string().optional(),
   materiality: z.string().optional(),
+
+  /**
+   * Campos del Structured Execution Envelope que se le piden a este agente.
+   *
+   * Es dato de EJECUCIÓN, no prompt: el `agent.md` canónico se inyecta íntegro y
+   * verificado por SHA, y el contrato del envelope viaja aquí. Vacío = no se pide
+   * envelope y la salida es sólo narrativa, como antes.
+   */
+  envelope_fields: z.array(z.string()).optional(),
 });
 export type WorkPackage = z.infer<typeof WorkPackage>;
 
@@ -157,6 +171,20 @@ export type WorkPackage = z.infer<typeof WorkPackage>;
  * advertencia explícita. Esto mantiene la separación exigida por el prompt maestro:
  * SYSTEM INSTRUCTIONS ≠ AGENT PROMPT ≠ WORK PACKAGE ≠ EXTERNAL DOCUMENT CONTENT.
  */
+export function authorizedRefsOf(wp: {
+  document_excerpts: readonly { ref_id: string }[];
+  source_refs: readonly { ref_id: string }[];
+  lawyer_provided_context?: string;
+}): string[] {
+  const refs: string[] = [];
+  if (wp.lawyer_provided_context && wp.lawyer_provided_context.trim().length > 0) {
+    refs.push(LAWYER_CONTEXT_REF);
+  }
+  for (const d of wp.document_excerpts) refs.push(d.ref_id);
+  for (const s of wp.source_refs) refs.push(s.ref_id);
+  return [...new Set(refs)];
+}
+
 export function renderWorkPackage(wp: WorkPackage): string {
   const lines: string[] = [];
   lines.push("<work_package>");
@@ -226,6 +254,18 @@ export function renderWorkPackage(wp: WorkPackage): string {
   }
 
   lines.push(`<expected_output_schema>${wp.expected_output_schema}</expected_output_schema>`);
+
+  // Contrato del envelope: mismas referencias que se entregaron de verdad, de modo que
+  // lo que se le pide citar al agente y lo que el servidor acepta al proyectar son, por
+  // construcción, el mismo conjunto.
+  if (wp.envelope_fields && wp.envelope_fields.length > 0) {
+    const contract = renderEnvelopeContract({
+      fields: wp.envelope_fields as EnvelopeField[],
+      authorizedRefs: authorizedRefsOf(wp),
+    });
+    if (contract) lines.push(contract);
+  }
+
   lines.push("</work_package>");
 
   if (wp.document_excerpts.length) {
