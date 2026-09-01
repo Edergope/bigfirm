@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   applyRouting,
   creditsForCost,
   providerCostUsd,
   routeModel,
+  MIN_REASONING_OUTPUT_TOKENS,
   TASK_CLASSES,
   documentIntelligenceState,
   shouldPollIngestion,
@@ -97,15 +100,18 @@ describe("ROUTING — el modelo más barato que supera el listón de cada trabaj
   it("[EXTRACTION] la extracción estructurada usa el modelo económico", () => {
     const d = routeModel({ taskClass: "EXTRACTION" });
     expect(d.preferred).toEqual({ provider: "openai", model: "gpt-5-nano" });
-    expect(d.max_output_tokens).toBeLessThanOrEqual(2_000);
+    // El techo respeta el piso de razonamiento: gpt-5-nano también piensa antes de
+    // responder, y asfixiarlo devolvería una respuesta vacía.
+    expect(d.max_output_tokens).toBe(MIN_REASONING_OUTPUT_TOKENS);
     expect(d.temperature).toBe(0);
   });
 
   it("[PLAN] planificar es seleccionar y validar, no redactar un tratado", () => {
     const d = routeModel({ taskClass: "PLAN", materiality: "MATERIAL" });
     expect(d.preferred.model).toBe("gpt-5-mini");
-    // El techo de salida baja de 16.000 a 4.000: ahí vivía el 82 % del costo.
-    expect(d.max_output_tokens).toBe(4_000);
+    // El ahorro viene del MODELO, no del techo: recortar el techo a 4.000 rompió la
+    // planificación entera el 1-sep. El presupuesto respeta el piso de razonamiento.
+    expect(d.max_output_tokens).toBe(MIN_REASONING_OUTPUT_TOKENS);
     expect(d.fallback[0]!.model).toBe("gpt-5");
   });
 
@@ -139,10 +145,12 @@ describe("ROUTING — el modelo más barato que supera el listón de cada trabaj
     expect(models.has("gpt-5")).toBe(true);
   });
 
-  it("[OUTPUT_CEILINGS] ningún trabajo conserva el techo de 16.000 tokens", () => {
+  it("[OUTPUT_CEILINGS] los techos quedan entre el piso de razonamiento y el máximo del modelo", () => {
     for (const taskClass of TASK_CLASSES) {
       for (const materiality of ["SIMPLE", "HIGH_STAKES"]) {
-        expect(routeModel({ taskClass, materiality }).max_output_tokens).toBeLessThanOrEqual(10_000);
+        const ceiling = routeModel({ taskClass, materiality }).max_output_tokens;
+        expect(ceiling).toBeGreaterThanOrEqual(MIN_REASONING_OUTPUT_TOKENS);
+        expect(ceiling).toBeLessThanOrEqual(16_000);
       }
     }
   });
@@ -158,7 +166,7 @@ describe("ROUTING — el modelo más barato que supera el listón de cada trabaj
     const routed = applyRouting(canonical, routeModel({ taskClass: "PLAN", materiality: "SIMPLE" }));
     expect(routed.route).toBe("iusia-general");
     expect(routed.preferred.model).toBe("gpt-5-mini");
-    expect(routed.max_output_tokens).toBe(4_000);
+    expect(routed.max_output_tokens).toBe(MIN_REASONING_OUTPUT_TOKENS);
     // El objeto canónico NO se muta: el registro de agentes es inmutable.
     expect(canonical.preferred.model).toBe("gpt-5");
     expect(canonical.max_output_tokens).toBe(16000);
@@ -286,5 +294,70 @@ describe("INTELIGENCIA DOCUMENTAL — el estado que el abogado necesita leer", (
       ),
     ).toBe(false);
     expect(shouldPollIngestion([], now)).toBe(false);
+  });
+});
+
+describe("PRESUPUESTO DE SALIDA — incidente exe_5z890j96y5x0wzew", () => {
+  it("[REASONING_FLOOR] ningún trabajo pide a un modelo de razonamiento pensar en menos de 12.000", () => {
+    // `max_completion_tokens` incluye los tokens de razonamiento. Fijar 4.000 en la
+    // planificación devolvió respuesta VACÍA en los dos candidatos y dejó la
+    // orquestación reintentando en bucle durante nueve minutos.
+    for (const taskClass of TASK_CLASSES) {
+      for (const materiality of ["SIMPLE", "MATERIAL", "HIGH_STAKES"]) {
+        const d = routeModel({ taskClass, materiality });
+        expect(
+          d.max_output_tokens,
+          `${taskClass}/${materiality} por debajo del piso de razonamiento`,
+        ).toBeGreaterThanOrEqual(MIN_REASONING_OUTPUT_TOKENS);
+      }
+    }
+  });
+
+  it("[FLOOR_COVERS_MEASURED] el piso deja holgura sobre la planificación que sí funcionó", () => {
+    // La única planificación completada con éxito consumió 8.528 tokens de salida.
+    expect(MIN_REASONING_OUTPUT_TOKENS).toBeGreaterThan(8_528);
+  });
+
+  it("[SAVINGS_COME_FROM_MODEL] el ahorro sigue existiendo sin recortar el razonamiento", () => {
+    const perMillion = (m: string) => {
+      const [p, ...rest] = m.split("/");
+      const r = rateFor(p!, rest.join("/"));
+      return r.output_usd_per_mtok;
+    };
+    // Con techos iguales, gpt-5-mini sigue costando 5× menos por token de salida.
+    expect(perMillion("openai/gpt-5") / perMillion("openai/gpt-5-mini")).toBe(5);
+    expect(routeModel({ taskClass: "PLAN", materiality: "MATERIAL" }).preferred.model).toBe(
+      "gpt-5-mini",
+    );
+  });
+});
+
+describe("BUCLE DE PLANIFICACIÓN — no puede haber rueda eterna", () => {
+  const WORKFLOW_SRC = readFileSync(
+    join(process.cwd(), "apps/web/src/worker/workflows/matter-orchestration.ts"),
+    "utf8",
+  );
+
+  it("[BOUNDED_PLAN_RETRIES] el paso de planificación declara reintentos acotados", () => {
+    const helper = WORKFLOW_SRC.slice(WORKFLOW_SRC.indexOf("planWithFailureClosed<"));
+    expect(helper).toMatch(/retries:\s*\{\s*limit:\s*2/);
+    expect(helper).toMatch(/timeout:\s*"10 minutes"/);
+  });
+
+  it("[FAILURE_CLOSES_ROOT] si la planificación agota sus intentos, la raíz se cierra", () => {
+    const helper = WORKFLOW_SRC.slice(
+      WORKFLOW_SRC.indexOf("planWithFailureClosed<"),
+      WORKFLOW_SRC.indexOf("/** Lee un output de especialista"),
+    );
+    // Sin esto la excepción salía de run() y la raíz quedaba RUNNING para siempre.
+    expect(helper).toContain("catch");
+    expect(helper).toContain("abort(");
+    expect(helper).toContain("PLAN_VIOLATION");
+  });
+
+  it("[PLAN_FAILURE_STOPS_ORCHESTRATION] un plan fallido no continúa hacia el DAG", () => {
+    const dyn = WORKFLOW_SRC.slice(WORKFLOW_SRC.indexOf("private async runDynamic("));
+    const afterPlan = dyn.slice(dyn.indexOf("planWithFailureClosed"));
+    expect(afterPlan).toContain("if (!planned)");
   });
 });

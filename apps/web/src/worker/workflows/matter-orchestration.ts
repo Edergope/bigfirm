@@ -571,7 +571,11 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       }),
     );
 
-    const planned = await step.do("dyn-plan", async () => {
+    // Reintentos ACOTADOS. Sin opciones, `step.do` hereda la política por defecto del
+    // motor y este paso quedó reintentando en bucle durante minutos con la raíz en
+    // RUNNING: para el abogado, una rueda girando para siempre. Un plan que no sale en
+    // tres intentos no va a salir en el décimo, y cada intento cuesta dinero real.
+    const planned = await this.planWithFailureClosed(step, abort, async () => {
       // Planificación ACOTADA. La medida histórica de esta llamada en staging es
       // 33–127 s (mediana 79 s) contra un modelo de razonamiento. Con los valores por
       // defecto —300 s por intento, 3 intentos, 2 candidatos— el silencio podía
@@ -760,6 +764,9 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       });
       return { plan: result.plan, source: result.source, creditsUsed, planCompletedAtMs: Date.now() };
     });
+    if (!planned) {
+      return { root_execution_id: params.root_execution_id, completed, failed };
+    }
 
     spentCredits += planned.creditsUsed;
     const plan: TeamPlan = planned.plan;
@@ -1206,6 +1213,39 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     });
 
     return { root_execution_id: params.root_execution_id, completed, failed };
+  }
+
+
+  /**
+   * Ejecuta la fase de planificación con reintentos ACOTADOS y cierre explícito.
+   *
+   * Sin opciones, `step.do` hereda la política de reintento por defecto del motor: en
+   * el incidente del 1-sep el paso se repitió durante minutos con la raíz en RUNNING
+   * —una rueda girando para siempre en la pantalla del abogado— y cada intento
+   * costaba dinero real. Peor: cuando el paso agota sus intentos, la excepción sale
+   * de `run()` y NADIE cierra la raíz, que se queda RUNNING indefinidamente.
+   *
+   * Aquí el fallo se convierte en un final explícito y recuperable: la raíz pasa a
+   * FAILED con su causa y el producto puede decir qué ocurrió.
+   */
+  private async planWithFailureClosed<T extends Rpc.Serializable<T>>(
+    step: WorkflowStep,
+    abort: (reason: CircuitBreakerReason, detail: string) => Promise<DagResult>,
+    body: () => Promise<T>,
+  ): Promise<T | null> {
+    try {
+      return (await step.do(
+        "dyn-plan",
+        { retries: { limit: 2, delay: "5 seconds", backoff: "exponential" }, timeout: "10 minutes" },
+        body,
+      )) as T;
+    } catch (error) {
+      await abort(
+        "PLAN_VIOLATION",
+        error instanceof Error ? error.message : "la planificación falló sin causa legible",
+      );
+      return null;
+    }
   }
 
   /** Lee un output de especialista desde R2 y devuelve un resumen humano acotado. */

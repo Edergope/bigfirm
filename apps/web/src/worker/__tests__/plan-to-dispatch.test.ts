@@ -122,7 +122,7 @@ describe("PLANIFICACIÓN — evidencia de vida y espera acotada", () => {
 
   it("[PLANNER_USES_BOUNDED_GATEWAY] el workflow construye el gateway del planner con esos límites", () => {
     const src = dynamicSource();
-    const planStep = src.slice(src.indexOf('step.do("dyn-plan"'), src.indexOf("spentCredits +="));
+    const planStep = src.slice(src.indexOf("planWithFailureClosed("), src.indexOf("spentCredits +="));
     expect(planStep).toContain("ORCHESTRATION_LIMITS.PLANNER_REQUEST_TIMEOUT_MS");
     expect(planStep).toContain("ORCHESTRATION_LIMITS.PLANNER_MAX_ATTEMPTS_PER_CANDIDATE");
     expect(planStep).toContain("PLAN_MODEL_ATTEMPT");

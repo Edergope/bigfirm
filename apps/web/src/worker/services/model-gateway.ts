@@ -48,6 +48,14 @@ export type ProviderFailureKind =
   | "http_4xx"
   | "http_5xx"
   | "empty"
+  /**
+   * El modelo agotó su presupuesto de salida ANTES de emitir contenido. En un modelo
+   * de razonamiento `max_completion_tokens` cubre también los tokens de razonamiento,
+   * así que un techo pensado como límite de contenido deja la respuesta vacía. Se
+   * distingue de `empty` porque la causa —y el arreglo— son otros: no es que el
+   * proveedor fallara, es que le pedimos pensar con menos espacio del que necesita.
+   */
+  | "output_budget_exhausted"
   | "network";
 
 class ProviderCallError extends Error {
@@ -267,7 +275,7 @@ export class ModelGateway {
     }
 
     const body = (await response.json().catch(() => null)) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
       usage?: {
         prompt_tokens?: number;
         completion_tokens?: number;
@@ -277,7 +285,14 @@ export class ModelGateway {
 
     const text = body?.choices?.[0]?.message?.content;
     if (typeof text !== "string" || text.length === 0) {
-      throw new ProviderCallError("empty", "respuesta vacía del proveedor");
+      const finishReason = body?.choices?.[0]?.finish_reason;
+      if (finishReason === "length") {
+        throw new ProviderCallError(
+          "output_budget_exhausted",
+          `${candidate.provider}/${candidate.model} agotó max_completion_tokens=${policy.max_output_tokens} sin emitir contenido: en un modelo de razonamiento ese techo incluye los tokens de razonamiento`,
+        );
+      }
+      throw new ProviderCallError("empty", `respuesta vacía del proveedor (finish_reason=${String(finishReason ?? "desconocido")})`);
     }
 
     return {

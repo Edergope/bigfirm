@@ -7,6 +7,13 @@
  * el modelo: está en pagar salida de modelo premium para todo, incluida la selección
  * de un equipo y la extracción de campos.
  *
+ * CORRECCIÓN 2026-09-01: el primer intento de esta política recortó también el techo
+ * de salida (4.000 en planificación) creyendo que limitaba la verborrea. En un modelo
+ * de razonamiento ese techo incluye los tokens de razonamiento, así que la respuesta
+ * volvía vacía y la orquestación entraba en bucle. El ahorro viene de ELEGIR BIEN EL
+ * MODELO —gpt-5-mini cuesta 5× menos que gpt-5 por token—, no de asfixiar el
+ * razonamiento: un techo que rompe la tarea no ahorra nada, la repite.
+ *
  * La política NO es «el modelo más barato para todo». Es el modelo más barato que
  * supera el listón de cada trabajo, con escalamiento por criterios DETERMINISTAS
  * —materialidad del asunto, fallo de validación estructurada— nunca por lo que el
@@ -45,6 +52,20 @@ export interface RoutingDecision {
   /** Por qué se eligió, para que la decisión sea auditable y no mágica. */
   reason: string;
 }
+
+/**
+ * Piso de presupuesto de salida para modelos de RAZONAMIENTO.
+ *
+ * En la familia gpt-5, `max_completion_tokens` cubre también los tokens de
+ * razonamiento, que el proveedor no devuelve como contenido. Un techo pensado como
+ * «cuánto texto quiero» deja al modelo sin espacio para pensar y la respuesta vuelve
+ * VACÍA con finish_reason=length. Ocurrió: fijar 4.000 en la planificación hizo
+ * fallar los dos candidatos y dejó la orquestación reintentando en bucle.
+ *
+ * La medición real de una planificación que SÍ funcionó fue de 8.528 tokens de
+ * salida. El piso deja holgura sobre ese caso observado.
+ */
+export const MIN_REASONING_OUTPUT_TOKENS = 12_000;
 
 const GPT5: RoutedModel = { provider: "openai", model: "gpt-5" };
 const GPT5_MINI: RoutedModel = { provider: "openai", model: "gpt-5-mini" };
@@ -87,7 +108,7 @@ export function routeModel(ctx: RoutingContext): RoutingDecision {
       return {
         preferred: GPT5_NANO,
         fallback: [GPT5_MINI],
-        max_output_tokens: 1_500,
+        max_output_tokens: MIN_REASONING_OUTPUT_TOKENS,
         temperature: 0,
         reason: "extraccion_estructurada_validada_server_side",
       };
@@ -99,7 +120,7 @@ export function routeModel(ctx: RoutingContext): RoutingDecision {
       return {
         preferred: escalate ? GPT5 : GPT5_MINI,
         fallback: escalate ? [GEMINI_PRO] : [GPT5],
-        max_output_tokens: 4_000,
+        max_output_tokens: MIN_REASONING_OUTPUT_TOKENS,
         temperature: 0.15,
         reason: escalate ? "plan_escalado_por_materialidad" : "plan_es_seleccion_validada",
       };
@@ -109,7 +130,7 @@ export function routeModel(ctx: RoutingContext): RoutingDecision {
       return {
         preferred: escalate ? GPT5 : GPT5_MINI,
         fallback: escalate ? [GEMINI_PRO] : [GPT5],
-        max_output_tokens: escalate ? 8_000 : 6_000,
+        max_output_tokens: escalate ? 16_000 : MIN_REASONING_OUTPUT_TOKENS,
         temperature: 0.15,
         reason: escalate ? "especialista_escalado_por_materialidad" : "especialista_estandar",
       };
@@ -120,7 +141,7 @@ export function routeModel(ctx: RoutingContext): RoutingDecision {
       return {
         preferred: GPT5,
         fallback: [GEMINI_PRO],
-        max_output_tokens: 8_000,
+        max_output_tokens: 16_000,
         temperature: 0.15,
         reason: "integracion_final_una_vez_por_expediente",
       };
@@ -130,7 +151,7 @@ export function routeModel(ctx: RoutingContext): RoutingDecision {
       return {
         preferred: escalate ? GPT5 : GPT5_MINI,
         fallback: [GPT5],
-        max_output_tokens: escalate ? 10_000 : 6_000,
+        max_output_tokens: escalate ? 16_000 : MIN_REASONING_OUTPUT_TOKENS,
         temperature: 0.15,
         reason: escalate ? "entregable_alta_criticidad" : "entregable_estandar",
       };
