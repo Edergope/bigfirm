@@ -7,6 +7,7 @@ export * from "./work-package.js";
 export * from "./execution.js";
 export * from "./events.js";
 export * from "./credits.js";
+export * from "./model-routing.js";
 export * from "./deadlines.js";
 export * from "./case-brief.js";
 export * from "./convocation.js";

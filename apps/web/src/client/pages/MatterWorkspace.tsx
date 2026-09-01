@@ -19,7 +19,6 @@ import {
   activityEvent,
   activityOutcome,
   documentClassLabel,
-  documentStatusTerm,
   isLegalActivity,
   materialityTerm,
   riskTerm,
@@ -37,7 +36,13 @@ import {
   ShieldAlert,
   Users,
 } from "lucide-react";
-import { matterLoadFailure, type RiskLevel } from "@iusia/domain";
+import {
+  DOCUMENT_INTELLIGENCE_TERMS,
+  documentIntelligenceState,
+  matterLoadFailure,
+  shouldPollIngestion,
+  type RiskLevel,
+} from "@iusia/domain";
 import {
   api,
   ApiError,
@@ -143,6 +148,18 @@ export function MatterWorkspace() {
     retry: (failureCount, error) =>
       failureCount < 3 && (!(error instanceof ApiError) || error.status >= 500),
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    // Mientras un documento siga procesándose, el expediente se refresca solo: el
+    // abogado no debería tener que recargar para enterarse de que ya está listo.
+    // Cuando todos alcanzan estado terminal, el sondeo se detiene.
+    refetchInterval: (query) =>
+      shouldPollIngestion(
+        (query.state.data?.documents ?? []).map((d) => ({
+          ingestion_status: d.ingestionStatus,
+          updated_at: d.updatedAt,
+        })),
+      )
+        ? 6000
+        : false,
   });
 
   if (detail.isLoading) {
@@ -556,7 +573,11 @@ function DocFolder({
       ) : (
         <ul className="divide-y divide-iusia-line/70">
           {docs.map((d) => {
-            const st = documentStatusTerm(d.status);
+            // La pregunta del abogado aquí es «¿IUSIA puede usar esto?», no «¿alguien
+            // lo revisó?». La fuente es `ingestion_status`; el ciclo de revisión
+            // jurídica es otro eje y se muestra aparte.
+            const intel = documentIntelligenceState(d.ingestion_status, d.updated_at);
+            const st = DOCUMENT_INTELLIGENCE_TERMS[intel];
             const Icon = documentIcon(d.mime_type, d.name);
             return (
               <li

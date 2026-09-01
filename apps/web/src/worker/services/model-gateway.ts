@@ -356,31 +356,75 @@ export function modelRequestParams(
  * Son COSTO de proveedor, no precio de venta. Revisar contra facturación real
  * antes de fijar la fórmula comercial de créditos (Blueprint §12).
  */
-export const MODEL_RATES: Record<
-  string,
-  { provider: string; model: string; input_usd_per_mtok: number; output_usd_per_mtok: number }
-> = {
+/**
+ * Tarifas OFICIALES de proveedor, USD por millón de tokens.
+ *
+ * Fuente: documentación oficial consultada el 2026-09-01 —
+ * developers.openai.com/api/docs/pricing y ai.google.dev/gemini-api/docs/pricing.
+ *
+ * `cached_input` no es un adorno: la entrada cacheada cuesta una décima parte y los
+ * prompts canónicos de IUSIA son inmutables, así que es exactamente el caso que el
+ * proveedor premia. Ignorarla —como se hacía— sobrestimaba el costo de cada llamada.
+ */
+export interface ModelRateEntry {
+  provider: string;
+  model: string;
+  input_usd_per_mtok: number;
+  cached_input_usd_per_mtok: number;
+  output_usd_per_mtok: number;
+  /** Fecha de la consulta a la documentación oficial. */
+  source_date: string;
+}
+
+export const MODEL_RATES: Record<string, ModelRateEntry> = {
   "openai/gpt-5": {
-    provider: "openai",
-    model: "gpt-5",
-    input_usd_per_mtok: 1.25,
-    output_usd_per_mtok: 10,
+    provider: "openai", model: "gpt-5",
+    input_usd_per_mtok: 1.25, cached_input_usd_per_mtok: 0.125, output_usd_per_mtok: 10,
+    source_date: "2026-09-01",
+  },
+  "openai/gpt-5-mini": {
+    provider: "openai", model: "gpt-5-mini",
+    input_usd_per_mtok: 0.25, cached_input_usd_per_mtok: 0.025, output_usd_per_mtok: 2,
+    source_date: "2026-09-01",
+  },
+  "openai/gpt-5-nano": {
+    provider: "openai", model: "gpt-5-nano",
+    input_usd_per_mtok: 0.05, cached_input_usd_per_mtok: 0.005, output_usd_per_mtok: 0.4,
+    source_date: "2026-09-01",
   },
   "google/gemini-2.5-pro": {
-    provider: "google",
-    model: "gemini-2.5-pro",
-    input_usd_per_mtok: 1.25,
-    output_usd_per_mtok: 10,
+    provider: "google", model: "gemini-2.5-pro",
+    input_usd_per_mtok: 1.25, cached_input_usd_per_mtok: 0.125, output_usd_per_mtok: 10,
+    source_date: "2026-09-01",
+  },
+  "google/gemini-2.5-flash": {
+    provider: "google", model: "gemini-2.5-flash",
+    input_usd_per_mtok: 0.3, cached_input_usd_per_mtok: 0.03, output_usd_per_mtok: 2.5,
+    source_date: "2026-09-01",
   },
 };
 
-export function rateFor(provider: string, model: string) {
-  return (
-    MODEL_RATES[`${provider}/${model}`] ?? {
-      provider,
-      model,
-      input_usd_per_mtok: 0,
-      output_usd_per_mtok: 0,
-    }
-  );
+/**
+ * Tarifa de un modelo. FALLA CERRADA ante un modelo desconocido.
+ *
+ * Antes devolvía ceros, de modo que un modelo sin tarifa registrada parecía GRATIS:
+ * el presupuesto no lo frenaba nunca y el ledger contabilizaba 0. Con routing
+ * dinámico eso es una puerta abierta a gastar sin límite y sin registro. Un modelo
+ * que IUSIA no sabe costear no debe ejecutarse.
+ */
+export function rateFor(provider: string, model: string): ModelRateEntry {
+  const rate = MODEL_RATES[`${provider}/${model}`];
+  if (!rate) {
+    throw new IusiaError(
+      "UNKNOWN_MODEL_RATE",
+      `No hay tarifa registrada para "${provider}/${model}": IUSIA no ejecuta un modelo cuyo costo no sabe calcular.`,
+      { provider, model, known: Object.keys(MODEL_RATES) },
+    );
+  }
+  return rate;
+}
+
+/** ¿Está este modelo habilitado para ejecutarse, es decir, sabemos costearlo? */
+export function hasKnownRate(provider: string, model: string): boolean {
+  return Boolean(MODEL_RATES[`${provider}/${model}`]);
 }

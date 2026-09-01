@@ -294,7 +294,9 @@ export class DocumentRepository {
         r2MirrorKey,
         contentHash,
         indexedAt: now,
-        status: "EN_REVISION",
+        // `status` es el ciclo de revisión JURÍDICA y no lo mueve un hecho técnico:
+        // indexar un documento no significa que un abogado lo haya revisado. Pisarlo
+        // aquí era el origen del «En revisión» que confundía a un documento indexado.
         ingestionStatus: "AI_INDEXED",
         updatedAt: now,
       })

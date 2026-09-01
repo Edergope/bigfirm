@@ -149,3 +149,93 @@ function sanitizeToken(value: string): string {
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : value.slice(0, max).trim();
 }
+
+
+// ────────────────── Inteligencia documental: qué ve el abogado ──────────────────
+
+/**
+ * Estado de un documento PARA EL ANÁLISIS, derivado de `ingestion_status`.
+ *
+ * `documents.status` es el ciclo de revisión JURÍDICA del despacho (pendiente, en
+ * revisión, aprobado). La disponibilidad para el análisis es otra cosa, y mostrarlas
+ * con la misma etiqueta hizo que un documento perfectamente indexado apareciera
+ * durante minutos como «En revisión» —en tono de advertencia— mientras el abogado
+ * esperaba a que pasara algo que ya había pasado.
+ */
+export type DocumentIntelligenceState =
+  | "PROCESSING"
+  | "INDEXED"
+  | "NOT_INDEXABLE"
+  | "ERROR"
+  | "STALLED";
+
+/**
+ * Un documento no puede quedarse «procesando» para siempre. Pasado este margen sin
+ * alcanzar estado terminal, se declara atascado y se ofrece reintentar la indexación
+ * —sin volver a subir el archivo ni crear otra versión—.
+ */
+export const INGESTION_STALLED_AFTER_MINUTES = 10;
+
+export function documentIntelligenceState(
+  ingestionStatus: string,
+  updatedAt?: string | null,
+  now: Date = new Date(),
+): DocumentIntelligenceState {
+  if (ingestionStatus === "AI_INDEXED") return "INDEXED";
+  if (ingestionStatus === "NOT_INDEXABLE") return "NOT_INDEXABLE";
+  if (ingestionStatus === "ERROR") return "ERROR";
+  // PROCESSING o FILE_STORED: en camino… salvo que lleve demasiado tiempo.
+  if (updatedAt) {
+    const since = now.getTime() - Date.parse(updatedAt);
+    if (Number.isFinite(since) && since > INGESTION_STALLED_AFTER_MINUTES * 60_000) {
+      return "STALLED";
+    }
+  }
+  return "PROCESSING";
+}
+
+export const DOCUMENT_INTELLIGENCE_TERMS: Record<
+  DocumentIntelligenceState,
+  { label: string; hint: string; tone: "info" | "success" | "neutral" | "critical" | "warning" }
+> = {
+  PROCESSING: {
+    label: "Procesando",
+    hint: "IUSIA está leyendo el documento. Estará disponible para el análisis en unos minutos.",
+    tone: "info",
+  },
+  INDEXED: {
+    label: "Indexado por IUSIA",
+    hint: "Disponible para el análisis: IUSIA puede citarlo como evidencia.",
+    tone: "success",
+  },
+  NOT_INDEXABLE: {
+    label: "Vista disponible · no indexado",
+    hint: "Se conserva en el expediente, pero su formato no permite usarlo como evidencia.",
+    tone: "neutral",
+  },
+  ERROR: {
+    label: "Error de procesamiento",
+    hint: "No pudo prepararse para el análisis. Puedes reintentar la indexación.",
+    tone: "critical",
+  },
+  STALLED: {
+    label: "Procesamiento detenido",
+    hint: "Lleva demasiado tiempo sin avanzar. Puedes reintentar la indexación.",
+    tone: "warning",
+  },
+};
+
+/** ¿Debe seguir consultándose el estado? Sólo mientras algo pueda cambiar solo. */
+export function shouldPollIngestion(
+  documents: readonly { ingestion_status: string; updated_at?: string | null }[],
+  now: Date = new Date(),
+): boolean {
+  return documents.some(
+    (d) => documentIntelligenceState(d.ingestion_status, d.updated_at, now) === "PROCESSING",
+  );
+}
+
+/** ¿Puede reintentarse la indexación de este documento? */
+export function canRetryIngestion(state: DocumentIntelligenceState): boolean {
+  return state === "ERROR" || state === "STALLED";
+}

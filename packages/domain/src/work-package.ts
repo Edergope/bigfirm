@@ -140,6 +140,13 @@ export const WorkPackage = z.object({
   jurisdiction: z.string().min(1).max(120),
   language: z.string().default("es-CO"),
   created_at: z.string().datetime(),
+
+  /**
+   * Clase de trabajo y materialidad, para que el runtime elija el modelo adecuado.
+   * El servidor las fija SIEMPRE; el modelo no puede escoger su propio modelo.
+   */
+  task_class: z.string().optional(),
+  materiality: z.string().optional(),
 });
 export type WorkPackage = z.infer<typeof WorkPackage>;
 

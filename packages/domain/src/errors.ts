@@ -13,6 +13,8 @@ export type IusiaErrorCode =
   /** Falta un secreto/config externa para operar (p. ej. AI Gateway sin credenciales). */
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_TIMEOUT"
+  /** Modelo sin tarifa registrada: IUSIA no ejecuta lo que no sabe costear. */
+  | "UNKNOWN_MODEL_RATE"
   | "GATE_BLOCKED"
   /** Plan de equipo inválido que no pudo repararse ni sustituirse por un fallback válido. */
   | "PLAN_INVALID"
@@ -33,6 +35,7 @@ const STATUS: Record<IusiaErrorCode, number> = {
   // 503: la operación es válida pero el servicio externo no está aprovisionado.
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_TIMEOUT: 504,
+  UNKNOWN_MODEL_RATE: 500,
   GATE_BLOCKED: 409,
   PLAN_INVALID: 422,
   ORCHESTRATION_ABORTED: 409,

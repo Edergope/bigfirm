@@ -1,6 +1,8 @@
 import { Agent } from "agents";
 import {
   IusiaError,
+  applyRouting,
+  routeModel,
   creditsForCost,
   extractLedgerEntries,
   providerCostUsd,
@@ -139,7 +141,19 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
 
       // 3. Ejecutar contra la capa de modelos.
       const gateway = new ModelGateway(this.env);
-      const result = await gateway.complete(def.model_policy, messages, {
+      // El modelo lo decide el SERVIDOR por clase de trabajo y materialidad del
+      // expediente, no el agent.md ni el propio modelo. Sin `task_class` se conserva
+      // la política canónica intacta.
+      const policy = workPackage.task_class
+        ? applyRouting(
+            def.model_policy,
+            routeModel({
+              taskClass: workPackage.task_class as never,
+              materiality: workPackage.materiality,
+            }),
+          )
+        : def.model_policy;
+      const result = await gateway.complete(policy, messages, {
         organization_id: execution.organizationId,
         matter_id: execution.matterId,
         agent_id: def.agent_id,

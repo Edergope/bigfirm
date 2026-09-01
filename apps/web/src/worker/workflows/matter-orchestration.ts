@@ -8,6 +8,8 @@ import {
   creditsForCost,
   deriveConclusionText,
   buildLawyerContext,
+  applyRouting,
+  routeModel,
   newId,
   providerCostUsd,
   ExecutionSafetyLedger,
@@ -65,6 +67,16 @@ export interface MatterOrchestrationParams {
 /** Estimación conservadora de créditos por ejecución (alineada con la ruta HTTP). */
 const ESTIMATED_CREDITS_PER_RUN = 300;
 const DEFAULT_ROOT_CREDIT_LIMIT = 5000;
+
+/**
+ * Techo de COSTO DE PROVEEDOR por expediente analizado, en USD.
+ *
+ * Los créditos son economía comercial; esto es dinero real facturado por el
+ * proveedor. Son cosas distintas y hasta ahora sólo se vigilaba la primera: una
+ * cadena de reintentos podía gastar sin que ninguna guarda lo notara, porque un
+ * modelo sin tarifa registrada además computaba cero.
+ */
+const DEFAULT_ROOT_PROVIDER_COST_BUDGET_USD = 1.5;
 
 type DagResult = { root_execution_id: string; completed: string[]; failed: string[] };
 
@@ -587,7 +599,10 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         eligible: eligibleAgentIds(),
         runModel: async (messages) => {
           const r = await gateway.complete(
-            orchestratorDef.model_policy,
+            applyRouting(
+              orchestratorDef.model_policy,
+              routeModel({ taskClass: "PLAN", materiality: ctx.materiality }),
+            ),
             messages,
             {
               organization_id: params.organization_id,
@@ -767,6 +782,15 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     if (!balanceOk) return abort("CREDIT_BUDGET_EXCEEDED", "saldo insuficiente para el equipo planificado");
 
     // ── DAG dinámico ──
+    const providerCostBudgetUsd = Number(
+      this.env.ROOT_PROVIDER_COST_BUDGET_USD ?? DEFAULT_ROOT_PROVIDER_COST_BUDGET_USD,
+    );
+    /** Costo de proveedor ya facturado por esta raíz, leído del ledger. */
+    const providerCostSoFar = async (): Promise<number> => {
+      const rows = await executions.listByRoot(params.root_execution_id);
+      return rows.reduce((sum, r) => sum + (r.providerCostUsd ?? 0), 0);
+    };
+
     const nodes = teamPlanToDag(plan);
     const batches = dispatchBatches(nodes);
     await timing(TIMING_MILESTONES.DAG_CREATED, { node_count: nodes.length, batch_count: batches.length });
@@ -800,6 +824,14 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           if (!g.ok) return abort(g.reason, g.detail);
           if (!canAffordNextExecution({ spentCredits, nextEstimatedCredits: ESTIMATED_CREDITS_PER_RUN, hardBudget })) {
             return abort("CREDIT_BUDGET_EXCEEDED", `presupuesto ${hardBudget} agotado`);
+          }
+          // Dinero real, no créditos comerciales: se lee del ledger antes de gastar más.
+          const spentUsd = await step.do(`dyn-cost-${task.task_id}`, providerCostSoFar);
+          if (spentUsd >= providerCostBudgetUsd) {
+            return abort(
+              "CREDIT_BUDGET_EXCEEDED",
+              `costo de proveedor ${spentUsd.toFixed(4)} USD alcanzó el techo de ${providerCostBudgetUsd} USD`,
+            );
           }
           for (const depAgent of node.requires) {
             const t = safety.registerTransfer(depAgent, node.agent_id);
@@ -949,6 +981,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   jurisdiction: ctx.jurisdiction,
                   language: "es-CO",
                   created_at: new Date().toISOString(),
+                  task_class: "SPECIALIST",
+                  materiality: ctx.materiality,
                 };
                 const worker = await getAgentByName<Env, LegalWorker>(this.env.LegalWorker, executionId);
                 const rr = await worker.run(workPackage);
@@ -1025,6 +1059,13 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
     if (!intGuard.ok) return abort(intGuard.reason, intGuard.detail);
     if (!canAffordNextExecution({ spentCredits, nextEstimatedCredits: ESTIMATED_CREDITS_PER_RUN, hardBudget })) {
       return abort("CREDIT_BUDGET_EXCEEDED", `presupuesto ${hardBudget} agotado antes de integrar`);
+    }
+    const spentBeforeIntegration = await step.do("dyn-cost-integrate", providerCostSoFar);
+    if (spentBeforeIntegration >= providerCostBudgetUsd) {
+      return abort(
+        "CREDIT_BUDGET_EXCEEDED",
+        `costo de proveedor ${spentBeforeIntegration.toFixed(4)} USD alcanzó el techo antes de integrar`,
+      );
     }
 
     const integration = await step.do(
@@ -1108,6 +1149,8 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           jurisdiction: ctx.jurisdiction,
           language: "es-CO",
           created_at: new Date().toISOString(),
+          task_class: "INTEGRATION",
+          materiality: ctx.materiality,
         };
         const worker = await getAgentByName<Env, LegalWorker>(this.env.LegalWorker, executionId);
         return worker.run(workPackage);

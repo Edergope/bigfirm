@@ -47,6 +47,8 @@ export interface ModelRate {
   provider: string;
   model: string;
   input_usd_per_mtok: number;
+  /** La entrada cacheada cuesta ~10× menos. Ignorarla sobrestima cada llamada. */
+  cached_input_usd_per_mtok?: number;
   output_usd_per_mtok: number;
 }
 
@@ -62,12 +64,24 @@ export const DEFAULT_CREDIT_POLICY: CreditPolicy = {
   minimum_credits_per_execution: 1,
 };
 
+/**
+ * Costo real de una llamada.
+ *
+ * Los proveedores informan `input_tokens` INCLUYENDO los cacheados, y facturan esa
+ * porción a tarifa reducida. Cobrar todo a tarifa plena —como se hacía— sobrestima
+ * el costo justo en el caso que IUSIA más produce: prompts canónicos inmutables que
+ * el proveedor cachea llamada tras llamada.
+ */
 export function providerCostUsd(
   rate: ModelRate,
-  usage: { input_tokens: number; output_tokens: number },
+  usage: { input_tokens: number; output_tokens: number; cached_input_tokens?: number },
 ): number {
+  const cached = Math.min(usage.cached_input_tokens ?? 0, usage.input_tokens);
+  const fresh = usage.input_tokens - cached;
+  const cachedRate = rate.cached_input_usd_per_mtok ?? rate.input_usd_per_mtok;
   return (
-    (usage.input_tokens / 1_000_000) * rate.input_usd_per_mtok +
+    (fresh / 1_000_000) * rate.input_usd_per_mtok +
+    (cached / 1_000_000) * cachedRate +
     (usage.output_tokens / 1_000_000) * rate.output_usd_per_mtok
   );
 }

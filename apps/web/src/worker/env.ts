@@ -40,6 +40,8 @@ export interface IusiaSecrets {
   ORCHESTRATION_MODE?: string;
   /** Límite duro de créditos por root execution dinámica (string→número). */
   ROOT_CREDIT_LIMIT?: string;
+  /** Techo de COSTO DE PROVEEDOR en USD por raíz. Dinero real, no créditos. */
+  ROOT_PROVIDER_COST_BUDGET_USD?: string;
 }
 
 declare global {

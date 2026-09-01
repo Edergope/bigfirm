@@ -135,7 +135,10 @@ export interface MatterDetail {
     name: string;
     mimeType: string;
     classification: string;
+    /** Ciclo de revisión JURÍDICA. No confundir con la disponibilidad para análisis. */
     status: string;
+    /** Disponibilidad para el análisis: la fuente de verdad de la inteligencia documental. */
+    ingestionStatus: string;
     driveFileId: string | null;
     updatedAt: string;
   }>;
