@@ -8,6 +8,9 @@ import {
   extractEnvelope,
   renderEnvelopeContract,
   stripEnvelope,
+  type EnvelopeFact,
+  type EnvelopeTask,
+  type StructuredExecutionEnvelope,
 } from "../execution-envelope.js";
 import { PROJECTION_CAPS, projectEnvelope, riskLevelFrom } from "../envelope-projection.js";
 import { authorizedRefsOf } from "../work-package.js";
@@ -18,7 +21,7 @@ import { authorizedRefsOf } from "../work-package.js";
  * llamada de modelo sobre la prosa.
  */
 
-const fact = (over: Record<string, unknown> = {}) => ({
+const fact = (over: Partial<EnvelopeFact> = {}): EnvelopeFact => ({
   fact_id: "F1",
   statement: "El contrato fijó un preaviso de 90 días.",
   certainty: "[D]",
@@ -29,7 +32,7 @@ const fact = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const envelope = (over: Record<string, unknown> = {}) => ({
+const envelope = (over: Partial<StructuredExecutionEnvelope> = {}): StructuredExecutionEnvelope => ({
   envelope_version: ENVELOPE_VERSION,
   conclusion_brief: undefined,
   facts: [],
@@ -120,7 +123,9 @@ describe("lectura de la salida del agente", () => {
   it("un elemento que no cumple el contrato canónico se rechaza, no se repara", () => {
     const text = wrap(
       envelope({
-        facts: [fact(), fact({ fact_id: "F2", certainty: "MUY_SEGURO" })],
+        // Deliberadamente fuera del contrato canónico: lo que se prueba es que la
+        // validación de runtime lo rechaza, no que TypeScript lo impida.
+        facts: [fact(), { ...fact({ fact_id: "F2" }), certainty: "MUY_SEGURO" } as unknown as EnvelopeFact],
       }),
     );
     const out = extractEnvelope(text);
@@ -214,7 +219,7 @@ describe("proyección al expediente: reglas deterministas", () => {
   });
 
   it("no vuelve a crear una tarea que el expediente ya tiene abierta", () => {
-    const task = {
+    const task: EnvelopeTask = {
       task_id: "T1",
       title: "Solicitar el contrato marco firmado",
       description: "Pedirlo a la contraparte.",
