@@ -399,6 +399,16 @@ export const api = {
     }>(`/api/matters/${matterId}/workspace`),
 
   /** Sube documentos aportados a Drive vía multipart. No usa el helper JSON. */
+  /**
+   * Reintenta la ingestión de UN documento fallido. Idempotente: mismo documento,
+   * misma versión, sin duplicar en el índice.
+   */
+  retryDocumentIngestion: (matterId: string, documentId: string) =>
+    request<{ document_id: string; ingestion_status: string }>(
+      `/api/matters/${matterId}/documents/${documentId}/retry`,
+      { method: "POST" },
+    ),
+
   uploadDocuments: async (matterId: string, files: File[]) => {
     const form = new FormData();
     for (const f of files) form.append("files", f);

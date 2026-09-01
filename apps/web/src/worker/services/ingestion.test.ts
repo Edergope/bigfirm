@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { isIndexableMimeType, normalizeToText, uploadToAiSearch } from "./ingestion.js";
+import {
+  DOWNLOAD_DEADLINE_MS,
+  IngestionTimeoutError,
+  NORMALIZE_DEADLINE_MS,
+  StageClock,
+  isIndexableMimeType,
+  normalizeToText,
+  uploadToAiSearch,
+} from "./ingestion.js";
 
 describe("normalización documental", () => {
   it("conserva el decoder estable para texto sin invocar Workers AI", async () => {
@@ -126,5 +134,92 @@ describe("normalización documental", () => {
         is_current: "true",
       }),
     ).rejects.toThrow("status=error: unsupported content");
+  });
+});
+
+/**
+ * Cotas de las dependencias externas.
+ *
+ * Ninguna espera puede ser ilimitada: una llamada a AI Search sin cota dejó 213,5 s
+ * muertos en una orquestación real. La descarga y la conversión tenían el mismo agujero,
+ * con el agravante de que ocupan un hueco de concurrencia mientras cuelgan y frenan al
+ * lote entero.
+ */
+describe("ninguna etapa espera indefinidamente", () => {
+  it("declara cotas para descarga y conversión", () => {
+    expect(DOWNLOAD_DEADLINE_MS).toBeGreaterThan(0);
+    expect(NORMALIZE_DEADLINE_MS).toBeGreaterThan(0);
+    // La conversión de un PDF grande legítimamente tarda más que su descarga.
+    expect(NORMALIZE_DEADLINE_MS).toBeGreaterThanOrEqual(DOWNLOAD_DEADLINE_MS);
+  });
+
+  it("un vencimiento NO se convierte en éxito vacío", () => {
+    // Marcar indexado un documento que no se pudo leer es peor que fallar: el análisis
+    // lo daría por considerado. El error es una clase propia, y el consumidor reintenta.
+    const error = new IngestionTimeoutError("NORMALIZE", NORMALIZE_DEADLINE_MS);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.stage).toBe("NORMALIZE");
+    expect(error.name).toBe("IngestionTimeoutError");
+  });
+});
+
+describe("cronómetro por etapa", () => {
+  it("reparte el tiempo entre etapas y cierra con el total", () => {
+    const clock = new StageClock();
+    clock.mark("download_ms");
+    clock.mark("normalize_ms");
+    const timings = clock.finish();
+    // Sin esto, la única evidencia era `indexed_at`: cuándo terminó, no dónde se fue.
+    expect(Object.keys(timings)).toEqual(
+      expect.arrayContaining(["download_ms", "normalize_ms", "finalize_ms", "total_ms"]),
+    );
+    for (const value of Object.values(timings)) {
+      expect(value).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+/**
+ * AI_INDEXED significa RECUPERABLE, no «la API devolvió 200».
+ *
+ * `uploadAndPoll` sondea hasta que el item queda `completed` y la ingestión sólo marca
+ * indexado después. Un `status` distinto de `completed` lanza, así que un documento a
+ * medio indexar nunca llega a AI_INDEXED.
+ */
+describe("semántica de AI_INDEXED", () => {
+  it("un item que no completó impide marcar indexado", async () => {
+    const aiSearch = {
+      items: {
+        uploadAndPoll: async () => ({ status: "error" as const, error: "conversion failed" }),
+      },
+    };
+    await expect(
+      uploadToAiSearch(aiSearch, "org/x/doc.txt", "contenido", { organization_id: "org" }),
+    ).rejects.toThrow(/error/);
+  });
+
+  it("sólo `completed` se acepta como indexado", async () => {
+    for (const status of ["queued", "running", "outdated", "skipped"] as const) {
+      const aiSearch = { items: { uploadAndPoll: async () => ({ status }) } };
+      await expect(
+        uploadToAiSearch(aiSearch, "org/x/doc.txt", "contenido", { organization_id: "org" }),
+      ).rejects.toThrow();
+    }
+    const ok = { items: { uploadAndPoll: async () => ({ status: "completed" as const }) } };
+    await expect(
+      uploadToAiSearch(ok, "org/x/doc.txt", "contenido", { organization_id: "org" }),
+    ).resolves.toMatchObject({ status: "completed" });
+  });
+});
+
+describe("imágenes: no se finge inteligencia", () => {
+  it("una imagen no es indexable y nunca entra a la cola", () => {
+    // El estado inicial que se le asigna es NOT_INDEXABLE, así que se muestra como
+    // «Vista disponible · no indexado» en vez de fallar con un error de proceso.
+    expect(isIndexableMimeType("image/png")).toBe(false);
+    expect(isIndexableMimeType("image/jpeg")).toBe(false);
+    // Y no se aplica OCR ni visión: no hay costo generativo escondido.
+    expect(isIndexableMimeType("application/pdf")).toBe(true);
+    expect(isIndexableMimeType("text/plain")).toBe(true);
   });
 });

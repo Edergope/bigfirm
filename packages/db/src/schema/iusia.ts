@@ -128,6 +128,14 @@ export const documents = sqliteTable(
     sizeBytes: integer("size_bytes"),
     /** FILE_STORED | PROCESSING | AI_INDEXED | NOT_INDEXABLE | ERROR */
     ingestionStatus: text("ingestion_status").notNull().default("FILE_STORED"),
+    /** Telemetría de ingestión. De operación: nunca se muestra al abogado. */
+    ingestionEnqueuedAt: text("ingestion_enqueued_at"),
+    ingestionStartedAt: text("ingestion_started_at"),
+    /** Duraciones por etapa en ms, como JSON. Se leen juntas o no se leen. */
+    ingestionTimings: text("ingestion_timings"),
+    ingestionAttempts: integer("ingestion_attempts").notNull().default(0),
+    /** Lote de carga. Correlación, NO transacción: un fallo no toca a los demás. */
+    uploadBatchId: text("upload_batch_id"),
     /**
      * Provenance del entregable generado por IUSIA. Vive EN EL DOCUMENTO, no sólo en
      * `audit_events`: de un DOCX debe poder reconstruirse su plantilla, su ejecución,
@@ -151,6 +159,7 @@ export const documents = sqliteTable(
   },
   (t) => [
     index("documents_org_matter_idx").on(t.organizationId, t.matterId),
+    index("documents_batch_idx").on(t.organizationId, t.uploadBatchId),
     uniqueIndex("documents_matter_drive_uq").on(t.matterId, t.driveFileId),
   ],
 );

@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  batchProgress,
   documentTypeForIntent,
+  newId,
   producesDocument,
   statusAfterDraftGenerated,
 } from "@iusia/domain";
@@ -88,6 +90,15 @@ const OfficialTemplateManifest = z.object({
   })),
 });
 
+/**
+ * Archivos que se suben a la vez al proveedor de almacenamiento.
+ *
+ * Coincide con el techo del consumidor de la cola: el cuello de botella es el mismo
+ * —conexiones simultáneas al proveedor— y tener dos números distintos sólo invitaría a
+ * que uno de los dos se quedara sin justificación.
+ */
+const UPLOAD_CONCURRENCY = 6;
+
 function initialIngestionStatus(mime: string): "NOT_INDEXABLE" | "PROCESSING" {
   return isIndexableMimeType(mime) ? "PROCESSING" : "NOT_INDEXABLE";
 }
@@ -144,76 +155,101 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
 
   const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
 
-  const results: Array<{
+  // Identidad del LOTE. No es una transacción: no se confirma ni se revierte en
+  // bloque, y el fallo de un archivo no toca a los demás. Sólo correlaciona qué
+  // archivos entraron juntos, para poder decir «12 de 15 preparados».
+  const uploadBatchId = newId("uploadBatch");
+  const enqueuedAt = new Date().toISOString();
+
+  type UploadResult = {
     document_id: string;
     name: string;
     status: string;
     deduplicated?: boolean;
-  }> = [];
-  for (const file of files) {
-    if (file.size > MAX_FILE_BYTES) {
-      results.push({ document_id: "", name: file.name, status: "UPLOAD_FAILED" });
-      continue;
-    }
-    const mime = file.type || "application/octet-stream";
-    if (!ACCEPTED_MIME.has(mime)) {
-      results.push({ document_id: "", name: file.name, status: "UNSUPPORTED" });
-      continue;
-    }
-    try {
-      const bytes = await file.arrayBuffer();
-      const ingestionStatus = initialIngestionStatus(mime);
+  };
+  const results: UploadResult[] = new Array(files.length);
 
-      // Un REINTENTO TÉCNICO no incorpora el documento dos veces. Se compara el
-      // binario por checksum contra lo que el expediente ya tiene: si es el mismo
-      // archivo, se devuelve el documento existente en vez de subirlo otra vez.
-      // Volver a aportar el mismo archivo a propósito es una acción distinta —crear
-      // una versión nueva— y tiene su propia ruta.
-      const fileChecksum = await checksum(bytes);
-      const alreadyThere = await documents.findByChecksum(organizationId, matterId, fileChecksum);
-      if (alreadyThere) {
-        results.push({
-          document_id: alreadyThere.documentId,
-          name: alreadyThere.filename,
-          status: alreadyThere.ingestionStatus,
-          deduplicated: true,
-        });
-        continue;
-      }
+  /*
+    Los archivos se suben EN PARALELO acotado.
 
-      const meta = await drive.uploadFile({
-        name: file.name,
-        parentId: uploadedFolder,
-        mimeType: mime,
-        content: bytes,
-      });
-      const documentId = await documents.link({
-        organizationId,
-        matterId,
-        driveFileId: meta.provider_file_id,
-        name: meta.name,
-        mimeType: mime,
-        classification: "FUENTE",
-        linkedBy: userId,
-        sizeBytes: file.size,
-        checksum: fileChecksum,
-        ingestionStatus,
-      });
-      if (ingestionStatus === "PROCESSING") {
-        await c.env.DOCUMENT_INGESTION.send({
-          organization_id: organizationId,
-          matter_id: matterId,
-          document_id: documentId,
-          drive_file_id: meta.provider_file_id,
-          reason: "LINKED",
-          enqueued_at: new Date().toISOString(),
-        });
+    Antes era `for (const file of files) { await drive.uploadFile(…) }`: la petición
+    HTTP quedaba retenida la suma de las subidas, y con 15 archivos el abogado esperaba
+    quince veces lo que tarda uno. Ésta es la espera que él sufre de verdad —la cola
+    trabaja después, en segundo plano—, así que era la serialización más cara de las dos.
+
+    El techo evita abrir quince conexiones al proveedor a la vez. Cada archivo resuelve
+    su propio resultado y su propio fallo: uno que reviente no cancela el lote.
+  */
+  await mapWithConcurrency(
+    files.map((file, index) => ({ file, index })),
+    UPLOAD_CONCURRENCY,
+    async ({ file, index }) => {
+      if (file.size > MAX_FILE_BYTES) {
+        results[index] = { document_id: "", name: file.name, status: "UPLOAD_FAILED" };
+        return;
       }
-      results.push({ document_id: documentId, name: meta.name, status: ingestionStatus });
-    } catch {
-      results.push({ document_id: "", name: file.name, status: "UPLOAD_FAILED" });
-    }
-  }
+      const mime = file.type || "application/octet-stream";
+      if (!ACCEPTED_MIME.has(mime)) {
+        results[index] = { document_id: "", name: file.name, status: "UNSUPPORTED" };
+        return;
+      }
+      try {
+        const bytes = await file.arrayBuffer();
+        const ingestionStatus = initialIngestionStatus(mime);
+
+        // Un REINTENTO TÉCNICO no incorpora el documento dos veces. Se compara el
+        // binario por checksum contra lo que el expediente ya tiene: si es el mismo
+        // archivo, se devuelve el documento existente en vez de subirlo otra vez.
+        // Volver a aportar el mismo archivo a propósito es una acción distinta —crear
+        // una versión nueva— y tiene su propia ruta.
+        const fileChecksum = await checksum(bytes);
+        const alreadyThere = await documents.findByChecksum(organizationId, matterId, fileChecksum);
+        if (alreadyThere) {
+          results[index] = {
+            document_id: alreadyThere.documentId,
+            name: alreadyThere.filename,
+            status: alreadyThere.ingestionStatus,
+            deduplicated: true,
+          };
+          return;
+        }
+
+        const meta = await drive.uploadFile({
+          name: file.name,
+          parentId: uploadedFolder,
+          mimeType: mime,
+          content: bytes,
+        });
+        const documentId = await documents.link({
+          organizationId,
+          matterId,
+          driveFileId: meta.provider_file_id,
+          name: meta.name,
+          mimeType: mime,
+          classification: "FUENTE",
+          linkedBy: userId,
+          sizeBytes: file.size,
+          checksum: fileChecksum,
+          ingestionStatus,
+          uploadBatchId,
+          ingestionEnqueuedAt: ingestionStatus === "PROCESSING" ? enqueuedAt : null,
+        });
+        if (ingestionStatus === "PROCESSING") {
+          await c.env.DOCUMENT_INGESTION.send({
+            organization_id: organizationId,
+            matter_id: matterId,
+            document_id: documentId,
+            drive_file_id: meta.provider_file_id,
+            reason: "LINKED",
+            enqueued_at: enqueuedAt,
+          });
+        }
+        results[index] = { document_id: documentId, name: meta.name, status: ingestionStatus };
+      } catch {
+        results[index] = { document_id: "", name: file.name, status: "UPLOAD_FAILED" };
+      }
+    },
+  );
 
   await audit.record({
     organizationId,
@@ -225,7 +261,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
     detail: { count: results.length, uploaded_folder: uploadedFolder },
   });
 
-  return c.json({ uploaded: results }, 201);
+  return c.json({ uploaded: results, batch_id: uploadBatchId }, 201);
 });
 
 /**
@@ -1057,4 +1093,99 @@ documentWorkspaceRoutes.post("/matters/:matterId/tasks/:taskId/document", async 
     }
     throw error;
   }
+});
+
+/**
+ * Reintenta la ingestión de UN documento fallido.
+ *
+ * Reintenta ese archivo y sólo ese: los otros catorce de un lote de quince no se
+ * vuelven a tocar. Es idempotente —mismo `document_id`, misma versión, mismo binario
+ * en el proveedor—, así que reescribe el mismo espejo en R2 y reenvía el mismo item al
+ * índice con la misma clave, sin duplicar nada.
+ */
+documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", async (c) => {
+  const { documents, authz, audit } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const documentId = c.req.param("documentId");
+
+  await authz.authorizeMatter(organizationId, userId, matterId, "document:link");
+
+  const doc = await documents.findById(organizationId, documentId);
+  if (!doc || doc.matterId !== matterId) {
+    throw new IusiaError("NOT_FOUND", "Documento no encontrado en este expediente");
+  }
+  if (doc.ingestionStatus !== "ERROR") {
+    throw new IusiaError(
+      "CONFLICT",
+      "Este documento no está en error, así que no hay nada que reintentar",
+      { code: "NOT_RETRYABLE", ingestion_status: doc.ingestionStatus },
+    );
+  }
+  if (!doc.driveFileId) {
+    throw new IusiaError("CONFLICT", "El documento no tiene archivo asociado", {
+      code: "NO_SOURCE_FILE",
+    });
+  }
+
+  // La transición a PROCESSING es la que autoriza el reencolado: si otra pestaña ya lo
+  // reintentó, ésta no encuentra el documento en ERROR y no encola un segundo mensaje.
+  const claimed = await documents.markIngestionRetrying(organizationId, documentId);
+  if (!claimed) {
+    throw new IusiaError("CONFLICT", "El documento ya se está reprocesando", {
+      code: "ALREADY_RETRYING",
+    });
+  }
+
+  await c.env.DOCUMENT_INGESTION.send({
+    organization_id: organizationId,
+    matter_id: matterId,
+    document_id: documentId,
+    drive_file_id: doc.driveFileId,
+    reason: "RETRY",
+    enqueued_at: new Date().toISOString(),
+  });
+
+  await audit.record({
+    organizationId,
+    matterId,
+    actorUserId: userId,
+    action: "document.ingestion.retry",
+    resourceType: "document",
+    resourceId: documentId,
+    outcome: "SUCCESS",
+    detail: { attempts: doc.ingestionAttempts ?? 0 },
+  });
+
+  return c.json({ document_id: documentId, ingestion_status: "PROCESSING" });
+});
+
+/**
+ * Progreso agregado de un lote de carga.
+ *
+ * Es lo que permite decir «12 de 15 documentos preparados» sin que el cliente sondee
+ * quince veces por separado ni tenga que recargar el expediente entero.
+ */
+documentWorkspaceRoutes.get("/matters/:matterId/uploads/:batchId", async (c) => {
+  const { documents, authz } = c.get("ctx");
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const batchId = c.req.param("batchId");
+
+  await authz.authorizeMatter(organizationId, userId, matterId, "document:read");
+
+  const docs = (await documents.listByBatch(organizationId, batchId)).filter(
+    (d) => d.matterId === matterId,
+  );
+  const items = docs.map((d) => ({
+    document_id: d.id,
+    name: d.name,
+    ingestion_status: d.ingestionStatus,
+  }));
+
+  return c.json({
+    batch_id: batchId,
+    ...batchProgress(items.map((i) => i.ingestion_status)),
+    documents: items,
+  });
 });

@@ -20,6 +20,65 @@ import { DriveConnectionError, OrganizationStorageResolver } from "./drive-crede
 export interface IngestionOutcome {
   status: "INDEXED" | "STORAGE_NOT_CONFIGURED" | "SKIPPED" | "ERROR";
   detail?: string;
+  /** Duraciones por etapa, en ms. Presentes sólo cuando la ingestión completó. */
+  timings?: StageTimings;
+}
+
+/**
+ * Cotas de las dependencias externas del pipeline.
+ *
+ * Ninguna espera puede ser ilimitada: una llamada a AI Search sin cota dejó 213,5 s
+ * muertos en una orquestación real. La descarga y la conversión tenían el mismo agujero
+ * —un PDF grande o un proveedor lento colgaban al consumidor sin techo—, con el
+ * agravante de que ocupan un hueco de concurrencia mientras tanto y frenan al lote
+ * entero.
+ *
+ * Un vencimiento NO se convierte en éxito vacío: se clasifica como fallo y el mensaje
+ * se reintenta. Marcar indexado un documento que no se pudo leer es peor que fallar.
+ */
+export const DOWNLOAD_DEADLINE_MS = 60_000;
+export const NORMALIZE_DEADLINE_MS = 120_000;
+
+export type StageTimings = Record<string, number>;
+
+export class IngestionTimeoutError extends Error {
+  constructor(readonly stage: string, readonly timeoutMs: number) {
+    super(`La etapa ${stage} superó ${timeoutMs} ms`);
+    this.name = "IngestionTimeoutError";
+  }
+}
+
+async function withDeadline<T>(promise: Promise<T>, timeoutMs: number, stage: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_r, reject) => {
+        timer = setTimeout(() => reject(new IngestionTimeoutError(stage, timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** Cronómetro por etapa: cada `mark` cierra el tramo abierto desde el anterior. */
+export class StageClock {
+  readonly timings: StageTimings = {};
+  private readonly startedAt = Date.now();
+  private last = Date.now();
+
+  mark(stage: string): void {
+    const now = Date.now();
+    this.timings[stage] = now - this.last;
+    this.last = now;
+  }
+
+  finish(): StageTimings {
+    this.timings.finalize_ms = Date.now() - this.last;
+    this.timings.total_ms = Date.now() - this.startedAt;
+    return this.timings;
+  }
 }
 
 export class IngestionService {
@@ -61,10 +120,25 @@ export class IngestionService {
     }
 
     let stage: IngestionStage = "DRIVE_DOWNLOAD";
+    // Reloj por etapa. Sin esto, la única evidencia era `indexed_at` —cuándo terminó—,
+    // así que no se podía saber si los segundos se iban en la descarga, en la
+    // conversión o en el índice. «Optimizar la ingestión» era adivinar.
+    const clock = new StageClock();
+    await documents.markIngestionStarted(message.organization_id, message.document_id);
     try {
-      const bytes = await storage.download(message.drive_file_id);
+      const bytes = await withDeadline(
+        storage.download(message.drive_file_id),
+        DOWNLOAD_DEADLINE_MS,
+        "DRIVE_DOWNLOAD",
+      );
+      clock.mark("download_ms");
       stage = "NORMALIZE";
-      const text = await normalizeToText(bytes, doc.mimeType, doc.name, this.env.AI);
+      const text = await withDeadline(
+        normalizeToText(bytes, doc.mimeType, doc.name, this.env.AI),
+        NORMALIZE_DEADLINE_MS,
+        "NORMALIZE",
+      );
+      clock.mark("normalize_ms");
 
       const key = documentMirrorKey(
         message.organization_id,
@@ -85,6 +159,7 @@ export class IngestionService {
           source_mime_type: doc.mimeType,
         },
       });
+      clock.mark("r2_ms");
 
       stage = "AI_SEARCH_UPLOAD";
       await uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
@@ -95,6 +170,7 @@ export class IngestionService {
         is_current: "true",
         is_active: "true",
       });
+      clock.mark("ai_search_ms");
 
       stage = "D1_MARK_INDEXED";
       await documents.markIndexed(
@@ -102,8 +178,9 @@ export class IngestionService {
         message.document_id,
         key,
         await sha256Hex(text),
+        clock.finish(),
       );
-      return { status: "INDEXED", detail: key };
+      return { status: "INDEXED", detail: key, timings: clock.timings };
     } catch (error) {
       if (error instanceof StorageNotConfiguredError) {
         return { status: "STORAGE_NOT_CONFIGURED" };

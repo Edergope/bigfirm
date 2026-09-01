@@ -23,8 +23,12 @@ import { IngestionService } from "./services/ingestion.js";
 export async function handleIngestionQueue(
   batch: MessageBatch<unknown>,
   env: Env,
+  /**
+   * Costura para medir el reparto con dependencias controladas. En producción se
+   * resuelve del entorno; ningún llamador real la pasa.
+   */
+  service: Pick<IngestionService, "ingest"> = IngestionService.forEnv(env),
 ): Promise<void> {
-  const service = IngestionService.forEnv(env);
   await mapWithConcurrency(batch.messages, INGESTION_CONCURRENCY, async (message) => {
     const parsed = DocumentIngestionMessage.safeParse(message.body);
     if (!parsed.success) {

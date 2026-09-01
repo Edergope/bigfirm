@@ -9,6 +9,8 @@ export const ID_PREFIXES = {
   user: "usr",
   matter: "mtr",
   document: "doc",
+  /** Lote de carga documental. Correlación, no transacción. */
+  uploadBatch: "ubt",
   documentVersion: "dvr",
   execution: "exe",
   event: "evt",

@@ -39,6 +39,8 @@ import {
 import {
   DOCUMENT_INTELLIGENCE_TERMS,
   TASK_ACTION_LABEL,
+  batchProgress,
+  batchProgressLabel,
   TASK_GROUPS,
   TASK_GROUP_LABEL,
   documentIntelligenceState,
@@ -478,12 +480,23 @@ function Documentos({ data }: { data: MatterDetail }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [generating, setGenerating] = useState(false);
 
+  const refreshDocuments = () => {
+    void queryClient.invalidateQueries({ queryKey: ["workspace", matterId] });
+    void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
+  };
+
   const upload = useMutation({
     mutationFn: (files: File[]) => api.uploadDocuments(matterId, files),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workspace", matterId] });
-      void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
-    },
+    onSuccess: refreshDocuments,
+  });
+
+  // Reintenta UN documento: los otros catorce de un lote de quince no se tocan.
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const retry = useMutation({
+    mutationFn: (documentId: string) => api.retryDocumentIngestion(matterId, documentId),
+    onMutate: (documentId: string) => setRetryingId(documentId),
+    onSuccess: refreshDocuments,
+    onSettled: () => setRetryingId(null),
   });
 
   const uploaded = workspace.data?.uploaded ?? [];
@@ -520,6 +533,8 @@ function Documentos({ data }: { data: MatterDetail }) {
             {upload.isPending ? "Subiendo…" : "Adjuntar documentos"}
           </button>
         }
+        onRetry={(documentId) => retry.mutate(documentId)}
+        retryingId={retryingId}
       />
 
       <DocFolder
@@ -560,6 +575,8 @@ function DocFolder({
   loading,
   empty,
   action,
+  onRetry,
+  retryingId,
 }: {
   title: string;
   subtitle: string;
@@ -567,9 +584,32 @@ function DocFolder({
   loading: boolean;
   empty: string;
   action: ReactNode;
+  /** Reintenta UN documento. Ausente en la carpeta de generados. */
+  onRetry?: (documentId: string) => void;
+  retryingId?: string | null;
 }) {
+  // Progreso agregado: con quince archivos el abogado necesita saber cuánto falta de
+  // un vistazo, no contar quince chips uno por uno.
+  const progress = batchProgress(docs.map((d) => d.ingestion_status));
   return (
-    <Module title={title} eyebrow={subtitle} padded={false} action={action}>
+    <Module
+      title={title}
+      eyebrow={docs.length > 0 ? batchProgressLabel(progress) : subtitle}
+      padded={false}
+      action={action}
+    >
+      {progress.processing > 0 ? (
+        <div className="px-5 pb-3">
+          <span className="block h-1 overflow-hidden rounded-full bg-iusia-mist/25">
+            <span
+              className="block h-full rounded-full bg-iusia-intel transition-[width] duration-500"
+              style={{
+                width: `${Math.round(((progress.indexed + progress.notIndexable) / progress.total) * 100)}%`,
+              }}
+            />
+          </span>
+        </div>
+      ) : null}
       {loading ? (
         <div className="px-5 pb-5">
           <Skeleton className="h-12" />
@@ -607,6 +647,16 @@ function DocFolder({
                   </span>
                 </span>
                 <StatusChip label={st.label} tone={st.tone} title={st.hint} />
+                {onRetry && d.ingestion_status === "ERROR" ? (
+                  <button
+                    type="button"
+                    onClick={() => onRetry(d.id)}
+                    disabled={retryingId === d.id}
+                    className="shrink-0 rounded-[8px] px-2 py-1 text-[12.5px] font-medium text-iusia-action transition-colors hover:bg-iusia-action/8 disabled:opacity-50"
+                  >
+                    {retryingId === d.id ? "Reintentando…" : "Reintentar"}
+                  </button>
+                ) : null}
               </li>
             );
           })}

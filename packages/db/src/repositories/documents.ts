@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { newId } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { documents, documentVersions } from "../schema/iusia.js";
@@ -39,6 +39,10 @@ export class DocumentRepository {
     sizeBytes?: number | null;
     checksum?: string | null;
     ingestionStatus?: string;
+    /** Lote de carga al que pertenece. Correlación, nunca transacción. */
+    uploadBatchId?: string | null;
+    /** Momento en que el mensaje entró a la cola. Abre la medición de espera. */
+    ingestionEnqueuedAt?: string | null;
     /** Provenance del entregable cuando el documento lo generó IUSIA. */
     provenance?: DocumentProvenance | null;
   }): Promise<string> {
@@ -66,6 +70,8 @@ export class DocumentRepository {
         currentVersion: 1,
         sizeBytes: input.sizeBytes ?? null,
         ingestionStatus: input.ingestionStatus ?? "FILE_STORED",
+        uploadBatchId: input.uploadBatchId ?? null,
+        ingestionEnqueuedAt: input.ingestionEnqueuedAt ?? null,
         contentSource: input.provenance?.contentSource ?? null,
         generatedFromTemplateId: input.provenance?.templateId ?? null,
         generatedFromTemplateVersion: input.provenance?.templateVersion ?? null,
@@ -284,11 +290,80 @@ export class DocumentRepository {
   }
 
   /** Marca un documento como indexado tras escribir su espejo normalizado en R2. */
+  /**
+   * Marca el inicio del trabajo real de ingestión.
+   *
+   * Cierra la espera en cola: `ingestion_enqueued_at` la abre y esto la cierra, así que
+   * el tiempo en cola deja de estar mezclado con el tiempo de proceso. También cuenta
+   * el intento, lo que distingue un fallo aislado de uno persistente.
+   */
+  /**
+   * Documentos de un lote de carga, con su estado de ingestión.
+   *
+   * Alimenta el progreso agregado —«12 de 15 preparados»— sin traer el expediente
+   * entero: un lote se consulta mientras se está cargando, y en ese momento importa
+   * cuánto falta, no qué más hay en el expediente.
+   */
+  async listByBatch(organizationId: string, uploadBatchId: string) {
+    return this.db
+      .select()
+      .from(documents)
+      .where(
+        and(
+          eq(documents.organizationId, organizationId),
+          eq(documents.uploadBatchId, uploadBatchId),
+          isNull(documents.retiredAt),
+        ),
+      )
+      .orderBy(desc(documents.createdAt));
+  }
+
+  /**
+   * Devuelve un documento fallido al estado de proceso para reintentarlo.
+   *
+   * Idempotente por diseño: NO crea versión, NO toca el binario en el proveedor y NO
+   * cambia `drive_file_id`, así que el reintento reescribe el mismo espejo en R2 y
+   * reenvía el mismo item al índice con la misma clave. Es el MISMO documento
+   * intentándolo otra vez, no uno nuevo.
+   *
+   * Sólo actúa sobre documentos en ERROR: reencolar uno que ya está indexado o en
+   * curso duplicaría trabajo sin motivo.
+   */
+  async markIngestionRetrying(organizationId: string, documentId: string): Promise<boolean> {
+    const updated = await this.db
+      .update(documents)
+      .set({
+        ingestionStatus: "PROCESSING",
+        ingestionEnqueuedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(documents.organizationId, organizationId),
+          eq(documents.id, documentId),
+          eq(documents.ingestionStatus, "ERROR"),
+        ),
+      )
+      .returning({ id: documents.id });
+    return updated.length > 0;
+  }
+
+  async markIngestionStarted(organizationId: string, documentId: string) {
+    await this.db
+      .update(documents)
+      .set({
+        ingestionStartedAt: new Date().toISOString(),
+        ingestionAttempts: sql`${documents.ingestionAttempts} + 1`,
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
   async markIndexed(
     organizationId: string,
     documentId: string,
     r2MirrorKey: string,
     contentHash: string,
+    timings?: Record<string, number>,
   ) {
     const now = new Date().toISOString();
     await this.db
@@ -297,6 +372,7 @@ export class DocumentRepository {
         r2MirrorKey,
         contentHash,
         indexedAt: now,
+        ingestionTimings: timings ? JSON.stringify(timings) : null,
         // `status` es el ciclo de revisión JURÍDICA y no lo mueve un hecho técnico:
         // indexar un documento no significa que un abogado lo haya revisado. Pisarlo
         // aquí era el origen del «En revisión» que confundía a un documento indexado.
