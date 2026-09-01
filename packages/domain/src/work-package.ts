@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   LAWYER_CONTEXT_REF,
+  LEGAL_KNOWLEDGE_REF,
   renderEnvelopeContract,
   type EnvelopeField,
 } from "./execution-envelope.js";
@@ -161,6 +162,8 @@ export const WorkPackage = z.object({
    * envelope y la salida es sólo narrativa, como antes.
    */
   envelope_fields: z.array(z.string()).optional(),
+  /** El servidor habilita citar conocimiento normativo. Ver `LEGAL_KNOWLEDGE_REF`. */
+  legal_knowledge_ref: z.boolean().optional(),
 });
 export type WorkPackage = z.infer<typeof WorkPackage>;
 
@@ -175,6 +178,11 @@ export function authorizedRefsOf(wp: {
   document_excerpts: readonly { ref_id: string }[];
   source_refs: readonly { ref_id: string }[];
   lawyer_provided_context?: string;
+  /**
+   * El SERVIDOR decide si este agente puede citar su conocimiento normativo, a partir
+   * de su `runtime_role`. Nunca lo decide el modelo ni viaja en su salida.
+   */
+  legal_knowledge_ref?: boolean;
 }): string[] {
   const refs: string[] = [];
   if (wp.lawyer_provided_context && wp.lawyer_provided_context.trim().length > 0) {
@@ -182,6 +190,7 @@ export function authorizedRefsOf(wp: {
   }
   for (const d of wp.document_excerpts) refs.push(d.ref_id);
   for (const s of wp.source_refs) refs.push(s.ref_id);
+  if (wp.legal_knowledge_ref === true) refs.push(LEGAL_KNOWLEDGE_REF);
   return [...new Set(refs)];
 }
 

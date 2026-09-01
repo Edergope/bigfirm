@@ -5,6 +5,7 @@ import {
   attemptIdempotencyKey,
   routeModel,
   creditsForCost,
+  allowsLegalKnowledgeRef,
   authorizedRefsOf,
   envelopeFieldsFor,
   extractEnvelope,
@@ -134,7 +135,13 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
       //    autoridades, que es invitarlo a inventarlas— y todo viaja en la MISMA
       //    llamada, sin una segunda pasada de modelo sobre la prosa.
       const envelopeFields = envelopeFieldsFor(def.runtime_role);
-      const dispatched: WorkPackage = { ...workPackage, envelope_fields: [...envelopeFields] };
+      const dispatched: WorkPackage = {
+        ...workPackage,
+        envelope_fields: [...envelopeFields],
+        // Sólo los roles cuyo trabajo ES el conocimiento normativo pueden citarlo, y lo
+        // decide el registry, no el modelo.
+        legal_knowledge_ref: allowsLegalKnowledgeRef(def.runtime_role),
+      };
       const messages = [
         { role: "system" as const, content: UNTRUSTED_SYSTEM_GUARD },
         // El agent.md canónico se inyecta íntegro y sin modificaciones.
@@ -264,6 +271,12 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
           detail: {
             envelope_present: extracted.present,
             envelope_rejected: extracted.rejected,
+            // QUÉ campo falló, no sólo cuántos: sin esto, 12 hechos perdidos eran
+            // indistinguibles de 12 hechos nunca emitidos.
+            envelope_rejected_fields: extracted.rejections
+              .map((r) => `${r.collection}.${r.fields.join("/")}`)
+              .slice(0, 8)
+              .join(" | "),
             ledger_facts: ledgers.facts,
             ledger_authorities: ledgers.authorities,
             projected_tasks: ledgers.tasks,

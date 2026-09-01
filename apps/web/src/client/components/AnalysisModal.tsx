@@ -227,16 +227,25 @@ export function AnalysisModal({
               </button>
             </header>
 
-            <div className="relative flex-1 overflow-y-auto">
-              {/* La red con datos reales: quién trabaja y hacia dónde va el trabajo. */}
-              <OrchestrationNetwork
-                nodes={network.nodes}
-                links={network.links}
-                integrating={network.integrating && !finished}
-                className="w-full"
-              />
+            {/*
+              Reparto vertical: el grafo domina (~75 %) y el progreso ocupa el resto.
+              Antes ambos compartían un único contenedor con scroll, así que al crecer
+              el equipo el grafo empujaba al progreso fuera de vista y aparecía un
+              scroll interno sobre la propia animación. Ahora cada zona tiene su altura
+              y sólo la lista de fases puede desplazarse.
+            */}
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div className="flex min-h-0 flex-[3] items-center justify-center overflow-hidden">
+                {/* La red con datos reales: quién trabaja y hacia dónde va el trabajo. */}
+                <OrchestrationNetwork
+                  nodes={network.nodes}
+                  links={network.links}
+                  integrating={network.integrating && !finished}
+                  className="h-full w-full"
+                />
+              </div>
 
-              <div className="px-6 pb-5">
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
                 {/* Progreso real, no un porcentaje inventado: fases cerradas sobre
                     fases conocidas. */}
                 <div className="mb-4 flex items-center gap-3">
@@ -257,7 +266,12 @@ export function AnalysisModal({
                 {events.isLoading && stages.length === 0 ? (
                   <Skeleton className="h-20 bg-white/5" />
                 ) : (
-                  <ol className="flex flex-col gap-1">
+                  /*
+                    Dos columnas en desktop: la zona baja tiene poca altura y muchas
+                    fases, así que se usa el ancho en vez de crecer hacia abajo. En
+                    viewport estrecho vuelve a una sola columna.
+                  */
+                  <ol className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
                     {stages.map((s, i) => (
                       <StageRow
                         key={s.key}

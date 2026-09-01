@@ -7,6 +7,7 @@ import {
   deriveOutcome,
   stripInternalProvenance,
   sanitizeLegalOutput,
+  stripTelemetrySections,
   projectStrategyGraph,
   resolveEvidenceDocuments,
 } from "@iusia/domain";
@@ -319,11 +320,18 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
           // agentes intercalan al integrar. Esa trazabilidad vive en el ledger y en
           // `text`, que se entrega íntegro para la vista de salida estructurada.
           summary: sanitizeLegalOutput(
-            stripInternalProvenance(deriveConclusionText(text)),
+            stripTelemetrySections(stripInternalProvenance(deriveConclusionText(text))).text,
             agentDisplayNames,
             documentNames,
           ),
-          text,
+          // El cuerpo completo también se presenta saneado: el abogado lo abre desde
+          // "Ver salida estructurada" y allí aparecían los bloques de telemetría.
+          // El original íntegro sigue en R2, que es donde vive la trazabilidad.
+          text: sanitizeLegalOutput(
+            stripTelemetrySections(text).text,
+            agentDisplayNames,
+            documentNames,
+          ),
           provider: stored.provenance?.provider ?? n.provider ?? null,
           model: stored.provenance?.model ?? n.model ?? null,
           produced_at: stored.provenance?.produced_at ?? n.completedAt ?? null,

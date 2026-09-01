@@ -61,15 +61,20 @@ export function OrchestrationNetwork({
   const H = 300;
   const cx = W / 2;
   const cy = H / 2 - 4;
-  const rx = 218;
-  const ry = 96;
+
+  // El lienzo es fijo y el SVG escala al contenedor (`preserveAspectRatio`), así que
+  // caber es cuestión de REPARTIR los nodos, no de hacer crecer el alto. Un solo anillo
+  // con muchos especialistas juntaba las etiquetas hasta hacerlas ilegibles y obligaba
+  // a desplazarse dentro del propio grafo.
+  const ring = ringLayout(nodes.length);
 
   const placed = nodes.map((n, i) => {
-    const angle = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(nodes.length, 1);
+    const r = ring.of(i);
+    const angle = -Math.PI / 2 + ((i - r.offset) * 2 * Math.PI) / r.count + r.rotation;
     return {
       ...n,
-      x: cx + rx * Math.cos(angle),
-      y: cy + ry * Math.sin(angle),
+      x: cx + r.rx * Math.cos(angle),
+      y: cy + r.ry * Math.sin(angle),
       right: Math.cos(angle) > 0.25,
       left: Math.cos(angle) < -0.25,
       vertical: Math.abs(Math.cos(angle)) <= 0.25,
@@ -84,6 +89,9 @@ export function OrchestrationNetwork({
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
+      // Escala al contenedor conservando proporción: el grafo cabe entero sin scroll,
+      // que es el requisito. El alto lo fija la zona del modal, no el número de nodos.
+      preserveAspectRatio="xMidYMid meet"
       className={className}
       role="img"
       aria-label={
@@ -378,4 +386,54 @@ export function wrapLabel(label: string, maxPerLine: number, maxLines = 2): stri
   }
   if (current) lines.push(current);
   return lines.slice(0, maxLines);
+}
+
+/** Un anillo del reparto: cuántos nodos lleva y con qué radios. */
+export interface RingSlot {
+  rx: number;
+  ry: number;
+  /** Nodos en este anillo. */
+  count: number;
+  /** Índice del primer nodo del anillo dentro de la lista completa. */
+  offset: number;
+  /** Giro del anillo, para que las coronas no queden alineadas radialmente. */
+  rotation: number;
+}
+
+/**
+ * Máximo de nodos en la corona exterior antes de abrir una segunda.
+ *
+ * Con el lienzo de 640×300 y etiquetas de dos líneas, siete posiciones es lo último que
+ * se lee sin que los nombres se toquen. Por encima, apiñar es peor que repartir.
+ */
+export const MAX_NODES_PER_RING = 7;
+
+/**
+ * Reparte N nodos en una o dos coronas concéntricas.
+ *
+ * Nunca produce scroll: el lienzo no crece: lo que cambia es la distribución. La corona
+ * interior es más pequeña y va girada media posición para que sus etiquetas caigan
+ * entre las de la exterior en vez de detrás.
+ */
+export function ringLayout(total: number): { rings: RingSlot[]; of: (i: number) => RingSlot } {
+  const outerCount = total <= MAX_NODES_PER_RING ? total : Math.ceil(total / 2);
+  const innerCount = total - outerCount;
+
+  const rings: RingSlot[] = [
+    { rx: 218, ry: 96, count: Math.max(outerCount, 1), offset: 0, rotation: 0 },
+  ];
+  if (innerCount > 0) {
+    rings.push({
+      rx: 122,
+      ry: 54,
+      count: innerCount,
+      offset: outerCount,
+      rotation: Math.PI / Math.max(innerCount, 1),
+    });
+  }
+
+  return {
+    rings,
+    of: (i: number) => (rings[1] && i >= outerCount ? rings[1] : rings[0]!),
+  };
 }

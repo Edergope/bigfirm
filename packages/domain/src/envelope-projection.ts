@@ -1,4 +1,5 @@
 import type { Authority, CanonicalFact } from "./ledgers.js";
+import { LEGAL_KNOWLEDGE_REF } from "./execution-envelope.js";
 import type {
   EnvelopeAuthority,
   EnvelopeFact,
@@ -155,7 +156,16 @@ export function projectEnvelope(input: ProjectionInput): ProjectionResult {
     (a) => a.citation,
     (a, refs) => {
       const { source_refs: _omit, ...canonical } = a;
-      authorities.push(canonical);
+      // DEGRADACIÓN FORZADA POR EL SERVIDOR. Una autoridad que sólo se apoya en el
+      // conocimiento del modelo es una AFIRMACIÓN, no una fuente verificada, y el
+      // modelo no puede declararla vigente por su cuenta. `REQUIRES_CALIBRATION` es el
+      // valor que el schema canónico reserva justamente para lo que exige verificación.
+      // Entra al ledger visible y marcada, en vez de no entrar —que es lo que pasaba— o
+      // de entrar afirmando una vigencia que nadie comprobó.
+      const onlyModelKnowledge = refs.every((r) => r === LEGAL_KNOWLEDGE_REF);
+      authorities.push(
+        onlyModelKnowledge ? { ...canonical, status: "REQUIRES_CALIBRATION" } : canonical,
+      );
       authorityProvenance[canonical.authority_id] = refs;
     },
   );

@@ -43,6 +43,28 @@ export const ENVELOPE_CLOSE = "IUSIA_ENVELOPE_V1>>>";
  */
 export const LAWYER_CONTEXT_REF = "LAWYER_CONTEXT";
 
+/**
+ * Referencia del conocimiento jurídico general del agente investigador.
+ *
+ * PROBLEMA MEDIDO. En exe_20nf6k8tvj3f44se el agente 03 devolvió un envelope válido con
+ * CERO autoridades, y la pestaña «Hechos y fuentes» mostró 7 hechos y 0 fuentes. No fue
+ * un rechazo: no emitió ninguna. La causa es de diseño, y era mía: se le exigía citar
+ * un `source_ref` de `<authorized_refs>`, y esa lista sólo contiene fragmentos de los
+ * documentos del cliente. El Código Civil no está en el expediente del cliente, así que
+ * un investigador honesto no tenía NINGUNA referencia válida que citar y calló.
+ *
+ * DISTINCIÓN QUE SE PRESERVA. Una cita que el modelo recuerda es una AFIRMACIÓN DEL
+ * MODELO, no una fuente verificada. Por eso esta referencia no la convierte en
+ * verdadera: el servidor fuerza `status: REQUIRES_CALIBRATION` en toda autoridad que
+ * sólo se apoye en ella —el propio valor que el schema canónico reserva para lo que
+ * exige verificación— y jamás puede quedar como VERIFIED_CURRENT. Entra al Authority
+ * Ledger visible y marcada, que es más útil y más honesto que no entrar.
+ *
+ * Cuando exista una herramienta real de verificación normativa, ésta acuñará
+ * referencias TOOL_VERIFIED server-side y aquéllas sí podrán ser VERIFIED_CURRENT.
+ */
+export const LEGAL_KNOWLEDGE_REF = "LEGAL_KNOWLEDGE";
+
 // ─────────────────────────────── Contratos ───────────────────────────────
 
 const SourceRefs = z.array(z.string().min(1)).default([]);
@@ -139,6 +161,17 @@ export function envelopeFieldsFor(runtimeRole: string): readonly EnvelopeField[]
   return FIELDS_BY_ROLE[runtimeRole] ?? ["conclusion_brief"];
 }
 
+/**
+ * Roles a los que se ofrece `LEGAL_KNOWLEDGE` como referencia citable.
+ *
+ * Sólo quienes tienen `authorities` entre sus campos: el conocimiento normativo es su
+ * trabajo. A un agente de intake no se le ofrece, porque su cometido es lo que consta
+ * en el expediente, no lo que recuerda.
+ */
+export function allowsLegalKnowledgeRef(runtimeRole: string): boolean {
+  return envelopeFieldsFor(runtimeRole).includes("authorities");
+}
+
 // ─────────────────────── Contrato enviado al agente ───────────────────────
 
 const FIELD_SPEC: Record<EnvelopeField, string[]> = {
@@ -149,12 +182,15 @@ const FIELD_SPEC: Record<EnvelopeField, string[]> = {
     '  "facts": [{',
     '    "fact_id": "string estable y único dentro de esta salida",',
     '    "statement": "string — el hecho, en una afirmación verificable",',
-    '    "certainty": "[F] acreditado | [D] documental | [A] alegado por parte | [I] inferido | [C] contradicho | [U] no verificado | [R] referido por tercero | [X] descartado",',
+    '    "certainty": "[F] | [D] | [A] | [I] | [C] | [U] | [R] | [X]",',
     '    "source_class": "Class A | Class B | Class C | Class D | Class E | Class F",',
     '    "primary_source": "string — de dónde sale el hecho",',
     '    "numbers": [{ "raw_text": "string", "value": number, "unit": "string" }],',
     '    "source_refs": ["ref_id de <authorized_refs>"]',
     "  }],",
+    "  // certainty: [F] acreditado · [D] documental · [A] alegado · [I] inferido ·",
+    "  //           [C] contradicho · [U] no verificado · [R] referido · [X] descartado.",
+    "  // Escribe SÓLO el código entre corchetes, sin la glosa.",
   ],
   authorities: [
     '  "authorities": [{',
@@ -241,11 +277,20 @@ export function renderEnvelopeContract(args: {
     lines.push("- (ninguna: no cites fuentes en source_refs)");
   } else {
     for (const ref of args.authorizedRefs) {
-      lines.push(
-        ref === LAWYER_CONTEXT_REF
-          ? `- ${LAWYER_CONTEXT_REF} :: contexto y hechos declarados por el abogado responsable (no es prueba documental)`
-          : `- ${ref}`,
-      );
+      if (ref === LAWYER_CONTEXT_REF) {
+        lines.push(
+          `- ${LAWYER_CONTEXT_REF} :: contexto y hechos declarados por el abogado responsable (no es prueba documental)`,
+        );
+      } else if (ref === LEGAL_KNOWLEDGE_REF) {
+        lines.push(
+          `- ${LEGAL_KNOWLEDGE_REF} :: tu conocimiento normativo y jurisprudencial general.`,
+          "  Úsala SÓLO en `authorities`, y sólo cuando puedas dar la cita completa y exacta.",
+          "  El servidor marcará esas autoridades como REQUIERE VERIFICACIÓN: eso es correcto y",
+          "  esperado. No la uses para hechos del expediente ni inventes una cita para poder citarla.",
+        );
+      } else {
+        lines.push(`- ${ref}`);
+      }
     }
   }
   lines.push("</authorized_refs>");
@@ -255,12 +300,83 @@ export function renderEnvelopeContract(args: {
 
 // ─────────────────────────── Lectura de la salida ───────────────────────────
 
+export interface EnvelopeRejection {
+  /** Colección donde estaba el elemento: facts, authorities, risks o tasks. */
+  collection: EnvelopeField;
+  /** Campos que fallaron la validación, para saber QUÉ corregir. */
+  fields: string[];
+}
+
 export interface ExtractedEnvelope {
   /** El bloque venía y era JSON parseable con la versión esperada. */
   present: boolean;
   envelope: StructuredExecutionEnvelope | null;
   /** Elementos presentes que no cumplieron su contrato canónico. Nunca se reparan. */
   rejected: number;
+  /**
+   * Por qué se rechazó cada uno.
+   *
+   * En la ejecución exe_20nf6k8tvj3f44se el agente de intake emitió 12 hechos y los 12
+   * se perdieron. El sistema sólo registraba el número, así que no había forma de saber
+   * si el problema era el modelo, el contrato o el schema. Ahora se registra el campo.
+   */
+  rejections: EnvelopeRejection[];
+}
+
+/**
+ * Normaliza la NOTACIÓN de los enums antes de validar.
+ *
+ * Esto no es reparar contenido y la distinción importa: `"[F] acreditado"` y `"[F]"`
+ * son la misma certeza escrita de dos formas, y `"Class A"` y `"A"` la misma clase de
+ * fuente. Rechazar por la forma de escribir un código descarta trabajo jurídico real
+ * por un detalle de transcripción —fue lo que pasó con los 12 hechos del intake—.
+ *
+ * Lo que sigue siendo rechazo duro: un valor que no corresponde a ningún código del
+ * contrato canónico, una afirmación vacía, o una cita inexistente. Nada se inventa y
+ * ningún valor se sustituye por otro distinto: sólo se reconoce el que ya estaba.
+ */
+function normalizeNotation(collection: EnvelopeField, raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const item = { ...(raw as Record<string, unknown>) };
+
+  const upperFirstToken = (v: unknown): unknown =>
+    typeof v === "string" ? v.trim().split(/[\s|,]+/)[0]!.toUpperCase() : v;
+
+  if (collection === "facts") {
+    // "[F] acreditado" | "F" | "f" → "[F]"
+    if (typeof item.certainty === "string") {
+      const m = item.certainty.trim().match(/\[?([A-Za-z])\]?/);
+      if (m) item.certainty = `[${m[1]!.toUpperCase()}]`;
+    }
+    // "A" | "class a" | "Class A — documento original" → "Class A"
+    if (typeof item.source_class === "string") {
+      const m = item.source_class.trim().match(/(?:class\s*)?([A-Fa-f])\b/i);
+      if (m) item.source_class = `Class ${m[1]!.toUpperCase()}`;
+    }
+    // `numbers` es una anotación del hecho, no el hecho: una entrada mal formada se
+    // descarta sin arrastrar consigo la afirmación jurídica, que sí es el trabajo.
+    if (Array.isArray(item.numbers)) {
+      item.numbers = item.numbers.filter(
+        (n) =>
+          n !== null &&
+          typeof n === "object" &&
+          typeof (n as Record<string, unknown>).raw_text === "string" &&
+          typeof (n as Record<string, unknown>).value === "number" &&
+          typeof (n as Record<string, unknown>).unit === "string",
+      );
+    }
+  }
+  if (collection === "authorities") {
+    item.type = upperFirstToken(item.type);
+    item.status = upperFirstToken(item.status);
+  }
+  if (collection === "risks") {
+    item.severity = upperFirstToken(item.severity);
+    item.likelihood = upperFirstToken(item.likelihood);
+  }
+  if (collection === "tasks") item.priority = upperFirstToken(item.priority);
+
+  return item;
 }
 
 /**
@@ -275,30 +391,38 @@ export interface ExtractedEnvelope {
  */
 export function extractEnvelope(text: string): ExtractedEnvelope {
   const raw = envelopeBlock(text);
-  if (raw === null) return { present: false, envelope: null, rejected: 0 };
+  if (raw === null) return absent();
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { present: false, envelope: null, rejected: 0 };
+    return absent();
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { present: false, envelope: null, rejected: 0 };
+    return absent();
   }
   const root = parsed as Record<string, unknown>;
   if (root.envelope_version !== ENVELOPE_VERSION) {
-    return { present: false, envelope: null, rejected: 0 };
+    return absent();
   }
 
   let rejected = 0;
-  const keep = <T>(schema: z.ZodType<T>, value: unknown): T[] => {
+  const rejections: EnvelopeRejection[] = [];
+  const keep = <T>(schema: z.ZodType<T>, collection: EnvelopeField, value: unknown): T[] => {
     if (!Array.isArray(value)) return [];
     const out: T[] = [];
     for (const el of value) {
-      const r = schema.safeParse(el);
-      if (r.success) out.push(r.data);
-      else rejected += 1;
+      const r = schema.safeParse(normalizeNotation(collection, el));
+      if (r.success) {
+        out.push(r.data);
+        continue;
+      }
+      rejected += 1;
+      rejections.push({
+        collection,
+        fields: [...new Set(r.error.issues.map((i) => i.path.join(".") || "(raíz)"))],
+      });
     }
     return out;
   };
@@ -311,14 +435,15 @@ export function extractEnvelope(text: string): ExtractedEnvelope {
   // Las validaciones se ejecutan ANTES de construir el resultado: `rejected` sólo es
   // cierto una vez que han corrido las cuatro, y leerlo en medio del literal lo dejaba
   // permanentemente en cero.
-  const facts = keep(EnvelopeFact, root.facts);
-  const authorities = keep(EnvelopeAuthority, root.authorities);
-  const risks = keep(EnvelopeRisk, root.risks);
-  const tasks = keep(EnvelopeTask, root.tasks);
+  const facts = keep(EnvelopeFact, "facts", root.facts);
+  const authorities = keep(EnvelopeAuthority, "authorities", root.authorities);
+  const risks = keep(EnvelopeRisk, "risks", root.risks);
+  const tasks = keep(EnvelopeTask, "tasks", root.tasks);
 
   return {
     present: true,
     rejected,
+    rejections,
     envelope: {
       envelope_version: ENVELOPE_VERSION,
       conclusion_brief: conclusion,
@@ -344,6 +469,10 @@ export function stripEnvelope(text: string): string {
   const after = closeIdx === -1 ? "" : text.slice(closeIdx + ENVELOPE_CLOSE.length);
   // Un fence de markdown que envolviera el bloque queda huérfano al quitarlo.
   return `${before}${after}`.replace(/```(?:json)?\s*```/g, "").trim();
+}
+
+function absent(): ExtractedEnvelope {
+  return { present: false, envelope: null, rejected: 0, rejections: [] };
 }
 
 function envelopeBlock(text: string): string | null {

@@ -5,6 +5,7 @@ import {
   MatterRole,
   findDuplicateCandidate,
   newId,
+  sanitizeLegalOutput,
 } from "@iusia/domain";
 import { z } from "zod";
 import type { AppBindings } from "../context.js";
@@ -157,12 +158,22 @@ mattersRoutes.get("/:matterId", async (c) => {
     audit.listForMatter(organizationId, matterId, 50),
   ]);
 
+  // Los hechos citan su fuente con el identificador interno del documento
+  // («Consta en doc_d4mysy6pspxap6aq#1»). El abogado necesita el nombre del archivo y
+  // el fragmento. El identificador se conserva en la fila; sólo cambia lo que se
+  // presenta.
+  const documentNames = new Map(docs.map((d) => [d.id, d.name]));
+  const presentableFacts = factRows.map((f) => ({
+    ...f,
+    primarySource: sanitizeLegalOutput(f.primarySource ?? "", new Map(), documentNames),
+  }));
+
   return c.json({
     matter,
     members,
     documents: docs,
     executions: execs,
-    facts: factRows,
+    facts: presentableFacts,
     authorities: authorityRows,
     activity,
     access: { via_supervision: decision.viaSupervision, reason: decision.reason },
