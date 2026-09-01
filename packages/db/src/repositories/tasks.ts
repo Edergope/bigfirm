@@ -15,6 +15,9 @@ export interface CreateTaskInput {
   deadlineSource?: string | null;
   assignedTo?: string | null;
   createdBy: string;
+  actionType?: string | null;
+  documentIntent?: string | null;
+  sourceExecutionId?: string | null;
 }
 
 export class TaskRepository {
@@ -36,6 +39,9 @@ export class TaskRepository {
       deadlineSource: input.deadlineSource ?? null,
       assignedTo: input.assignedTo ?? null,
       createdBy: input.createdBy,
+      actionType: input.actionType ?? null,
+      documentIntent: input.documentIntent ?? null,
+      sourceExecutionId: input.sourceExecutionId ?? null,
       createdAt: now,
       updatedAt: now,
     });
@@ -57,6 +63,33 @@ export class TaskRepository {
       .where(and(eq(tasks.organizationId, organizationId), eq(tasks.id, taskId)))
       .limit(1);
     return row ?? null;
+  }
+
+  /**
+   * Vincula el borrador generado y avanza el ciclo de la tarea.
+   *
+   * NO la completa: generar un borrador es trabajo hecho por IUSIA, pero revisarlo,
+   * enviarlo o firmarlo es una decisión del abogado. Cerrar la tarea aquí se la
+   * quitaría sin que nadie la haya tomado.
+   */
+  async attachGeneratedDocument(
+    organizationId: string,
+    taskId: string,
+    input: {
+      generatedDocumentId: string;
+      status: string;
+      documentGenerationExecutionId?: string | null;
+    },
+  ): Promise<void> {
+    await this.db
+      .update(tasks)
+      .set({
+        generatedDocumentId: input.generatedDocumentId,
+        documentGenerationExecutionId: input.documentGenerationExecutionId ?? null,
+        status: input.status,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(tasks.organizationId, organizationId), eq(tasks.id, taskId)));
   }
 
   async setStatus(organizationId: string, taskId: string, status: string) {

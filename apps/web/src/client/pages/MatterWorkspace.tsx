@@ -38,9 +38,15 @@ import {
 } from "lucide-react";
 import {
   DOCUMENT_INTELLIGENCE_TERMS,
+  TASK_ACTION_LABEL,
+  TASK_GROUPS,
+  TASK_GROUP_LABEL,
   documentIntelligenceState,
+  isTaskCompleted,
   matterLoadFailure,
   shouldPollIngestion,
+  taskGroupOf,
+  taskPrimaryAction,
   type RiskLevel,
 } from "@iusia/domain";
 import {
@@ -948,189 +954,271 @@ function Tareas({ matterId }: { matterId: string }) {
   const tasks = useQuery({ queryKey: ["tasks", matterId], queryFn: () => api.listTasks(matterId) });
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<"TASK" | "PROCEDURAL_DEADLINE">("TASK");
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["tasks", matterId] });
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["tasks", matterId] });
+    void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
+  };
   const create = useMutation({
     mutationFn: () => api.createTask(matterId, { title, kind }),
     onSuccess: () => {
       setTitle("");
-      void invalidate();
+      invalidate();
     },
   });
   const setStatus = useMutation({
     mutationFn: (v: { id: string; status: "COMPLETADA" | "PENDIENTE" }) =>
       api.setTaskStatus(matterId, v.id, v.status),
-    onSuccess: () => void invalidate(),
+    onSuccess: () => invalidate(),
+  });
+  // Generar el borrador NO cierra la tarea: la deja lista para revisar.
+  const generate = useMutation({
+    mutationFn: (taskId: string) => api.generateTaskDocument(matterId, taskId),
+    onMutate: (taskId: string) => {
+      setBusyTaskId(taskId);
+      setError(null);
+    },
+    onSuccess: () => invalidate(),
+    onError: (e: unknown) => {
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : "No fue posible generar el borrador. Vuelve a intentarlo.",
+      );
+    },
+    onSettled: () => setBusyTaskId(null),
   });
 
   const all = tasks.data?.tasks ?? [];
-  const open = all
-    .filter((t) => t.status !== "COMPLETADA" && t.status !== "CANCELADA")
-    .sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999"));
-  const done = all.filter((t) => t.status === "COMPLETADA");
+  const byDue = (a: TaskRow_, b: TaskRow_) =>
+    (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999");
+  // Cuatro grupos de lectura, no un tablero: sigue siendo la pestaña del expediente.
+  const groups = TASK_GROUPS.map((group) => ({
+    group,
+    label: TASK_GROUP_LABEL[group],
+    items: all.filter((t) => taskGroupOf(t.status) === group).sort(byDue),
+  })).filter((g) => g.items.length > 0 || g.group === "todo");
+
+  const pendingCount = all.filter((t) => !isTaskCompleted(t.status)).length;
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
-      <Module
-        className="lg:col-span-2"
-        eyebrow={open.length === 0 ? "Nada pendiente" : `${open.length} pendientes`}
-        title="Tareas y términos"
-        padded={false}
+    <Module
+      eyebrow={pendingCount === 0 ? "Nada pendiente" : `${pendingCount} pendientes`}
+      title="Tareas y términos"
+      padded={false}
+    >
+      {/* Compositor de una línea: crear es frecuente, no ceremonial. */}
+      <form
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (title.trim()) create.mutate();
+        }}
+        className="flex items-center gap-2 px-5 pb-3"
       >
-        {/* Compositor de una línea: crear es frecuente, no ceremonial. */}
-        <form
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault();
-            if (title.trim()) create.mutate();
-          }}
-          className="flex items-center gap-2 px-5 pb-3"
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Describe la tarea o el término…"
+          aria-label="Nueva tarea o término"
+          className="h-9 w-0 min-w-0 flex-1 rounded-[10px] text-[13.5px]"
+        />
+        <Select
+          value={kind}
+          onChange={(e) => setKind(e.target.value as typeof kind)}
+          aria-label="Tipo"
+          className="h-9 w-[9.5rem] shrink-0 rounded-[10px] text-[13px]"
         >
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Describe la tarea o el término…"
-            aria-label="Nueva tarea o término"
-            className="h-9 w-0 min-w-0 flex-1 rounded-[10px] text-[13.5px]"
-          />
-          <Select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as typeof kind)}
-            aria-label="Tipo"
-            className="h-9 w-[9.5rem] shrink-0 rounded-[10px] text-[13px]"
-          >
-            <option value="TASK">Tarea</option>
-            <option value="PROCEDURAL_DEADLINE">Término procesal</option>
-          </Select>
-          <Button type="submit" size="sm" disabled={create.isPending || !title.trim()}>
-            {create.isPending ? "Añadiendo…" : "Añadir"}
-          </Button>
-        </form>
+          <option value="TASK">Tarea</option>
+          <option value="PROCEDURAL_DEADLINE">Término procesal</option>
+        </Select>
+        <Button type="submit" size="sm" disabled={create.isPending || !title.trim()}>
+          {create.isPending ? "Añadiendo…" : "Añadir"}
+        </Button>
+      </form>
 
-        {tasks.isLoading ? (
-          <div className="px-5 pb-5">
-            <Skeleton className="h-12" />
-          </div>
-        ) : open.length === 0 ? (
-          <p className="px-5 pb-5 text-[13px] text-iusia-mist-text">
-            No hay nada pendiente en este expediente.
-          </p>
-        ) : (
-          <ul className="divide-y divide-iusia-line/70">
-            {open.map((t) => (
-              <TaskRow
-                key={t.id}
-                task={t}
-                onToggle={() => setStatus.mutate({ id: t.id, status: "COMPLETADA" })}
-                pending={setStatus.isPending}
-              />
-            ))}
-          </ul>
-        )}
-      </Module>
+      {error ? (
+        <p className="mx-5 mb-3 rounded-[10px] border border-iusia-warning/35 bg-iusia-warning/10 px-4 py-2.5 text-[12.5px] leading-relaxed text-iusia-warning-text">
+          {error}
+        </p>
+      ) : null}
 
-      <Module
-        tone="ice"
-        eyebrow={`${done.length} ${done.length === 1 ? "cerrada" : "cerradas"}`}
-        title="Completadas"
-        padded={false}
-      >
-        {done.length === 0 ? (
-          <p className="px-5 pb-5 text-[13px] text-iusia-mist-text">
-            Lo que cierres queda aquí, con su registro.
-          </p>
-        ) : (
-          <ul className="divide-y divide-iusia-line/60">
-            {done.slice(0, 8).map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-3 px-5 py-2.5">
-                <span className="min-w-0 truncate text-[13px] text-iusia-mist-text line-through decoration-iusia-mist/60">
-                  {t.title}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setStatus.mutate({ id: t.id, status: "PENDIENTE" })}
-                  disabled={setStatus.isPending}
-                  className="shrink-0 text-[12px] font-medium text-iusia-action transition-colors hover:underline disabled:opacity-50"
-                >
-                  Reabrir
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Module>
-    </div>
+      {tasks.isLoading ? (
+        <div className="px-5 pb-5">
+          <Skeleton className="h-12" />
+        </div>
+      ) : all.length === 0 ? (
+        <p className="px-5 pb-5 text-[13px] text-iusia-mist-text">
+          No hay nada pendiente en este expediente.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-5 px-5 pb-5">
+          {groups.map((g) => (
+            <section key={g.group}>
+              <h3 className="mb-2 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-iusia-mist-text">
+                {g.label}
+                {g.items.length > 0 ? (
+                  <span className="ml-1.5 font-normal tnum">{g.items.length}</span>
+                ) : null}
+              </h3>
+              {g.items.length === 0 ? (
+                <p className="text-[13px] text-iusia-mist-text">Nada por hacer ahora mismo.</p>
+              ) : (
+                /*
+                  Dos columnas en pantallas anchas: doce tarjetas apiladas obligan a
+                  desplazarse para ver el trabajo del expediente.
+                */
+                <ul className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
+                  {g.items.map((t) => (
+                    <TaskCard
+                      key={t.id}
+                      task={t}
+                      busy={busyTaskId === t.id}
+                      disabled={setStatus.isPending || generate.isPending}
+                      onToggle={() =>
+                        setStatus.mutate({
+                          id: t.id,
+                          status: isTaskCompleted(t.status) ? "PENDIENTE" : "COMPLETADA",
+                        })
+                      }
+                      onGenerate={() => generate.mutate(t.id)}
+                    />
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
+    </Module>
   );
 }
 
 /**
- * Una obligación abierta. El término procesal se distingue de la tarea porque su
- * incumplimiento tiene consecuencia jurídica, y por eso lleva su regla de cómputo a
- * la vista: una fecha sin regla no es un término, es un recordatorio.
+ * Una actuación del expediente.
+ *
+ * Antes era una fila con una casilla y un título: suficiente para una lista de
+ * pendientes, insuficiente para trabajo jurídico. La estrategia de IUSIA propone
+ * actuaciones —«enviar requerimiento de incumplimiento con 30 días de subsanación»— y
+ * redactar ese requerimiento es trabajo que el sistema sabe hacer; sin una acción en la
+ * tarjeta, el abogado tenía que empezarlo desde cero en otra pantalla.
+ *
+ * Se muestra sólo lo esencial y lo que el servidor ya devuelve: qué hay que hacer, de
+ * qué clase es, con qué urgencia, para cuándo, y la acción que corresponde.
  */
-function TaskRow({
+function TaskCard({
   task: t,
+  busy,
+  disabled,
   onToggle,
-  pending,
+  onGenerate,
 }: {
   task: TaskRow_;
+  busy: boolean;
+  disabled: boolean;
   onToggle: () => void;
-  pending: boolean;
+  onGenerate: () => void;
 }) {
   const due = t.dueAt ? new Date(t.dueAt) : null;
   const days = due ? Math.ceil((due.getTime() - Date.now()) / 86_400_000) : null;
   const overdue = days !== null && days < 0;
   const isDeadline = t.kind === "PROCEDURAL_DEADLINE";
+  const completed = isTaskCompleted(t.status);
+  const action = taskPrimaryAction({
+    actionType: t.actionType,
+    generatedDocumentId: t.generatedDocumentId,
+    status: t.status,
+  });
+  const actionLabel =
+    t.actionType && t.actionType in TASK_ACTION_LABEL
+      ? TASK_ACTION_LABEL[t.actionType as keyof typeof TASK_ACTION_LABEL]
+      : null;
 
   return (
-    <li className="group flex items-center gap-3.5 px-5 py-3 transition-colors duration-[var(--motion-fast)] hover:bg-iusia-ice/70">
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={pending}
-        aria-label={`Marcar "${t.title}" como completada`}
-        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-iusia-mist-strong transition-all duration-[var(--motion-fast)] hover:border-iusia-success hover:bg-iusia-success/10 disabled:opacity-50"
-      >
-        <Check
-          size={11}
-          strokeWidth={3}
-          aria-hidden
-          className="text-iusia-success opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-60"
-        />
-      </button>
+    <li className="flex flex-col gap-2.5 rounded-[var(--radius-md)] border border-iusia-line/70 bg-white px-4 py-3.5 transition-colors duration-[var(--motion-fast)] hover:border-iusia-mist-strong/60">
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={disabled}
+          aria-pressed={completed}
+          aria-label={
+            completed ? `Reabrir "${t.title}"` : `Marcar "${t.title}" como completada`
+          }
+          className={
+            "mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-all duration-[var(--motion-fast)] disabled:opacity-50 " +
+            (completed
+              ? "border-iusia-success bg-iusia-success/15"
+              : "border-iusia-mist-strong hover:border-iusia-carbon")
+          }
+        >
+          {/*
+            El verde señala COMPLETADA y nada más. Antes la casilla mostraba un check
+            verde al pasar el cursor, así que una tarea pendiente parecía cerrada.
+          */}
+          <Check
+            size={11}
+            strokeWidth={3}
+            aria-hidden
+            className={completed ? "text-iusia-success" : "text-transparent"}
+          />
+        </button>
 
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] text-iusia-carbon">{t.title}</span>
-        {isDeadline && t.deadlineRule ? (
-          <span className="block truncate text-[12px] text-iusia-mist-text">
-            {t.deadlineRule}
-            {t.deadlineSource ? ` · ${t.deadlineSource}` : ""}
-          </span>
-        ) : null}
-      </span>
-
-      {isDeadline ? <StatusChip label="Término" tone="warning" /> : null}
-
-      {due ? (
-        <span className="shrink-0 text-right">
+        <span className="min-w-0 flex-1">
           <span
             className={
-              "block text-[12.5px] tnum " +
-              (overdue ? "font-medium text-iusia-critical" : "text-iusia-carbon")
+              "block text-[14px] leading-snug " +
+              (completed
+                ? "text-iusia-mist-text line-through decoration-iusia-mist/60"
+                : "text-iusia-carbon")
             }
           >
-            {due.toLocaleDateString("es-CO")}
+            {t.title}
           </span>
-          <span className="block text-[11px] text-iusia-mist-text">
-            {days !== null && days < 0
-              ? `${Math.abs(days)} d de retraso`
-              : days === 0
-                ? "vence hoy"
-                : `en ${days} d`}
-          </span>
+          {t.description ? (
+            <span className="mt-0.5 line-clamp-2 block text-[12.5px] leading-relaxed text-iusia-mist-text">
+              {t.description}
+            </span>
+          ) : null}
+          {isDeadline && t.deadlineRule ? (
+            <span className="mt-1 block text-[12px] text-iusia-mist-text">
+              {t.deadlineRule}
+              {t.deadlineSource ? ` · ${t.deadlineSource}` : ""}
+            </span>
+          ) : null}
         </span>
-      ) : (
-        <span className="shrink-0 text-[12px] text-iusia-mist-text">Sin fecha</span>
-      )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[30px] text-[12px] text-iusia-mist-text">
+        {isDeadline ? <StatusChip label="Término" tone="warning" size="sm" /> : null}
+        {actionLabel ? <StatusChip label={actionLabel} tone="neutral" size="sm" /> : null}
+        <span className={overdue ? "font-medium text-iusia-critical tnum" : "tnum"}>
+          {due
+            ? `${due.toLocaleDateString("es-CO")} · ${
+                days !== null && days < 0
+                  ? `${Math.abs(days)} d de retraso`
+                  : days === 0
+                    ? "vence hoy"
+                    : `en ${days} d`
+              }`
+            : "Sin fecha"}
+        </span>
+      </div>
+
+      {!completed && action.kind !== "OPEN_DETAIL" ? (
+        <div className="pl-[30px]">
+          {action.kind === "GENERATE_DRAFT" ? (
+            <Button size="sm" onClick={onGenerate} disabled={disabled || busy}>
+              {busy ? "Redactando…" : action.label}
+            </Button>
+          ) : (
+            // El resto de acciones aún no tiene destino propio: se nombra lo que
+            // corresponde hacer, sin fingir un botón que no lleva a ninguna parte.
+            <span className="text-[12.5px] font-medium text-iusia-mist-text">{action.label}</span>
+          )}
+        </div>
+      ) : null}
     </li>
   );
 }

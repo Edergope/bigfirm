@@ -521,8 +521,14 @@ export class LegalWorker extends Agent<Env, LegalWorkerState> {
           organizationId: execution.organizationId,
           matterId: execution.matterId,
           title: t.title,
-          description: `${t.description}\n\nPrioridad sugerida: ${t.priority}. Origen: análisis de IUSIA (${execution.id}), fuentes: ${t.source_refs.join(", ")}.`,
+          description: t.description,
           createdBy: author!,
+          actionType: t.action_type,
+          documentIntent: t.document_intent,
+          // Trazabilidad hacia el trabajo que PROPUSO la tarea: permite reconstruir con
+          // qué hechos y qué estrategia se pidió esta actuación, y alimenta el contexto
+          // cuando la tarea genere su borrador.
+          sourceExecutionId: execution.id,
         });
         taskCount += 1;
       }

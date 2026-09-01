@@ -274,6 +274,20 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
+  /**
+   * Genera el borrador de una tarea documental.
+   *
+   * Mismo backend que la generación ad hoc: el abogado no vuelve a escribir el
+   * encargo, porque IUSIA ya conoce el expediente y la estrategia que produjo la tarea.
+   */
+  generateTaskDocument: (matterId: string, taskId: string) =>
+    request<{
+      docx: { name: string; document_id: string };
+      pdf: { name: string; document_id: string };
+      task_status: string;
+      content_source: string;
+    }>(`/api/matters/${matterId}/tasks/${taskId}/document`, { method: "POST" }),
+
   setTaskStatus: (
     matterId: string,
     taskId: string,
@@ -609,6 +623,14 @@ export interface TaskRow {
   dueAt: string | null;
   deadlineRule: string | null;
   deadlineSource: string | null;
+  /** Clase de actuación jurídica. Decide la acción primaria de la tarjeta. */
+  actionType: string | null;
+  /** Documento a producir, sólo en tareas de redacción. */
+  documentIntent: string | null;
+  /** Análisis que propuso la tarea. */
+  sourceExecutionId: string | null;
+  /** Borrador ya generado a partir de la tarea. */
+  generatedDocumentId: string | null;
 }
 
 export interface CreateTaskBody {

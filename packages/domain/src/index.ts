@@ -20,6 +20,7 @@ export * from "./orchestration-view.js";
 export * from "./execution-envelope.js";
 export * from "./envelope-projection.js";
 export * from "./lawyer-narrative.js";
+export * from "./task-action.js";
 export * from "./orchestration-safety.js";
 export * from "./team-plan.js";
 export * from "./errors.js";

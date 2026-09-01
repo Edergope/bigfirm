@@ -21,6 +21,8 @@ export interface DocumentProvenance {
   agentId?: string | null;
   promptSha256?: string | null;
   model?: string | null;
+  /** Tarea del expediente que originó el borrador, si nació de una. */
+  originTaskId?: string | null;
 }
 
 export class DocumentRepository {
@@ -71,6 +73,7 @@ export class DocumentRepository {
         generatedByAgentId: input.provenance?.agentId ?? null,
         generatedPromptSha256: input.provenance?.promptSha256 ?? null,
         generatedModel: input.provenance?.model ?? null,
+      originTaskId: input.provenance?.originTaskId ?? null,
         linkedBy: input.linkedBy,
         createdAt: now,
         updatedAt: now,

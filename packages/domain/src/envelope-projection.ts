@@ -61,6 +61,10 @@ export interface ProjectedTask {
   title: string;
   description: string;
   priority: string;
+  /** Clase de actuación: decide la acción primaria que ofrece la tarjeta. */
+  action_type: string;
+  /** Documento a producir. Sólo presente en tareas de redacción. */
+  document_intent: string | null;
   source_refs: string[];
 }
 
@@ -204,6 +208,10 @@ export function projectEnvelope(input: ProjectionInput): ProjectionResult {
         title: t.title,
         description: t.description,
         priority: t.priority,
+        action_type: t.action_type,
+        // La intención documental sólo tiene sentido si la tarea produce un documento:
+        // conservarla en las demás sería ofrecer una redacción que nadie pidió.
+        document_intent: t.action_type === "DOCUMENT_DRAFT" ? (t.document_intent ?? null) : null,
         source_refs: refs,
       });
     },

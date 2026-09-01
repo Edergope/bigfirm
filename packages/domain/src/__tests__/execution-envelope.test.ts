@@ -224,6 +224,8 @@ describe("proyección al expediente: reglas deterministas", () => {
       title: "Solicitar el contrato marco firmado",
       description: "Pedirlo a la contraparte.",
       priority: "HIGH",
+      action_type: "DOCUMENT_DRAFT",
+      document_intent: "REQUIREMENT",
       source_refs: [LAWYER_CONTEXT_REF],
     };
     const r = projectEnvelope({

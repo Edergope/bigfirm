@@ -116,6 +116,8 @@ export class DocumentGenerationService {
     /** Cuando no hay `values`, IUSIA redacta el contenido con este resolvedor (agente 08). */
     resolveValues?: ValueResolver;
     executionId?: string;
+    /** Tarea del expediente que originó el borrador, cuando nace de una. */
+    originTaskId?: string;
   }): Promise<GenerationResult> {
     const db = createDb(this.env.DB);
     const templatesRepo = new TemplateRepository(db);
@@ -243,6 +245,9 @@ export class DocumentGenerationService {
       agentId: draftProvenance?.agent_id ?? null,
       promptSha256: draftProvenance?.prompt_sha256 ?? null,
       model: draftProvenance?.model ?? null,
+      // Procedencia inversa: la pestaña de documentos puede decir de qué actuación
+      // nació el borrador sin consultar la tabla de tareas.
+      originTaskId: input.originTaskId ?? null,
     };
     const docxDocId = await documentsRepo.link({
       organizationId: input.organizationId,

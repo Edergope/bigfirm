@@ -1,5 +1,10 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import {
+  documentTypeForIntent,
+  producesDocument,
+  statusAfterDraftGenerated,
+} from "@iusia/domain";
 import { IusiaError, documentErrorMessage } from "@iusia/domain";
 import { TemplateRepository, createDb } from "@iusia/db";
 import type { AppBindings } from "../context.js";
@@ -919,4 +924,137 @@ documentWorkspaceRoutes.patch("/admin/templates/:templateId/status", async (c) =
     detail: { status: parsed.data.status },
   });
   return c.json({ ok: true, status: parsed.data.status });
+});
+
+/**
+ * Genera el borrador de una TAREA del expediente.
+ *
+ * Mismo backend que la generación ad hoc: mismo Template Registry, mismo Document
+ * Engine, mismo agente 08. Lo único que cambia es de dónde sale la intención — de la
+ * tarea que el análisis propuso, no de un formulario— y que el resultado queda vinculado
+ * a la tarea en ambos sentidos.
+ *
+ * El abogado no vuelve a escribir el encargo: IUSIA ya conoce el expediente, la
+ * estrategia que produjo la tarea, los hechos y las autoridades validadas.
+ */
+documentWorkspaceRoutes.post("/matters/:matterId/tasks/:taskId/document", async (c) => {
+  const ctx = c.get("ctx");
+  const { matters, authz, audit, tasks } = ctx;
+  const { organizationId, userId } = c.get("session");
+  const matterId = c.req.param("matterId");
+  const taskId = c.req.param("taskId");
+
+  await authz.authorizeMatter(organizationId, userId, matterId, "deliverable:publish");
+  const matter = await matters.findById(organizationId, matterId);
+  if (!matter) throw new IusiaError("NOT_FOUND", "Expediente no encontrado");
+
+  const task = await tasks.findById(organizationId, taskId);
+  if (!task || task.matterId !== matterId) {
+    throw new IusiaError("NOT_FOUND", "Tarea no encontrada en este expediente");
+  }
+  if (!producesDocument(task.actionType)) {
+    throw new IusiaError(
+      "VALIDATION_FAILED",
+      "Esta tarea no consiste en producir un escrito, así que no genera borrador",
+      { code: "TASK_NOT_DOCUMENT_DRAFT", action_type: task.actionType ?? "OTHER" },
+    );
+  }
+
+  // La intención documental decide la plantilla. Sin correspondencia NO se adivina:
+  // un borrador con la plantilla equivocada es peor que ningún borrador.
+  const documentType = documentTypeForIntent(task.documentIntent);
+  if (!documentType) {
+    throw new IusiaError(
+      "CONFLICT",
+      "No hay una plantilla oficial para el tipo de escrito que pide esta tarea. Créala en plantillas o redáctalo manualmente.",
+      { code: "TEMPLATE_NOT_FOUND" },
+    );
+  }
+
+  const service = DocumentGenerationService.forEnv(c.env);
+  const drafter = DocumentDraftService.forEnv(c.env);
+  try {
+    const result = await service.generate({
+      userId,
+      organizationId,
+      matter: { id: matter.id, reference: matter.reference, title: matter.title },
+      documentType,
+      originTaskId: taskId,
+      resolveValues: async (variables) => {
+        const draft = await drafter.draft({
+          ctx,
+          organizationId,
+          matterId,
+          documentType,
+          variables,
+          // El encargo es la propia tarea: título y descripción tal como el equipo las
+          // redactó. No se reenvía el expediente entero; el Case Brief y el análisis ya
+          // aportan el contexto, y la tarea aporta la intención concreta.
+          instructions: `${task.title}\n\n${task.description ?? ""}`.trim(),
+          executionId: task.sourceExecutionId ?? undefined,
+        });
+        return {
+          values: draft.values,
+          provenance: {
+            agent_id: draft.agent_id,
+            provider: draft.provider,
+            model: draft.model,
+            prompt_sha256: draft.prompt_sha256,
+          },
+        };
+      },
+    });
+
+    // Vínculo en ambos sentidos y avance del ciclo de la tarea. Generar NO la cierra:
+    // revisar, enviar o firmar es una decisión del abogado.
+    await tasks.attachGeneratedDocument(organizationId, taskId, {
+      generatedDocumentId: result.docx.document_id,
+      status: statusAfterDraftGenerated(),
+    });
+
+    await audit.record({
+      organizationId,
+      matterId,
+      actorUserId: userId,
+      action: "document.generate",
+      resourceType: "document",
+      resourceId: result.docx.document_id,
+      outcome: "SUCCESS",
+      detail: {
+        origin: "TASK",
+        origin_task_id: taskId,
+        source_execution_id: task.sourceExecutionId ?? "",
+        template_id: result.template_id,
+        template_version: result.template_version,
+        content_source: result.draft ? "AGENT" : "MANUAL",
+        ...(result.draft
+          ? {
+              draft_agent_id: result.draft.agent_id,
+              draft_model: result.draft.model,
+              draft_prompt_sha256: result.draft.prompt_sha256,
+            }
+          : {}),
+      },
+    });
+
+    return c.json({
+      docx: { name: result.docx.name, document_id: result.docx.document_id },
+      pdf: { name: result.pdf.name, document_id: result.pdf.document_id },
+      // La tarea NO queda completada: queda con borrador listo.
+      task_status: statusAfterDraftGenerated(),
+      content_source: result.draft ? "AGENT" : "MANUAL",
+    });
+  } catch (error) {
+    if (error instanceof DocumentGenerationError) {
+      throw new IusiaError("CONFLICT", documentErrorMessage(error.code), { code: error.code });
+    }
+    if (error instanceof DocumentDraftError) {
+      throw new IusiaError("CONFLICT", error.message, { code: error.code });
+    }
+    if (error instanceof DriveConnectionError) {
+      const code = driveErrorToCode(error);
+      throw new IusiaError("CONFLICT", documentErrorMessage(code), { code });
+    }
+    throw error;
+  }
 });

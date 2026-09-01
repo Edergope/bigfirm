@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Authority, CanonicalFact } from "./ledgers.js";
+import { DOCUMENT_INTENTS, TASK_ACTION_TYPES } from "./task-action.js";
 import { RISK_LEVELS } from "./matter.js";
 
 /**
@@ -110,6 +111,14 @@ export const EnvelopeTask = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   priority: TaskPriority,
+  /**
+   * Clase de actuación. Es lo que convierte una tarea en accionable: sin ella la
+   * tarjeta sólo puede ofrecer una casilla, y redactar el requerimiento que la propia
+   * tarea pide quedaba fuera del sistema.
+   */
+  action_type: z.enum(TASK_ACTION_TYPES).default("OTHER"),
+  /** Documento a producir. Sólo se usa cuando `action_type` es DOCUMENT_DRAFT. */
+  document_intent: z.enum(DOCUMENT_INTENTS).optional(),
   source_refs: SourceRefs,
 });
 export type EnvelopeTask = z.infer<typeof EnvelopeTask>;
@@ -218,8 +227,13 @@ const FIELD_SPEC: Record<EnvelopeField, string[]> = {
     '    "title": "string — acción concreta, en imperativo",',
     '    "description": "string — qué hay que hacer y por qué",',
     '    "priority": "LOW | MEDIUM | HIGH | URGENT",',
+    '    "action_type": "DOCUMENT_DRAFT | EVIDENCE_COLLECTION | LEGAL_RESEARCH | LEGAL_ANALYSIS | CLIENT_ACTION | FILING | INTERNAL_REVIEW | OTHER",',
+    '    "document_intent": "sólo si action_type es DOCUMENT_DRAFT: REQUIREMENT | NOTICE | LEGAL_OPINION | CONTRACT | CLAIM | RESPONSE | APPEAL | MEMORANDUM | MINUTES | POWER_OF_ATTORNEY | OTHER",',
     '    "source_refs": ["ref_id de <authorized_refs>"]',
     "  }],",
+    "  // action_type describe QUÉ hay que hacer, y con él IUSIA ofrece la acción",
+    "  // correspondiente. Marca DOCUMENT_DRAFT sólo cuando la actuación consista en",
+    "  // producir un escrito; recoger prueba o gestionar con el cliente NO lo son.",
   ],
 };
 

@@ -141,6 +141,8 @@ export const documents = sqliteTable(
     generatedByAgentId: text("generated_by_agent_id"),
     generatedPromptSha256: text("generated_prompt_sha256"),
     generatedModel: text("generated_model"),
+    /** Tarea del expediente que originó este borrador, si nació de una. */
+    originTaskId: text("origin_task_id"),
     linkedBy: text("linked_by")
       .notNull()
       .references(() => user.id),
@@ -214,12 +216,23 @@ export const tasks = sqliteTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id),
+    /** Clase de actuación jurídica. Decide la acción primaria de la tarjeta. */
+    actionType: text("action_type"),
+    /** Documento a producir, sólo para DOCUMENT_DRAFT. Selecciona la plantilla. */
+    documentIntent: text("document_intent"),
+    /** Análisis que PROPUSO esta tarea. */
+    sourceExecutionId: text("source_execution_id"),
+    /** Borrador ya generado a partir de la tarea. */
+    generatedDocumentId: text("generated_document_id"),
+    /** Ejecución que REDACTÓ el borrador. Distinta de la que propuso la tarea. */
+    documentGenerationExecutionId: text("document_generation_execution_id"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
   (t) => [
     index("tasks_org_matter_idx").on(t.organizationId, t.matterId),
     index("tasks_org_due_idx").on(t.organizationId, t.dueAt),
+    index("tasks_org_matter_status_idx").on(t.organizationId, t.matterId, t.status),
   ],
 );
 
