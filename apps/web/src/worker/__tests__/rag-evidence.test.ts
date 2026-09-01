@@ -139,3 +139,43 @@ describe("collectMatterEvidence (grounding RAG del DAG)", () => {
     expect(rendered).toContain("doc_atlas");
   });
 });
+
+/**
+ * El control de retiro NO vive en el filtro del índice, vive en D1.
+ *
+ * Al quitar `is_active` del pre-filtro (que dejaba la recuperación en cero) hay que
+ * demostrar que el retiro sigue siendo efectivo. Lo es, y de forma más fuerte: el
+ * índice sólo cambia cuando aterriza el reenvío del item, mientras que `documentNames`
+ * sale de `listForMatter`, que filtra `retired_at IS NULL` en el momento de consultar.
+ */
+describe("retiro de documentos aplicado contra D1, no contra el índice", () => {
+  it("descarta un chunk de un documento retirado aunque el índice lo devuelva", async () => {
+    const provider = new FakeRetrievalProvider([
+      chunk({ document_id: "doc_vigente" }),
+      chunk({ document_id: "doc_retirado" }),
+    ]);
+    const excerpts = await collectMatterEvidence({
+      retrieval: provider,
+      organizationId: ORG,
+      matterId: MATTER,
+      objective: OBJECTIVE,
+      // `listForMatter` ya excluyó el retirado: no aparece en el mapa.
+      documentNames: new Map([["doc_vigente", "Contrato vigente.pdf"]]),
+    });
+    expect(excerpts).toHaveLength(1);
+    expect(excerpts[0]?.ref_id.startsWith("doc_vigente")).toBe(true);
+  });
+
+  it("entrega el chunk de un documento activo indexado sin el campo is_active", async () => {
+    const provider = new FakeRetrievalProvider([chunk({ document_id: "doc_antiguo" })]);
+    const excerpts = await collectMatterEvidence({
+      retrieval: provider,
+      organizationId: ORG,
+      matterId: MATTER,
+      objective: OBJECTIVE,
+      documentNames: new Map([["doc_antiguo", "Demanda 2025.pdf"]]),
+    });
+    expect(excerpts).toHaveLength(1);
+    expect(excerpts[0]?.document_name).toBe("Demanda 2025.pdf");
+  });
+});

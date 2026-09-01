@@ -79,7 +79,7 @@ describe("buildMetadataFilter (pre-retrieval)", () => {
       organization_id: ORG_A,
       authorized_matter_ids: [MATTER_A],
     });
-    expect(filter).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] }, is_active: "true" });
+    expect(filter).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] } });
   });
 });
 
@@ -102,7 +102,7 @@ describe("request en formato actual de AI Search", () => {
     // El filtro ACL viaja ANTES del retrieval.
     expect(arg.ai_search_options.retrieval.filters).toEqual({
       organization_id: ORG_A,
-      matter_id: { $in: [MATTER_A] }, is_active: "true",
+      matter_id: { $in: [MATTER_A] },
     });
   });
 });
@@ -116,7 +116,7 @@ describe("refiltro post-retrieval por metadata (aunque el índice fugue)", () =>
       query: "contrato confidencial",
     });
     // El pre-filtro viajó al índice.
-    expect(index.lastFilters).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] }, is_active: "true" });
+    expect(index.lastFilters).toEqual({ organization_id: ORG_A, matter_id: { $in: [MATTER_A] } });
     expect(results).toHaveLength(1);
     expect(results[0]?.document_id).toBe("doc_secretoA");
     expect(results[0]?.matter_id).toBe(MATTER_A);
@@ -166,5 +166,62 @@ describe("binding ausente", () => {
         query: "x",
       }),
     ).toEqual([]);
+  });
+});
+
+/**
+ * Regresión del incidente de recuperación en cero (2026-08-27 → 2026-09-01).
+ *
+ * El filtro pre-retrieval llevaba `is_active: "true"`. La última recuperación con
+ * chunks fue el 2026-08-26T23:11Z y la cláusula entró 78 minutos después; desde
+ * entonces las 7 recuperaciones registradas devolvieron 0 chunks. El análisis se
+ * completaba, los especialistas trabajaban, y el abogado no recibía nada.
+ *
+ * La frontera de seguridad (organización + matter) se mantiene intacta. El control de
+ * retiro vive donde está la autoridad —D1— y se prueba abajo.
+ */
+describe("el pre-filtro no puede excluir el corpus por estado de negocio", () => {
+  it("sólo lleva las dos claves de aislamiento", () => {
+    const filter = buildMetadataFilter({
+      organization_id: ORG_A,
+      authorized_matter_ids: [MATTER_A],
+    });
+    expect(Object.keys(filter).sort()).toEqual(["matter_id", "organization_id"]);
+  });
+
+  it("no filtra por is_active: es una igualdad sobre un campo opcional", () => {
+    // Un documento indexado antes de que el campo existiera no puede satisfacerla
+    // nunca, así que la cláusula excluía en silencio todo el corpus anterior.
+    const filter = buildMetadataFilter({
+      organization_id: ORG_A,
+      authorized_matter_ids: [MATTER_A],
+    });
+    expect(filter).not.toHaveProperty("is_active");
+    expect(filter).not.toHaveProperty("is_current");
+  });
+
+  it("recupera un chunk cuya metadata NO declara is_active", async () => {
+    // Éste es exactamente el corpus indexado antes de fb68d13.
+    const sinCampo = [
+      {
+        score: 0.9,
+        text: "cláusula de terminación anticipada",
+        item: {
+          key: documentMirrorKey(ORG_A, MATTER_A, "doc_antiguo"),
+          metadata: {
+            organization_id: ORG_A,
+            matter_id: MATTER_A,
+            document_id: "doc_antiguo",
+          },
+        },
+      },
+    ];
+    const provider = new AiSearchRetrievalProvider(new LeakyFakeIndex(sinCampo));
+    const results = await provider.search({
+      scope: { organization_id: ORG_A, authorized_matter_ids: [MATTER_A] },
+      query: "terminación",
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.document_id).toBe("doc_antiguo");
   });
 });

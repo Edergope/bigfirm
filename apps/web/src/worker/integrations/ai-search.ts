@@ -98,12 +98,31 @@ export class AiSearchRetrievalProvider implements RetrievalProvider {
   }
 }
 
-/** Filtro de metadata: organización exacta + matter dentro de los autorizados. */
+/**
+ * Filtro de metadata: organización exacta + matter dentro de los autorizados.
+ *
+ * Éstas son las DOS claves que constituyen la frontera de seguridad, y no se tocan:
+ * el índice nunca ve otra firma ni un matter no autorizado, y los chunks se
+ * revalidan además contra su propia metadata al volver.
+ *
+ * NO se filtra aquí por `is_active`. Se hizo, y dejó la recuperación en cero:
+ * la última recuperación con chunks fue el 2026-08-26T23:11Z y la cláusula entró en
+ * el filtro 78 minutos después (fb68d13); desde entonces las 7 recuperaciones
+ * registradas devolvieron 0 chunks, con el mismo `$in` sobre `matter_id` que venía
+ * funcionando durante semanas. La cláusula era además insalvable por diseño: es una
+ * igualdad sobre un campo OPCIONAL que ningún documento indexado antes de ese commit
+ * puede satisfacer, de modo que excluía en silencio todo el corpus previo.
+ *
+ * El retiro NO queda sin control: se aplica después, contra D1, que es la autoridad.
+ * `listForMatter` filtra `retired_at IS NULL` y `collectMatterEvidence` intersecta los
+ * chunks recuperados con ese conjunto, en todas las rutas RAG. Ese control es más
+ * fuerte que el del índice, no más débil: es inmediato, mientras que la metadata del
+ * índice sólo cambia cuando el reenvío del item aterriza.
+ */
 export function buildMetadataFilter(scope: RetrievalScope): MetadataFilter {
   return {
     organization_id: scope.organization_id,
     matter_id: { $in: [...scope.authorized_matter_ids] },
-    is_active: "true",
   };
 }
 

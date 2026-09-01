@@ -568,7 +568,10 @@ export interface ExecutionResult {
   }>;
   evidence: {
     chunk_count: number;
+    /** Documentos RECUPERADOS por el retrieval. Vacío si no se recuperó nada. */
     documents: Array<{ document_id: string; document_name: string }>;
+    /** Documentos ACTIVOS del expediente, se haya recuperado de ellos o no. */
+    matter_document_count: number;
   };
 }
 

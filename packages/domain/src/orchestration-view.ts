@@ -84,6 +84,59 @@ export function deriveOutcome(args: {
   return evidenceChunkCount > 0 ? "COMPLETED" : "INSUFFICIENT_EVIDENCE";
 }
 
+export interface GroundingNotice {
+  /** Etiqueta corta junto al título de la conclusión. */
+  label: string;
+  tone: "success" | "warning";
+  /** Aviso extenso sobre la conclusión. `null` cuando está fundamentada. */
+  detail: string | null;
+}
+
+/**
+ * Fundamentación del análisis ENTREGADO.
+ *
+ * Un análisis terminado se entrega SIEMPRE. La fundamentación es una propiedad que se
+ * declara junto al trabajo, nunca un motivo para ocultarlo.
+ *
+ * Antes no era así y el resultado se contradecía a sí mismo: `INSUFFICIENT_EVIDENCE`
+ * cortaba la pantalla con «Sin evidencia suficiente» y descartaba los outputs, cuando
+ * un bloque más abajo la misma pantalla habría mostrado esa conclusión como válida y
+ * «Basado en hechos informados». En la ejecución exe_xpxvvs1s09x6hp9p los cinco
+ * especialistas produjeron análisis reales sobre los hechos declarados por el abogado
+ * —25.395 caracteres sólo el de intake— y el abogado no recibió ninguno.
+ *
+ * La asimetría lo delataba: sin documentos adjuntos el análisis se entregaba con un
+ * matiz, y con documentos adjuntos que no recuperaron nada se entregaba MENOS. El caso
+ * con más insumos daba menos producto, que es exactamente al revés.
+ *
+ * Que no se recuperara nada teniendo documentos SÍ es una anomalía, y por eso se
+ * nombra de forma específica y accionable en vez de esconderse tras el aviso genérico.
+ */
+export function groundingNotice(args: {
+  documentCount: number;
+  evidenceChunkCount: number;
+}): GroundingNotice {
+  if (args.evidenceChunkCount > 0) {
+    return { label: "Fundamentado en el expediente", tone: "success", detail: null };
+  }
+  if (args.documentCount === 0) {
+    return {
+      label: "Basado en hechos informados",
+      tone: "warning",
+      detail:
+        "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada.",
+    };
+  }
+  const plural = args.documentCount === 1 ? "documento" : "documentos";
+  return {
+    label: "Basado en hechos informados",
+    tone: "warning",
+    detail:
+      `IUSIA no recuperó fragmentos de ${args.documentCount} ${plural} del expediente, así que este análisis se apoya únicamente en los hechos que declaraste. ` +
+      "Revisa el estado de indexación de los documentos antes de usarlo como fundamento.",
+  };
+}
+
 export type StageState = "pending" | "active" | "done" | "failed";
 
 /** Una etapa del progreso, en lenguaje de producto (el cliente le pone copy). */

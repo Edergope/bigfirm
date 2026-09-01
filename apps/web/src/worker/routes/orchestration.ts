@@ -339,7 +339,14 @@ orchestrationRoutes.get("/executions/:rootExecutionId/result", async (c) => {
     status: root.status,
     outcome: deriveOutcome({ rootStatus: root.status, evidenceChunkCount, documentCount: docs.length }),
     outputs,
-    evidence: { chunk_count: evidenceChunkCount, documents: evidenceDocuments },
+    evidence: {
+      chunk_count: evidenceChunkCount,
+      documents: evidenceDocuments,
+      // Documentos ACTIVOS del expediente, distinto de los recuperados: es lo que
+      // permite decir «hay N documentos y no se recuperó ninguno», que es la anomalía
+      // accionable. `documents` sale del retrieval y vale 0 justamente en ese caso.
+      matter_document_count: docs.length,
+    },
     mode: docs.length === 0 ? "TEXT_ONLY" : "DOCUMENT_BACKED",
     // Advertencia humana: un análisis sin soporte documental es válido, pero el
     // abogado debe saber sobre qué base se produjo. Nunca se inventa soporte.

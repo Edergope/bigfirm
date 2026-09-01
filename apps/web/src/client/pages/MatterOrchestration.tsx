@@ -13,6 +13,7 @@ import {
 } from "@iusia/ui";
 import {
   deriveProgressStages,
+  groundingNotice,
   shouldKeepPolling,
   shouldRefreshHistory,
   type ProgressStage,
@@ -523,18 +524,12 @@ function ResultView({
     );
   }
 
-  if (result.outcome === "INSUFFICIENT_EVIDENCE") {
-    return (
-      <Card>
-        <CardHeader title="Resultado del análisis" />
-        <StateBlock
-          kind="not_configured"
-          title="Sin evidencia suficiente en el expediente"
-          hint="IUSIA no recuperó documentos indexados para fundamentar una conclusión. Vincula o sincroniza documentos y vuelve a intentarlo."
-        />
-      </Card>
-    );
-  }
+  // Un análisis terminado NO se suprime por falta de fundamentación documental: el
+  // trabajo de los especialistas se entrega y la fundamentación se declara junto a él.
+  const grounding = groundingNotice({
+    documentCount: result.evidence.matter_document_count,
+    evidenceChunkCount: result.evidence.chunk_count,
+  });
 
   const headline = result.outputs.find((o) => o.node_code === "00") ?? result.outputs[0];
   const specialists = result.outputs.filter((o) => o !== headline);
@@ -545,12 +540,12 @@ function ResultView({
         <CardHeader
           title="Conclusión de IUSIA"
           subtitle={headline ? `${headline.agent_name}` : undefined}
-          action={<StatusChip label={result.evidence.chunk_count > 0 ? "Fundamentado en el expediente" : "Basado en hechos informados"} tone="success" dot />}
+          action={<StatusChip label={grounding.label} tone={grounding.tone} dot />}
         />
         <div className="px-6 py-5">
-          {result.evidence.chunk_count === 0 ? (
+          {grounding.detail ? (
             <p className="mb-4 rounded-[10px] border border-iusia-warning/35 bg-iusia-warning/10 px-4 py-3 text-[13px] leading-relaxed text-iusia-warning-text">
-              Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación cuando sea aportada.
+              {grounding.detail}
             </p>
           ) : null}
           {headline ? (
