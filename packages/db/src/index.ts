@@ -5,6 +5,7 @@ export * from "./repositories/audit.js";
 export * from "./repositories/credits.js";
 export * from "./repositories/agents.js";
 export * from "./repositories/documents.js";
+export * from "./repositories/ingestion-attempts.js";
 export * from "./repositories/ledgers.js";
 export * from "./repositories/tasks.js";
 export * from "./repositories/notifications.js";

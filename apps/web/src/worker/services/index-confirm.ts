@@ -1,0 +1,134 @@
+import { DocumentRepository, createDb } from "@iusia/db";
+import type { Env } from "../env.js";
+import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
+import {
+  INDEX_CONFIRM_MAX_ATTEMPTS,
+  indexConfirmDelaySeconds,
+  type AiSearchUploadInfo,
+} from "./ingestion.js";
+
+/**
+ * Confirmación de que un documento está REALMENTE disponible para el análisis.
+ *
+ * POR QUÉ EXISTE. En el lote de cinco de IUS-2026-016 el índice tardó entre 77 y 112 s
+ * y fue el 98,8 %-99,4 % del tiempo total: el consumidor se pasaba casi dos minutos por
+ * documento esperando de brazos cruzados. La referencia oficial confirma que
+ * `items.upload()` encola y retorna, y que `items.get(id).info()` devuelve `status` y
+ * `chunks_count`. Así que subir y preguntar después no es un atajo: es como está
+ * diseñada la API.
+ *
+ * QUÉ SIGNIFICA INDEXADO. Cinco condiciones, todas necesarias:
+ *   1. el proveedor dice `completed`;
+ *   2. `chunks_count > 0`;
+ *   3. una búsqueda FILTRADA POR ESE DOCUMENTO devuelve al menos un fragmento suyo;
+ *   4. el documento no está retirado;
+ *   5. su versión es la vigente.
+ *
+ * La tercera no es redundante. Un filtro de metadata mal puesto dejó la recuperación en
+ * cero durante días mientras todos los estados decían que estaba indexado: que el
+ * proveedor termine no prueba que el RAG lo encuentre.
+ */
+export type ConfirmOutcome =
+  | { status: "CONFIRMED"; chunks: number }
+  | { status: "PENDING"; providerStatus: string; nextDelaySeconds: number }
+  | { status: "FAILED"; code: string; detail?: string }
+  | { status: "SKIPPED"; reason: string }
+  | { status: "DELAYED"; attempts: number };
+
+type ItemsBinding = {
+  items?: { get?: (id: string) => { info: () => Promise<AiSearchUploadInfo> } };
+};
+
+export async function confirmDocumentIndexed(
+  env: Env,
+  input: { organizationId: string; matterId: string; documentId: string },
+): Promise<ConfirmOutcome> {
+  const documents = new DocumentRepository(createDb(env.DB));
+  const doc = await documents.findById(input.organizationId, input.documentId);
+
+  // D1 es la autoridad: retirado o de otro expediente no se confirma, diga lo que diga
+  // el índice.
+  if (!doc) return { status: "SKIPPED", reason: "documento inexistente" };
+  if (doc.matterId !== input.matterId) return { status: "SKIPPED", reason: "matter no coincide" };
+  if (doc.retiredAt) return { status: "SKIPPED", reason: "documento retirado" };
+  if (doc.ingestionStatus === "AI_INDEXED") return { status: "SKIPPED", reason: "ya confirmado" };
+  if (doc.ingestionStatus !== "INDEXING") {
+    return { status: "SKIPPED", reason: `estado ${doc.ingestionStatus}` };
+  }
+
+  const attempt = (doc.indexConfirmAttempts ?? 0) + 1;
+
+  // 1-2. Estado del item EXACTO que subimos, no de uno parecido.
+  const info = await itemInfo(env, doc.aiSearchItemId);
+  if (info?.status === "error") {
+    await documents.markIngestionFailedAt(
+      input.organizationId,
+      input.documentId,
+      "AI_SEARCH",
+      "AI_SEARCH_ITEM_ERROR",
+      info.error ?? "el índice rechazó el documento",
+    );
+    return { status: "FAILED", code: "AI_SEARCH_ITEM_ERROR", detail: info.error };
+  }
+
+  const providerDone = info?.status === "completed";
+  const hasChunks = (info?.chunks_count ?? 0) > 0;
+
+  if (providerDone && hasChunks) {
+    // 3. Recuperación REAL, filtrando por el documento antes de buscar.
+    const retrieval = new AiSearchRetrievalProvider(env.AI_SEARCH ?? null);
+    const chunks = await retrieval.search({
+      scope: {
+        organization_id: input.organizationId,
+        authorized_matter_ids: [input.matterId],
+      },
+      query: doc.name,
+      document_id: input.documentId,
+      max_results: 3,
+    });
+    if (chunks.length > 0) {
+      await documents.markIndexed(
+        input.organizationId,
+        input.documentId,
+        doc.r2MirrorKey ?? "",
+        doc.contentHash ?? "",
+      );
+      return { status: "CONFIRMED", chunks: chunks.length };
+    }
+  }
+
+  // Todavía no. «No ha terminado» NO es «ha fallado»: el proveedor puede ir lento sin
+  // estar roto, y declarar error ahí es exactamente lo que produjo un falso fallo en un
+  // documento sano.
+  if (attempt >= INDEX_CONFIRM_MAX_ATTEMPTS) {
+    await documents.markIndexConfirmDelayed(input.organizationId, input.documentId, attempt);
+    return { status: "DELAYED", attempts: attempt };
+  }
+
+  const nextDelaySeconds = indexConfirmDelaySeconds(attempt);
+  await documents.scheduleIndexConfirm(
+    input.organizationId,
+    input.documentId,
+    attempt,
+    new Date(Date.now() + nextDelaySeconds * 1000).toISOString(),
+  );
+  return {
+    status: "PENDING",
+    providerStatus: info?.status ?? (providerDone ? "completed" : "unknown"),
+    nextDelaySeconds,
+  };
+}
+
+/** Estado del item por su identidad. Sin identidad no hay nada que preguntar. */
+async function itemInfo(env: Env, itemId: string | null): Promise<AiSearchUploadInfo | null> {
+  if (!itemId) return null;
+  const binding = env.AI_SEARCH as unknown as ItemsBinding | null;
+  const handle = binding?.items?.get?.(itemId);
+  if (!handle) return null;
+  try {
+    return await handle.info();
+  } catch {
+    // El índice no responde ahora: se vuelve a preguntar, no se degrada el documento.
+    return null;
+  }
+}

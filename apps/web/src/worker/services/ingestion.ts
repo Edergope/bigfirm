@@ -4,7 +4,7 @@ import {
   documentMirrorKey,
   type DocumentIngestionMessage,
 } from "@iusia/domain";
-import { DocumentRepository, MatterRepository, createDb } from "@iusia/db";
+import { DocumentRepository, IngestionAttemptRepository, MatterRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
 import { DriveConnectionError, OrganizationStorageResolver } from "./drive-credentials.js";
 import { DriveWorkspaceService } from "./drive-workspace.js";
@@ -102,7 +102,41 @@ export const AI_SEARCH_DEADLINE_MS = 150_000;
  */
 export const AI_SEARCH_POLL_MS = 25_000;
 
+/**
+ * Espera antes de la primera confirmación, y política de reintento.
+ *
+ * MEDIDO: el índice tardó entre 77 y 112 s en los cinco documentos reales. Preguntar
+ * antes de los 30 s sería preguntar en vano; los intervalos siguientes crecen hasta un
+ * techo de dos minutos y cubren con holgura el peor caso observado, con margen para un
+ * upstream más lento sin convertir la lentitud en un fallo.
+ *
+ * Cloudflare admite `delaySeconds` de hasta 24 h, así que estos valores caben de sobra.
+ */
+export const INDEX_CONFIRM_FIRST_DELAY_S = 30;
+export const INDEX_CONFIRM_MAX_ATTEMPTS = 12;
+
+/** Espera antes del intento N: 30, 45, 60, 90, 120… con techo de 120 s. */
+export function indexConfirmDelaySeconds(attempt: number): number {
+  const ladder = [30, 45, 60, 90, 120];
+  return ladder[Math.min(Math.max(attempt - 1, 0), ladder.length - 1)]!;
+}
+
 export type StageTimings = Record<string, number>;
+
+/**
+ * El artefacto normalizado excede el máximo del proveedor.
+ *
+ * No es un fallo transitorio ni algo que un reintento arregle: hace falta partir el
+ * documento, que es el trabajo pendiente de SPRINT_01B. Se clasifica aparte para que no
+ * se confunda con una caída del índice.
+ */
+export class PartitionRequiredError extends Error {
+  readonly code = "PARTITION_REQUIRED";
+  constructor(readonly bytes: number) {
+    super(`El documento normalizado (${bytes} bytes) supera el máximo del índice`);
+    this.name = "PartitionRequiredError";
+  }
+}
 
 export class IngestionTimeoutError extends Error {
   constructor(readonly stage: string, readonly timeoutMs: number) {
@@ -174,6 +208,30 @@ export class IngestionService {
     await documents
       .markIngestionStarted(message.organization_id, message.document_id, delivery)
       .catch(() => undefined);
+
+    // Historial: una fila POR INTENTO. La fila del documento se sobrescribe —es el
+    // estado actual, que es lo que la pantalla necesita—, pero la evidencia de lo que
+    // pasó antes no puede depender de ella.
+    const attempts = new IngestionAttemptRepository(db);
+    const attemptId = await attempts
+      .open({
+        organizationId: message.organization_id,
+        matterId: message.matter_id,
+        documentId: message.document_id,
+        attempt: (await documents.findById(message.organization_id, message.document_id))
+          ?.ingestionAttempts ?? 1,
+        reason: message.reason,
+        cfQueueMessageId: delivery?.messageId ?? null,
+        cfQueueAttempt: delivery?.attempt ?? null,
+      })
+      .catch(() => null);
+    const closeAttempt = (outcome: {
+      finalState: string;
+      stage?: string | null;
+      failureCode?: string | null;
+      failureMessage?: string | null;
+      timings?: Record<string, number> | null;
+    }) => (attemptId ? attempts.close(attemptId, outcome).catch(() => undefined) : Promise.resolve());
 
     const doc = await documents.findById(message.organization_id, message.document_id);
     if (!doc) return { status: "SKIPPED", detail: "documento no encontrado en el registro" };
@@ -299,41 +357,42 @@ export class IngestionService {
 
         stage = "AI_SEARCH_UPLOAD";
         await heartbeat("AI_SEARCH");
-        const indexed = await withDeadline(
-          uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
-            organization_id: message.organization_id,
-            matter_id: message.matter_id,
-            document_id: message.document_id,
-            document_version: String(doc.currentVersion),
-            is_current: "true",
-            is_active: "true",
-          }),
-          AI_SEARCH_DEADLINE_MS,
-          "AI_SEARCH_UPLOAD",
-        );
+
+        /*
+          IDEMPOTENCIA. Una reentrega no vuelve a subir el mismo item: si ya hay
+          identidad persistida y el índice no lo dio por fallido, se reutiliza. Con
+          at-least-once eso no es una optimización, es la diferencia entre un item y dos.
+        */
+        let item: AiSearchUploadInfo | null = null;
+        if (doc.aiSearchItemId) {
+          item = { id: doc.aiSearchItemId, key: doc.aiSearchItemKey ?? key, status: "queued" };
+        } else {
+          item = await withDeadline(
+            uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, indexMetadata({
+              organizationId: message.organization_id,
+              matterId: message.matter_id,
+              documentId: message.document_id,
+              documentVersion: doc.currentVersion,
+            })),
+            AI_SEARCH_DEADLINE_MS,
+            "AI_SEARCH_UPLOAD",
+          );
+        }
         clock.mark("ai_search_ms");
 
         stage = "D1_MARK_INDEXED";
         const hash = await sha256Hex(text);
-        if (indexed?.status === "completed") {
-          await documents.markIndexed(
-            message.organization_id,
-            message.document_id,
-            key,
-            hash,
-            clock.finish(),
-          );
-        } else {
-          // Subido pero sin confirmar todavía. NO es un error: el espejo está escrito y
-          // la barrida confirmará con una recuperación real.
-          await documents.markIndexing(
-            message.organization_id,
-            message.document_id,
-            key,
-            hash,
-            clock.finish(),
-          );
-        }
+        // El item está ENVIADO. Confirmar que se recupera es otro trabajo: esperarlo
+        // aquí ocupaba el 99 % del tiempo del consumidor sin hacer nada.
+        await documents.markIndexing(
+          message.organization_id,
+          message.document_id,
+          key,
+          hash,
+          clock.finish(),
+          { itemId: item?.id ?? null, itemKey: item?.key ?? key },
+        );
+        await this.enqueueIndexConfirm(message, INDEX_CONFIRM_FIRST_DELAY_S);
       }
 
       /*
@@ -385,6 +444,7 @@ export class IngestionService {
         }
       }
 
+      await closeAttempt({ finalState: "INDEXED", stage, timings: clock.timings });
       return { status: "INDEXED", detail: key, timings: clock.timings };
     } catch (error) {
       if (error instanceof StorageNotConfiguredError) {
@@ -397,18 +457,49 @@ export class IngestionService {
         stage,
         ...safeIngestionError(error),
       });
+      const failureStage = FAILURE_STAGE[stage] ?? "UNKNOWN";
+      const failureCode = error instanceof PartitionRequiredError
+        ? error.code
+        : error instanceof Error
+          ? error.name
+          : "UNKNOWN";
+      const failureMessage = error instanceof Error ? error.message : "error desconocido";
       await documents.markIngestionFailedAt(
         message.organization_id,
         message.document_id,
-        FAILURE_STAGE[stage] ?? "UNKNOWN",
-        error instanceof Error ? error.name : "UNKNOWN",
-        error instanceof Error ? error.message : "error desconocido",
+        failureStage,
+        failureCode,
+        failureMessage,
       );
+      await closeAttempt({ finalState: "ERROR", stage: failureStage, failureCode, failureMessage });
       return {
         status: "ERROR",
         detail: error instanceof Error ? error.message : "error desconocido",
       };
     }
+  }
+
+  /**
+   * Encola la confirmación de indexación con retraso.
+   *
+   * Es el camino NORMAL de readiness. El cron queda sólo como red de seguridad: dejar
+   * que un documento espere hasta diez minutos porque cayó justo después de una barrida
+   * sería aceptar latencia que no existe.
+   */
+  private async enqueueIndexConfirm(
+    message: DocumentIngestionMessage,
+    delaySeconds: number,
+  ): Promise<void> {
+    await this.env.DOCUMENT_INGESTION.send(
+      {
+        organization_id: message.organization_id,
+        matter_id: message.matter_id,
+        document_id: message.document_id,
+        reason: "AI_SEARCH_CONFIRM",
+        enqueued_at: new Date().toISOString(),
+      },
+      { delaySeconds },
+    ).catch(() => undefined);
   }
 
   /**
@@ -600,8 +691,50 @@ export type AiSearchUploadInfo = {
   file_size?: number | null;
 };
 
+/**
+ * Tamaño máximo de un item, según la referencia oficial del binding de Items: 4 MB.
+ *
+ * No es una estimación: está documentado. Un artefacto normalizado que lo supere no se
+ * envía —fallar opacamente contra el proveedor no dice nada— y se clasifica como
+ * `PARTITION_REQUIRED`, que es el trabajo de SPRINT_01B.
+ */
+export const AI_SEARCH_MAX_ITEM_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Campos de metadata que viajan al índice.
+ *
+ * La referencia oficial fija un máximo de 5 por instancia y estábamos enviando SEIS:
+ * `organization_id`, `matter_id`, `document_id`, `document_version`, `is_current` e
+ * `is_active`. Este último dejó de filtrarse cuando su cláusula dejó la recuperación en
+ * cero durante días, así que ya no lo usa nadie: se retira y quedamos exactamente en el
+ * límite documentado, conservando lo que sí se filtra.
+ */
+export function indexMetadata(args: {
+  organizationId: string;
+  matterId: string;
+  documentId: string;
+  documentVersion: number | string;
+}): Record<string, string> {
+  return {
+    organization_id: args.organizationId,
+    matter_id: args.matterId,
+    document_id: args.documentId,
+    document_version: String(args.documentVersion),
+    is_current: "true",
+  };
+}
+
 type AiSearchIngestionBinding = {
   items?: {
+    /**
+     * Encola el item y RETORNA. La indexación ocurre en segundo plano.
+     * Documentado en la referencia oficial del binding de Items.
+     */
+    upload?: (
+      name: string,
+      content: string,
+      options?: { metadata?: Record<string, string> },
+    ) => Promise<AiSearchUploadInfo>;
     uploadAndPoll?: (
       name: string,
       content: string,
@@ -611,6 +744,8 @@ type AiSearchIngestionBinding = {
         timeoutMs?: number;
       },
     ) => Promise<AiSearchUploadInfo>;
+    /** Estado del item ya subido: `status`, `chunks_count`, `file_size`, … */
+    get?: (itemId: string) => { info: () => Promise<AiSearchUploadInfo> };
   };
 };
 
@@ -674,14 +809,16 @@ export async function uploadToAiSearch(
   text: string,
   metadata: Record<string, string>,
 ): Promise<AiSearchUploadInfo> {
-  if (!aiSearch?.items?.uploadAndPoll) {
-    throw new Error("AI Search uploadAndPoll no está configurado");
+  if (!aiSearch?.items?.upload) {
+    throw new Error("AI Search items.upload no está configurado");
   }
-  const item = await aiSearch.items.uploadAndPoll(key, text, {
-    metadata,
-    pollIntervalMs: 1000,
-    timeoutMs: AI_SEARCH_POLL_MS,
-  });
+  // Guardrail de tamaño con fuente: 4 MB documentados. Enviar por encima sería fallar
+  // contra el proveedor sin saber por qué.
+  const bytes = new TextEncoder().encode(text).byteLength;
+  if (bytes > AI_SEARCH_MAX_ITEM_BYTES) {
+    throw new PartitionRequiredError(bytes);
+  }
+  const item = await aiSearch.items.upload(key, text, { metadata });
   if (item.status === "error") {
     // El proveedor rechazó el contenido: eso sí es un fallo real.
     throw new Error(`AI Search rechazó el item${item.error ? `: ${item.error}` : ""}`);

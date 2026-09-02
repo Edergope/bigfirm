@@ -150,6 +150,13 @@ export const documents = sqliteTable(
     /** Identidad que asigna Cloudflare al mensaje, y su número de entrega. */
     cfQueueMessageId: text("cf_queue_message_id"),
     cfQueueAttempt: integer("cf_queue_attempt"),
+    /** Identidad EXACTA del item en el índice: permite confirmar ESE y no otro. */
+    aiSearchItemId: text("ai_search_item_id"),
+    aiSearchItemKey: text("ai_search_item_key"),
+    aiSearchUploadedAt: text("ai_search_uploaded_at"),
+    /** Confirmación de indexación: contador propio y cuándo volver a preguntar. */
+    indexConfirmAttempts: integer("index_confirm_attempts").notNull().default(0),
+    indexConfirmNextAt: text("index_confirm_next_at"),
     /** Lote de carga. Correlación, NO transacción: un fallo no toca a los demás. */
     uploadBatchId: text("upload_batch_id"),
     /**
@@ -617,5 +624,44 @@ export const templates = sqliteTable(
     index("templates_scope_type_idx").on(t.scope, t.documentType),
     index("templates_org_idx").on(t.organizationId),
     index("templates_family_version_idx").on(t.familyId, t.version),
+  ],
+);
+
+/**
+ * Historial de intentos de ingestión.
+ *
+ * La fila del documento conserva el estado ACTUAL, que es lo que la pantalla necesita.
+ * Pero `markIngestionStarted` limpia el código de fallo en cada intento, así que el
+ * segundo intento de `Cedula extrangeria Maria.pdf` borró la causa exacta del primero.
+ * El forense necesita lo que pasó ANTES, y eso no cabe en una sola fila.
+ *
+ * No es un sistema de eventos: es una fila por intento, con lo mínimo para reconstruir
+ * qué entrega lo tomó, hasta dónde llegó y cómo terminó.
+ */
+export const documentIngestionAttempts = sqliteTable(
+  "document_ingestion_attempts",
+  {
+    id: text("id").primaryKey(),
+    organizationId: orgId(),
+    matterId: text("matter_id").notNull(),
+    documentId: text("document_id").notNull(),
+    /** Número de intento lógico del documento. */
+    attempt: integer("attempt").notNull(),
+    /** Lo que Cloudflare afirma de la entrega que originó este intento. */
+    cfQueueMessageId: text("cf_queue_message_id"),
+    cfQueueAttempt: integer("cf_queue_attempt"),
+    reason: text("reason"),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+    /** INDEXED | INDEXING | ERROR | SKIPPED | STORAGE_NOT_CONFIGURED */
+    finalState: text("final_state"),
+    stage: text("stage"),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    timings: text("timings"),
+  },
+  (t) => [
+    index("ingestion_attempts_doc_idx").on(t.documentId, t.startedAt),
+    index("ingestion_attempts_org_idx").on(t.organizationId, t.matterId),
   ],
 );

@@ -84,6 +84,7 @@ export function documentIngressKey(
   return `${matterFolderPrefix(organizationId, matterId)}ingress/${documentId}`;
 }
 
+/** Documento concreto que se quiere recuperar, cuando la consulta lo acota. */
 export interface RetrievalScope {
   organization_id: string;
   /** Matters a los que el usuario tiene acceso autorizado. Vacío ⇒ sin resultados. */
@@ -94,6 +95,14 @@ export interface RetrievalQuery {
   scope: RetrievalScope;
   query: string;
   max_results?: number;
+  /**
+   * Acota la búsqueda a UN documento, filtrando en el índice ANTES de buscar.
+   *
+   * Sin esto, comprobar que un documento se recupera obligaba a pedir los mejores
+   * resultados del expediente y esperar que apareciera entre ellos: en un expediente
+   * grande eso no lo encuentra casi nunca.
+   */
+  document_id?: string;
 }
 
 export interface RetrievalResult {
@@ -159,6 +168,12 @@ export const DocumentIngestionMessage = z.object({
      * caída de Drive no puede gastar los reintentos de un documento que ya se entendió.
      */
     "PROVIDER_SYNC",
+    /**
+     * Sólo confirmar que el índice terminó y que el documento se recupera. Es el camino
+     * NORMAL de readiness: el trabajo de inteligencia sube y termina, y esto pregunta
+     * después, sin ocupar un consumidor durante los 77-112 s que tarda el índice.
+     */
+    "AI_SEARCH_CONFIRM",
   ]),
   /** Marca de idempotencia adicional para deduplicar reintentos de Queue. */
   enqueued_at: z.string().datetime(),

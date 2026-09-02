@@ -65,7 +65,16 @@ export class AiSearchRetrievalProvider implements RetrievalProvider {
       ai_search_options: {
         retrieval: {
           // Filtro PRE-retrieval por tenant/matter: el índice nunca ve otras firmas.
-          filters: buildMetadataFilter(query.scope),
+          // Cuando se pide un documento concreto, se acota también a él: pedir el
+          // expediente entero y filtrar después no encuentra nada en un expediente
+          // grande.
+          filters: query.document_id
+            ? buildDocumentFilter({
+                organizationId: query.scope.organization_id,
+                matterId: query.scope.authorized_matter_ids[0] ?? "",
+                documentId: query.document_id,
+              })
+            : buildMetadataFilter(query.scope),
           max_num_results: query.max_results ?? 8,
         },
       },
@@ -82,6 +91,9 @@ export class AiSearchRetrievalProvider implements RetrievalProvider {
       // Descarta cualquier resultado fuera de alcance aunque el índice lo devolviera.
       if (organizationId !== query.scope.organization_id) continue;
       if (!query.scope.authorized_matter_ids.includes(matterId)) continue;
+      // Defensa en profundidad: aunque el índice haya filtrado, se revalida contra la
+      // metadata del chunk. Nunca se confía sólo en el índice.
+      if (query.document_id && documentId !== query.document_id) continue;
 
       const key = str(chunk.item?.key);
       results.push({
@@ -123,6 +135,30 @@ export function buildMetadataFilter(scope: RetrievalScope): MetadataFilter {
   return {
     organization_id: scope.organization_id,
     matter_id: { $in: [...scope.authorized_matter_ids] },
+  };
+}
+
+/**
+ * Filtro para comprobar que UN documento concreto se recupera.
+ *
+ * La comprobación anterior lanzaba una consulta genérica al expediente, pedía los cinco
+ * mejores resultados y esperaba que el documento apareciera entre ellos. En un
+ * expediente de cincuenta documentos eso no encuentra el suyo casi nunca: la
+ * confirmación habría dependido de la suerte, y un documento perfectamente indexado se
+ * habría quedado sin confirmar.
+ *
+ * El documento se pide POR SU IDENTIDAD, antes de buscar. Las dos claves de aislamiento
+ * siguen presentes: esto restringe, nunca amplía.
+ */
+export function buildDocumentFilter(args: {
+  organizationId: string;
+  matterId: string;
+  documentId: string;
+}): MetadataFilter {
+  return {
+    organization_id: args.organizationId,
+    matter_id: { $in: [args.matterId] },
+    document_id: args.documentId,
   };
 }
 

@@ -11,6 +11,8 @@ export const ID_PREFIXES = {
   document: "doc",
   /** Lote de carga documental. Correlación, no transacción. */
   uploadBatch: "ubt",
+  /** Intento de ingestión. Una fila por intento, para el forense. */
+  ingestionAttempt: "iat",
   documentVersion: "dvr",
   execution: "exe",
   event: "evt",

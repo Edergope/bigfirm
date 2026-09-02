@@ -1,6 +1,6 @@
 import { DocumentRepository, createDb } from "@iusia/db";
 import type { Env } from "./env.js";
-import { AiSearchRetrievalProvider } from "./integrations/ai-search.js";
+
 
 /**
  * Barrida de reconciliación de la sincronización con el proveedor.
@@ -19,50 +19,40 @@ import { AiSearchRetrievalProvider } from "./integrations/ai-search.js";
  * procesa documentos ni habla con el proveedor — de eso ya se encarga el consumidor.
  */
 /**
- * Confirma que un documento subido al índice se RECUPERA de verdad.
+ * RED DE SEGURIDAD de la confirmación de indexación.
  *
- * Es el gate que faltaba: hasta ahora `AI_INDEXED` significaba «el proveedor dijo
- * completado», y ya sabemos por experiencia que eso no garantiza que el RAG devuelva
- * nada —un filtro de metadata mal puesto dejó la recuperación en cero durante días sin
- * que ningún estado lo delatara—. Ahora el estado sólo avanza cuando una consulta real,
- * con el alcance real, devuelve fragmentos del documento.
+ * NO es el camino normal. El camino normal lo abre el propio trabajo de ingestión, que
+ * encola un `AI_SEARCH_CONFIRM` con 30 s de retraso y se reprograma solo mientras el
+ * índice siga trabajando. Esta barrida sólo recoge lo VENCIDO: un mensaje que se perdió,
+ * un despliegue a mitad, una DLQ que nadie tocó.
  *
- * Sin LLM: es una consulta al índice, no un análisis.
+ * Antes era el camino primario, y eso significaba que un documento podía esperar hasta
+ * diez minutos por haber caído justo después de una barrida. Esa latencia no existía en
+ * ningún sitio salvo en nuestra propia arquitectura.
  */
-export async function confirmIndexReadiness(env: Env): Promise<{ confirmed: number; pending: number }> {
+export async function confirmIndexReadiness(env: Env): Promise<{ requeued: number }> {
   const documents = new DocumentRepository(createDb(env.DB));
-  const awaiting = await documents.listAwaitingIndexConfirmation(SWEEP_BATCH_LIMIT);
-  const retrieval = new AiSearchRetrievalProvider(env.AI_SEARCH ?? null);
+  const due = await documents.listAwaitingIndexConfirmation(
+    new Date().toISOString(),
+    SWEEP_BATCH_LIMIT,
+  );
 
-  let confirmed = 0;
-  let pending = 0;
-  for (const doc of awaiting) {
+  let requeued = 0;
+  for (const doc of due) {
     try {
-      const chunks = await retrieval.search({
-        scope: { organization_id: doc.organizationId, authorized_matter_ids: [doc.matterId] },
-        query: "documento del expediente",
-        max_results: 5,
+      await env.DOCUMENT_INGESTION.send({
+        organization_id: doc.organizationId,
+        matter_id: doc.matterId,
+        document_id: doc.id,
+        reason: "AI_SEARCH_CONFIRM",
+        enqueued_at: new Date().toISOString(),
       });
-      // Ha de recuperarse ESTE documento, no cualquiera del expediente.
-      const mine = chunks.filter((c) => c.document_id === doc.id);
-      if (mine.length > 0) {
-        await documents.markIndexed(
-          doc.organizationId,
-          doc.id,
-          doc.r2MirrorKey ?? "",
-          doc.contentHash ?? "",
-        );
-        confirmed += 1;
-      } else {
-        pending += 1;
-      }
+      requeued += 1;
     } catch {
-      // El índice no responde ahora: se reintenta en la próxima barrida. Un fallo aquí
-      // nunca degrada el estado del documento.
-      pending += 1;
+      // La cola no aceptó el mensaje: la próxima barrida lo reintenta.
     }
   }
-  return { confirmed, pending };
+  return { requeued };
 }
 
 export async function handleProviderSyncSweep(env: Env): Promise<{ requeued: number }> {

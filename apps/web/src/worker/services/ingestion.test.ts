@@ -3,8 +3,9 @@ import {
   DOWNLOAD_DEADLINE_MS,
   IngestionTimeoutError,
   NORMALIZE_DEADLINE_MS,
-  AI_SEARCH_POLL_MS,
+  AI_SEARCH_MAX_ITEM_BYTES,
   StageClock,
+  indexMetadata,
   isIndexableMimeType,
   normalizeToText,
   uploadToAiSearch,
@@ -76,14 +77,14 @@ describe("normalización documental", () => {
     expect(isIndexableMimeType("audio/wav")).toBe(false);
   });
 
-  it("indexa inmediatamente en AI Search con metadata ACL antes de marcar AI_INDEXED", async () => {
-    const uploadAndPoll = vi.fn().mockResolvedValue({
+  it("ENVÍA a AI Search con metadata ACL y no espera a que termine", async () => {
+    const upload = vi.fn().mockResolvedValue({
       id: "item-1",
       key: "org/org1/matter/mtr1/doc/doc1.txt",
       status: "completed",
     });
     await expect(uploadToAiSearch(
-      { items: { uploadAndPoll } },
+      { items: { upload } },
       "org/org1/matter/mtr1/doc/doc1.txt",
       "IUSIA_E2E_NEW_MATTER_20260826",
       {
@@ -95,7 +96,7 @@ describe("normalización documental", () => {
       },
     )).resolves.toMatchObject({ status: "completed" });
 
-    expect(uploadAndPoll).toHaveBeenCalledWith(
+    expect(upload).toHaveBeenCalledWith(
       "org/org1/matter/mtr1/doc/doc1.txt",
       "IUSIA_E2E_NEW_MATTER_20260826",
       {
@@ -106,20 +107,18 @@ describe("normalización documental", () => {
           document_version: "2",
           is_current: "true",
         },
-        pollIntervalMs: 1000,
-        timeoutMs: 25000,
       },
     );
   });
 
-  it("falla cerrado si AI Search uploadAndPoll no está configurado", async () => {
+  it("falla cerrado si AI Search items.upload no está configurado", async () => {
     await expect(uploadToAiSearch(null, "doc.txt", "contenido", {})).rejects.toThrow(
-      "AI Search uploadAndPoll no está configurado",
+      "AI Search items.upload no está configurado",
     );
   });
 
   it("falla cerrado si AI Search RECHAZA el contenido", async () => {
-    const uploadAndPoll = vi.fn().mockResolvedValue({
+    const upload = vi.fn().mockResolvedValue({
       id: "item-err",
       key: "doc.txt",
       status: "error",
@@ -127,7 +126,7 @@ describe("normalización documental", () => {
     });
 
     await expect(
-      uploadToAiSearch({ items: { uploadAndPoll } }, "doc.txt", "contenido", {
+      uploadToAiSearch({ items: { upload } }, "doc.txt", "contenido", {
         organization_id: "org1",
         matter_id: "mtr1",
         document_id: "doc1",
@@ -203,7 +202,7 @@ describe("semántica de AI_INDEXED", () => {
   it("un contenido RECHAZADO por el proveedor sigue siendo un fallo", async () => {
     const aiSearch = {
       items: {
-        uploadAndPoll: async () => ({ status: "error" as const, error: "conversion failed" }),
+        upload: async () => ({ status: "error" as const, error: "conversion failed" }),
       },
     };
     await expect(
@@ -214,7 +213,7 @@ describe("semántica de AI_INDEXED", () => {
   it("un sondeo sin confirmar NO lanza: el item ya se subió", async () => {
     // Subir de nuevo en el reintento sería desperdicio, y declarar error sería falso.
     for (const status of ["queued", "running"] as const) {
-      const aiSearch = { items: { uploadAndPoll: async () => ({ status }) } };
+      const aiSearch = { items: { upload: async () => ({ status }) } };
       await expect(
         uploadToAiSearch(aiSearch, "org/x/doc.txt", "contenido", { organization_id: "org" }),
       ).resolves.toMatchObject({ status });
@@ -222,16 +221,37 @@ describe("semántica de AI_INDEXED", () => {
   });
 
   it("confirmado de inmediato se acepta igual", async () => {
-    const ok = { items: { uploadAndPoll: async () => ({ status: "completed" as const }) } };
+    const ok = { items: { upload: async () => ({ status: "completed" as const }) } };
     await expect(
       uploadToAiSearch(ok, "org/x/doc.txt", "contenido", { organization_id: "org" }),
     ).resolves.toMatchObject({ status: "completed" });
   });
 
-  it("el sondeo se acota muy por debajo del tiempo del índice", async () => {
-    // Deliberado: no se espera a que el índice termine dentro del consumidor. Bloquearlo
-    // 110 s por documento era el 99 % del tiempo de un lote.
-    expect(AI_SEARCH_POLL_MS).toBeLessThan(60_000);
+  it("la metadata cabe en el máximo documentado de 5 campos por instancia", () => {
+    // La referencia oficial del binding de Items fija 5. Enviábamos SEIS —el sexto era
+    // `is_active`, que dejó de filtrarse cuando su cláusula puso la recuperación a cero—.
+    const fields = indexMetadata({
+      organizationId: "org1",
+      matterId: "mtr1",
+      documentId: "doc1",
+      documentVersion: 2,
+    });
+    expect(Object.keys(fields)).toHaveLength(5);
+    expect(fields).not.toHaveProperty("is_active");
+    // Lo que la seguridad exige sigue estando.
+    expect(fields.organization_id).toBe("org1");
+    expect(fields.matter_id).toBe("mtr1");
+    expect(fields.document_id).toBe("doc1");
+  });
+
+  it("rechaza un artefacto por encima del máximo documentado en vez de fallar opaco", async () => {
+    const upload = vi.fn();
+    const huge = "x".repeat(AI_SEARCH_MAX_ITEM_BYTES + 1);
+    await expect(
+      uploadToAiSearch({ items: { upload } }, "doc.txt", huge, {}),
+    ).rejects.toThrow(/supera el máximo/);
+    // Ni siquiera se intenta: 4 MB están documentados, no estimados.
+    expect(upload).not.toHaveBeenCalled();
   });
 });
 

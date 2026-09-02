@@ -2,6 +2,7 @@ import { DocumentIngestionMessage } from "@iusia/domain";
 import { DocumentRepository, createDb } from "@iusia/db";
 import type { Env } from "./env.js";
 import { IngestionService } from "./services/ingestion.js";
+import { confirmDocumentIndexed } from "./services/index-confirm.js";
 
 /**
  * Consumidor de la cola de ingestión documental.
@@ -79,6 +80,23 @@ export async function ingestBatch(
         attempt: (message as { attempts?: number }).attempts,
         timestamp: (message as { timestamp?: Date }).timestamp?.toISOString?.(),
       };
+      /*
+        MENSAJE DISCRIMINADO. `AI_SEARCH_CONFIRM` no es una ingestión: sólo pregunta al
+        índice si el item que ya subimos terminó y si el documento se recupera. Tratarlo
+        como una ingestión más volvería a subir el contenido y a ocupar un consumidor.
+      */
+      if (parsed.data.reason === "AI_SEARCH_CONFIRM") {
+        const outcome = await confirmDocumentIndexed(env, {
+          organizationId: parsed.data.organization_id,
+          matterId: parsed.data.matter_id,
+          documentId: parsed.data.document_id,
+        });
+        // PENDING ya se reprogramó con su propio retraso: este mensaje cumplió.
+        message.ack();
+        void outcome;
+        return;
+      }
+
       const outcome = await service.ingest(parsed.data, delivery);
       if (outcome.status === "ERROR") {
         message.retry(); // fallo transitorio: reintentar (o a la DLQ tras max_retries)

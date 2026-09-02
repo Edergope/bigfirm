@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AI_SEARCH_POLL_MS } from "../services/ingestion.js";
+import { INDEX_CONFIRM_FIRST_DELAY_S, indexConfirmDelaySeconds } from "../services/ingestion.js";
 import { ingestionLifecycle, isIngestionInFlight } from "@iusia/domain";
 
 const workerDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,9 +23,24 @@ const read = (rel: string) => readFileSync(join(workerDir, rel), "utf8");
  * en 120 s: 7,9 s por encima del peor caso observado.
  */
 describe("el cuello es el índice, no la conversión", () => {
-  it("no se bloquea el consumidor esperando a que el índice confirme", () => {
-    // Esperar 110 s por documento dentro del consumidor era el 99 % del lote.
-    expect(AI_SEARCH_POLL_MS).toBeLessThan(60_000);
+  it("el consumidor NO espera al índice: sube y entrega el turno", () => {
+    const src = read("services/ingestion.ts");
+    // `items.upload()` encola y retorna, según la referencia oficial.
+    expect(src).toContain("items.upload");
+    expect(src).not.toContain("uploadAndPoll(key, text");
+    // Y la confirmación se encola con retraso, no se espera aquí.
+    expect(src).toContain("enqueueIndexConfirm");
+    expect(INDEX_CONFIRM_FIRST_DELAY_S).toBeGreaterThan(0);
+  });
+
+  it("la primera pregunta llega después de que tenga sentido preguntar", () => {
+    // El índice tardó 77-112 s en los cinco documentos reales: preguntar a los 5 s sería
+    // preguntar en vano, y la escalera cubre el peor caso observado con holgura.
+    expect(INDEX_CONFIRM_FIRST_DELAY_S).toBeGreaterThanOrEqual(30);
+    expect(indexConfirmDelaySeconds(1)).toBe(30);
+    expect(indexConfirmDelaySeconds(5)).toBe(120);
+    // Techo: no crece indefinidamente.
+    expect(indexConfirmDelaySeconds(99)).toBe(120);
   });
 
   it("un sondeo que vence deja el documento INDEXANDO, no en error", () => {
@@ -58,26 +73,45 @@ describe("el cuello es el índice, no la conversión", () => {
  * días sin que ningún estado lo delatara.
  */
 describe("indexado significa que se recupera de verdad", () => {
-  const sweep = read("scheduled.ts");
+  const confirm = read("services/index-confirm.ts");
 
-  it("la confirmación consulta el índice con el alcance real", () => {
-    expect(sweep).toContain("confirmIndexReadiness");
-    expect(sweep).toContain("authorized_matter_ids");
+  it("pregunta por el item EXACTO que subimos", () => {
+    expect(confirm).toContain("doc.aiSearchItemId");
+    expect(confirm).toContain("items?.get?.");
   });
 
-  it("exige recuperar ESE documento, no cualquiera del expediente", () => {
-    expect(sweep).toContain("chunks.filter((c) => c.document_id === doc.id)");
+  it("exige que el proveedor haya terminado Y que haya fragmentos", () => {
+    expect(confirm).toContain('info?.status === "completed"');
+    expect(confirm).toContain("chunks_count ?? 0) > 0");
   });
 
-  it("si el índice no responde, el documento NO se degrada", () => {
-    const confirm = sweep.slice(sweep.indexOf("export async function confirmIndexReadiness"));
-    // El catch incrementa pendientes; nunca marca error.
-    expect(confirm.slice(0, 2000)).not.toContain("markIngestionFailed");
+  it("filtra por el documento ANTES de buscar, no después", () => {
+    // La versión anterior pedía el top-5 del expediente y esperaba que apareciera: en un
+    // expediente de cincuenta documentos eso no lo encuentra casi nunca.
+    expect(confirm).toContain("document_id: input.documentId");
+    expect(read("integrations/ai-search.ts")).toContain("buildDocumentFilter");
+  });
+
+  it("D1 manda sobre el índice: retirado o de otro matter no se confirma", () => {
+    expect(confirm).toContain("doc.retiredAt");
+    expect(confirm).toContain("doc.matterId !== input.matterId");
+  });
+
+  it("«todavía no» NO es «ha fallado»", () => {
+    // Es la distinción que produjo un falso error en un documento sano.
+    expect(confirm).toContain("markIndexConfirmDelayed");
+    expect(confirm).toContain('status: "DELAYED"');
   });
 
   it("la confirmación no usa modelos generativos", () => {
-    expect(sweep).not.toContain("ModelGateway");
-    expect(sweep).not.toContain("chatCompletions");
+    expect(confirm).not.toContain("ModelGateway");
+    expect(confirm).not.toContain("chatCompletions");
+  });
+
+  it("el cron sólo recoge lo vencido: no es el camino normal", () => {
+    const sweep = read("scheduled.ts");
+    expect(sweep).toContain("RED DE SEGURIDAD");
+    expect(sweep).toContain("listAwaitingIndexConfirmation");
   });
 });
 

@@ -459,8 +459,10 @@ export class DocumentRepository {
         ingestionAttempts: sql`${documents.ingestionAttempts} + 1`,
         cfQueueMessageId: delivery?.messageId ?? null,
         cfQueueAttempt: delivery?.attempt ?? null,
-        ingestionFailureCode: null,
-        ingestionFailureMessage: null,
+        // El fallo anterior NO se borra aquí. Hacerlo destruyó la causa exacta del
+        // primer intento de `Cedula extrangeria Maria.pdf`: cuando el segundo intento
+        // arrancó, la evidencia de por qué había fallado el primero desapareció. Estos
+        // campos son el ÚLTIMO fallo conocido, y el historial por intento vive aparte.
       })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
@@ -539,6 +541,7 @@ export class DocumentRepository {
     r2MirrorKey: string,
     contentHash: string,
     timings?: Record<string, number>,
+    item?: { itemId: string | null; itemKey: string | null },
   ) {
     const now = new Date().toISOString();
     await this.db
@@ -550,13 +553,55 @@ export class DocumentRepository {
         ingestionStage: "AI_SEARCH",
         ingestionHeartbeatAt: now,
         ingestionTimings: timings ? JSON.stringify(timings) : null,
+        // Identidad EXACTA del item: sin ella, confirmar era buscar a ciegas.
+        aiSearchItemId: item?.itemId ?? null,
+        aiSearchItemKey: item?.itemKey ?? null,
+        aiSearchUploadedAt: now,
+        indexConfirmAttempts: 0,
+        indexConfirmNextAt: null,
         updatedAt: now,
       })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
 
+  /** Programa la siguiente pregunta al índice y cuenta el intento. */
+  async scheduleIndexConfirm(
+    organizationId: string,
+    documentId: string,
+    attempt: number,
+    nextAt: string,
+  ) {
+    await this.db
+      .update(documents)
+      .set({
+        indexConfirmAttempts: attempt,
+        indexConfirmNextAt: nextAt,
+        ingestionHeartbeatAt: new Date().toISOString(),
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /**
+   * El índice sigue sin confirmar tras agotar los intentos.
+   *
+   * NO se marca error: «no ha terminado» no es «ha fallado». El documento queda en un
+   * estado operativo visible para soporte, y la barrida puede seguir intentándolo — un
+   * upstream lento no puede convertirse en un documento roto.
+   */
+  async markIndexConfirmDelayed(organizationId: string, documentId: string, attempt: number) {
+    await this.db
+      .update(documents)
+      .set({
+        indexConfirmAttempts: attempt,
+        indexConfirmNextAt: null,
+        ingestionStage: "INDEXING_DELAYED",
+        ingestionHeartbeatAt: new Date().toISOString(),
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
   /** Documentos subidos al índice cuya recuperabilidad falta confirmar. */
-  async listAwaitingIndexConfirmation(limit = 25) {
+  async listAwaitingIndexConfirmation(now: string, limit = 25) {
     return this.db
       .select({
         id: documents.id,
@@ -566,7 +611,16 @@ export class DocumentRepository {
         contentHash: documents.contentHash,
       })
       .from(documents)
-      .where(and(eq(documents.ingestionStatus, "INDEXING"), isNull(documents.retiredAt)))
+      .where(
+        and(
+          eq(documents.ingestionStatus, "INDEXING"),
+          isNull(documents.retiredAt),
+          // Sólo lo VENCIDO. La confirmación normal la hace el mensaje con retraso; la
+          // barrida recoge lo que ese camino no cubrió —mensaje perdido, despliegue a
+          // mitad—, no adelanta lo que ya tiene turno.
+          lte(documents.indexConfirmNextAt, now),
+        ),
+      )
       .limit(limit);
   }
 
