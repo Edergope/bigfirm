@@ -43,31 +43,63 @@ export interface BatchProgress {
   failed: number;
   /** Cargados y en proceso de inteligencia. */
   processing: number;
+  /** Dejaron de avanzar. Reintentables, y NO deben contarse como «procesando». */
+  stalled: number;
   /** Nada en curso: el lote ya no va a cambiar por sí solo. */
   settled: boolean;
 }
 
-export function batchProgress(statuses: readonly string[]): BatchProgress {
+/**
+ * Agregado del lote a partir de los estados DERIVADOS, no de la columna cruda.
+ *
+ * Es la corrección de una contradicción que el abogado vio en pantalla: la cabecera
+ * decía «5 archivos cargados · 5 procesando» mientras las cinco filas decían
+ * «Procesamiento detenido». Las filas pasaban por `documentIntelligenceState` —que
+ * aplica la regla de antigüedad— y la cabecera leía `ingestion_status` directamente.
+ * Dos derivaciones del mismo dato sólo pueden coincidir por casualidad.
+ *
+ * Ahora ambas parten de lo mismo: quien llama deriva el estado una vez y lo pasa aquí.
+ */
+export function batchProgress(states: readonly string[]): BatchProgress {
   let uploading = 0;
   let indexed = 0;
   let notIndexable = 0;
   let failed = 0;
   let processing = 0;
-  for (const status of statuses) {
-    if (status === "AI_INDEXED") indexed += 1;
-    else if (status === "NOT_INDEXABLE") notIndexable += 1;
-    else if (status === "ERROR") failed += 1;
-    else if (status === "UPLOADING" || status === "FILE_STORED") uploading += 1;
-    else processing += 1;
+  let stalled = 0;
+  for (const state of states) {
+    switch (state) {
+      case "INDEXED":
+      case "AI_INDEXED":
+        indexed += 1;
+        break;
+      case "NOT_INDEXABLE":
+        notIndexable += 1;
+        break;
+      case "ERROR":
+      case "UPLOAD_FAILED":
+        failed += 1;
+        break;
+      case "STALLED":
+        stalled += 1;
+        break;
+      case "UPLOADING":
+      case "FILE_STORED":
+        uploading += 1;
+        break;
+      default:
+        processing += 1;
+    }
   }
   return {
-    total: statuses.length,
+    total: states.length,
     // Todo lo que ya no está transfiriéndose tiene sus bytes a salvo.
-    uploaded: statuses.length - uploading,
+    uploaded: states.length - uploading,
     uploading,
     indexed,
     notIndexable,
     failed,
+    stalled,
     processing,
     settled: processing === 0 && uploading === 0,
   };
@@ -93,6 +125,11 @@ export function batchProgressLabel(progress: BatchProgress): string {
   }
   if (progress.indexed > 0) parts.push(`${progress.indexed} indexados por IUSIA`);
   if (progress.processing > 0) parts.push(`${progress.processing} procesando`);
+  if (progress.stalled > 0) {
+    parts.push(
+      `${progress.stalled} con procesamiento detenido`,
+    );
+  }
   if (progress.notIndexable > 0) {
     parts.push(`${progress.notIndexable} disponibles para consulta`);
   }

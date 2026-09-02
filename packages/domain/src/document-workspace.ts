@@ -182,10 +182,20 @@ export type DocumentIntelligenceState =
  */
 export const INGESTION_STALLED_AFTER_MINUTES = 10;
 
+/**
+ * Estado de inteligencia de un documento.
+ *
+ * `heartbeatAt` es la señal de vida del trabajo de fondo: se sella al terminar cada
+ * etapa. Cuando existe, es LA fuente para decidir si algo sigue avanzando —una
+ * conversión legítimamente lenta ya no se declara muerta mientras trabaja—. Cuando no
+ * existe, se cae a `updatedAt`, que es lo único que había antes y lo que llevó a
+ * declarar detenidos cinco trabajos de los que el sistema no sabía absolutamente nada.
+ */
 export function documentIntelligenceState(
   ingestionStatus: string,
   updatedAt?: string | null,
   now: Date = new Date(),
+  heartbeatAt?: string | null,
 ): DocumentIntelligenceState {
   if (ingestionStatus === "AI_INDEXED") return "INDEXED";
   if (ingestionStatus === "NOT_INDEXABLE") return "NOT_INDEXABLE";
@@ -199,11 +209,12 @@ export function documentIntelligenceState(
   // transferencia, la fila se quedaría en UPLOADING sin que nadie la volviera a tocar:
   // pasado el margen se declara detenida y se ofrece reintentar, en vez de dejar al
   // abogado ante un estado que ya no avanza.
+  const lastSignal = heartbeatAt ?? updatedAt;
   const stalled =
-    updatedAt !== null &&
-    updatedAt !== undefined &&
+    lastSignal !== null &&
+    lastSignal !== undefined &&
     (() => {
-      const since = now.getTime() - Date.parse(updatedAt);
+      const since = now.getTime() - Date.parse(lastSignal);
       return Number.isFinite(since) && since > INGESTION_STALLED_AFTER_MINUTES * 60_000;
     })();
   if (stalled) return "STALLED";

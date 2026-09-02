@@ -20,6 +20,14 @@ import type { GoogleDriveAdapter } from "../integrations/google-drive.js";
  * se reutiliza. Los reintentos no duplican porque `ensureFolder` busca antes de
  * crear y el repositorio recuerda el primer id.
  */
+/** Las cuatro carpetas que IUSIA mantiene por expediente. */
+export interface MatterFolders {
+  matter: string;
+  uploaded: string;
+  generated: string;
+  retired: string;
+}
+
 export class DriveWorkspaceService {
   constructor(
     private readonly env: Env,
@@ -95,11 +103,41 @@ export class DriveWorkspaceService {
    * Carpeta del expediente y sus dos subcarpetas. Devuelve los ids de "aportados" y
    * "generados", donde viven los documentos del abogado y los de IUSIA.
    */
+  /**
+   * Estructura de carpetas en curso, por expediente.
+   *
+   * Cinco documentos del mismo lote se procesan a la vez, y los cinco necesitan las
+   * mismas cuatro carpetas. Sin esto, los cinco comprobaban D1 a la vez, los cinco
+   * fallaban la comprobación y los cinco llamaban a Drive: cuatro carpetas duplicadas
+   * por nivel, y cuatro trabajadores perdiendo la escritura en D1 con carpetas
+   * huérfanas detrás.
+   *
+   * `remember` ya resuelve la carrera en D1 —índice único y relectura—, pero eso ocurre
+   * DESPUÉS de haber creado la carpeta en el proveedor. Compartir la promesa evita la
+   * llamada de más, que es donde estaba el daño real.
+   */
+  private static readonly inFlight = new Map<string, Promise<MatterFolders>>();
+
   async ensureMatterFolders(
     userId: string,
     organizationId: string,
     matter: { id: string; reference: string; title: string },
-  ): Promise<{ matter: string; uploaded: string; generated: string; retired: string }> {
+  ): Promise<MatterFolders> {
+    const key = `${organizationId}:${matter.id}`;
+    const running = DriveWorkspaceService.inFlight.get(key);
+    if (running) return running;
+    const started = this.createMatterFolders(userId, organizationId, matter).finally(() => {
+      DriveWorkspaceService.inFlight.delete(key);
+    });
+    DriveWorkspaceService.inFlight.set(key, started);
+    return started;
+  }
+
+  private async createMatterFolders(
+    userId: string,
+    organizationId: string,
+    matter: { id: string; reference: string; title: string },
+  ): Promise<MatterFolders> {
     const drive = await this.adapterFor(organizationId);
     const { matters } = await this.ensureFirmStructure(userId, organizationId);
     const folderName = matterFolderName(matter.reference, matter.title);

@@ -193,9 +193,9 @@ describe("carga durable: el archivo deja de depender del navegador", () => {
   it("un archivo que falla al subir no arrastra a los otros cuatro", () => {
     const p = batchProgress(many({ UPLOADED: 4, UPLOAD_FAILED: 1 }));
     expect(p.total).toBe(5);
-    expect(p.failed).toBe(0);
-    // El fallido no se cuenta como cargado, y los cuatro siguen su curso.
-    expect(p.uploaded).toBe(5 - p.uploading);
+    // El que no llegó se cuenta como fallido, y los cuatro siguen su curso.
+    expect(p.failed).toBe(1);
+    expect(p.processing).toBe(4);
   });
 
   it("no se puede convocar ignorando archivos que aún se están subiendo", () => {
@@ -267,5 +267,86 @@ describe("navegar no altera la realidad de los archivos", () => {
     // Es la frase que cierra la ansiedad: deja de depender del navegador del abogado.
     expect(DOCUMENT_INTELLIGENCE_TERMS.UPLOADED.label).toBe("Cargado · Procesando");
     expect(DOCUMENT_INTELLIGENCE_TERMS.UPLOADED.hint).toContain("ya está guardado en IUSIA");
+  });
+});
+
+/**
+ * Regresión del incidente de los cinco documentos de IUS-2026-016 (2026-09-02 03:58Z).
+ *
+ * Los cinco quedaron en «Procesamiento detenido» a los diez minutos exactos. La
+ * evidencia del ledger: `ingestion_attempts = 0`, `ingestion_started_at = NULL`,
+ * `ingestion_timings = NULL` — el consumidor nunca llegó a marcarlos como empezados.
+ * La UI los declaró muertos por PURA ARITMÉTICA sobre `updated_at`, sin un solo dato
+ * sobre su estado real, y la cabecera decía a la vez «5 procesando».
+ */
+describe("«detenido» debe significar algo, no sólo antigüedad", () => {
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+  it("un trabajo que sigue dando señales NO se declara detenido", () => {
+    // Subido hace media hora, pero la última etapa terminó hace un minuto: está vivo.
+    // Antes esto era «Procesamiento detenido» y el abogado veía muerto lo que trabajaba.
+    expect(
+      documentIntelligenceState("PROCESSING", minutesAgo(30), new Date(), minutesAgo(1)),
+    ).toBe("PROCESSING");
+  });
+
+  it("un trabajo sin señales durante el margen SÍ se declara detenido", () => {
+    expect(
+      documentIntelligenceState("PROCESSING", minutesAgo(30), new Date(), minutesAgo(20)),
+    ).toBe("STALLED");
+  });
+
+  it("sin latido se cae a la marca de actualización, como antes", () => {
+    // Documentos anteriores a la instrumentación: el comportamiento no cambia.
+    expect(documentIntelligenceState("PROCESSING", minutesAgo(30))).toBe("STALLED");
+    expect(documentIntelligenceState("PROCESSING", minutesAgo(1))).toBe("PROCESSING");
+  });
+
+  it("el latido no resucita un estado terminal", () => {
+    expect(
+      documentIntelligenceState("AI_INDEXED", minutesAgo(90), new Date(), minutesAgo(90)),
+    ).toBe("INDEXED");
+    expect(documentIntelligenceState("ERROR", minutesAgo(90), new Date(), minutesAgo(1))).toBe(
+      "ERROR",
+    );
+  });
+});
+
+describe("la cabecera no puede contradecir a las filas", () => {
+  it("cinco detenidos NO se cuentan como cinco procesando", () => {
+    // El bug exacto: cabecera «5 archivos cargados · 5 procesando» con las cinco filas
+    // en «Procesamiento detenido». Eran dos derivaciones distintas del mismo dato.
+    const p = batchProgress(many({ STALLED: 5 }));
+    expect(p.stalled).toBe(5);
+    expect(p.processing).toBe(0);
+    const label = batchProgressLabel(p);
+    expect(label).toContain("5 con procesamiento detenido");
+    expect(label).not.toContain("5 procesando");
+  });
+
+  it("un lote mixto refleja cada estado tal cual", () => {
+    const p = batchProgress(many({ INDEXED: 3, PROCESSING: 1, ERROR: 1 }));
+    const label = batchProgressLabel(p);
+    expect(label).toContain("5 archivos cargados");
+    expect(label).toContain("3 indexados por IUSIA");
+    expect(label).toContain("1 procesando");
+    expect(label).toContain("1 con error");
+  });
+
+  it("todo indexado se dice sin ruido", () => {
+    expect(batchProgressLabel(batchProgress(many({ INDEXED: 5 })))).toBe(
+      "5 archivos cargados · 5 indexados por IUSIA",
+    );
+  });
+
+  it("un lote detenido está asentado: ya no va a cambiar solo", () => {
+    // La barra de avance debe terminar aunque no acabe en verde.
+    expect(batchProgress(many({ STALLED: 5 })).settled).toBe(true);
+  });
+
+  it("acepta tanto el estado derivado como el crudo para lo indexado", () => {
+    // La cabecera recibe estados derivados; algunas rutas todavía pasan el crudo.
+    expect(batchProgress(["INDEXED"]).indexed).toBe(1);
+    expect(batchProgress(["AI_INDEXED"]).indexed).toBe(1);
   });
 });

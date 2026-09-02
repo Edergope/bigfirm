@@ -134,6 +134,13 @@ export const documents = sqliteTable(
     /** Duraciones por etapa en ms, como JSON. Se leen juntas o no se leen. */
     ingestionTimings: text("ingestion_timings"),
     ingestionAttempts: integer("ingestion_attempts").notNull().default(0),
+    /** Última señal de vida del trabajo. Distingue «trabajando» de «abandonado». */
+    ingestionHeartbeatAt: text("ingestion_heartbeat_at"),
+    /** Etapa en curso o en la que se detuvo. */
+    ingestionStage: text("ingestion_stage"),
+    /** Clasificación del fallo. Para soporte; nunca se muestra al abogado. */
+    ingestionFailureCode: text("ingestion_failure_code"),
+    ingestionFailureMessage: text("ingestion_failure_message"),
     /** Lote de carga. Correlación, NO transacción: un fallo no toca a los demás. */
     uploadBatchId: text("upload_batch_id"),
     /**

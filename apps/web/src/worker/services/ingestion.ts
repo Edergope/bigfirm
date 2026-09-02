@@ -98,6 +98,18 @@ export class IngestionService {
     const db = createDb(this.env.DB);
     const documents = new DocumentRepository(db);
 
+    /*
+      EL INTENTO SE REGISTRA PRIMERO.
+
+      En IUS-2026-016 los cinco documentos quedaron con `ingestion_attempts = 0` e
+      `ingestion_started_at = NULL`: no había forma de saber si el consumidor los había
+      tomado y muerto, o si nunca los recibió. Sellar el intento antes de tocar D1, el
+      proveedor o el índice convierte ese contador en la respuesta a esa pregunta.
+    */
+    await documents
+      .markIngestionStarted(message.organization_id, message.document_id)
+      .catch(() => undefined);
+
     const doc = await documents.findById(message.organization_id, message.document_id);
     if (!doc) return { status: "SKIPPED", detail: "documento no encontrado en el registro" };
     if (doc.retiredAt) return { status: "SKIPPED", detail: "documento retirado" };
@@ -108,20 +120,30 @@ export class IngestionService {
       return { status: "SKIPPED", detail: "versión no vigente" };
     }
 
-    // Las credenciales son las del ALMACENAMIENTO DE LA ORGANIZACIÓN, no las del
-    // abogado que vinculó el archivo: una ingestión en background no puede depender
-    // del OAuth personal de nadie. Sin conexión válida el documento queda PENDIENTE y
-    // el mensaje se ACK-ea: ningún reintento resolverá una reconexión OAuth pendiente.
-    let storage;
-    try {
-      storage = await this.storage.resolveAdapter(message.organization_id);
-    } catch (error) {
-      if (error instanceof DriveConnectionError) {
-        await documents.setStatus(message.organization_id, message.document_id, "PENDIENTE");
-        return { status: "STORAGE_NOT_CONFIGURED", detail: error.code };
+    /*
+      EL PROVEEDOR SE RESUELVE TARDE, Y SÓLO SI HACE FALTA.
+
+      Antes se resolvía al principio, para todos los mensajes. Eso ataba CADA ingestión
+      a la salud del OAuth de Drive en ese instante: un fallo que no fuera
+      `DriveConnectionError` —un error de red al refrescar el token, por ejemplo— se
+      propagaba, el mensaje se reintentaba tres veces y acababa en la cola de descarte,
+      dejando el documento congelado en PROCESSING sin una sola pista.
+
+      Con el ingreso durable, los bytes ya están en R2: Drive sólo se necesita para la
+      sincronización final. Si esa parte falla, el documento queda en ERROR con su etapa
+      registrada y es reintentable, en vez de desaparecer del mundo.
+    */
+    const resolveStorage = async () => {
+      try {
+        return await this.storage.resolveAdapter(message.organization_id);
+      } catch (error) {
+        if (error instanceof DriveConnectionError) {
+          await documents.setStatus(message.organization_id, message.document_id, "PENDIENTE");
+          return null;
+        }
+        throw error;
       }
-      throw error;
-    }
+    };
 
     let stage: IngestionStage = "PROVIDER_SYNC";
     // Reloj por etapa. Sin esto, la única evidencia era `indexed_at` —cuándo terminó—,
@@ -147,6 +169,8 @@ export class IngestionService {
       let syncedProviderFileId: string | null = null;
 
       if (doc.driveFileId) {
+        const storage = await resolveStorage();
+        if (!storage) return { status: "STORAGE_NOT_CONFIGURED" };
         bytes = await withDeadline(
           storage.download(doc.driveFileId),
           DOWNLOAD_DEADLINE_MS,
@@ -161,6 +185,13 @@ export class IngestionService {
           return { status: "ERROR", detail: "los bytes del documento no están disponibles" };
         }
         bytes = await ingress.arrayBuffer();
+        await documents.markIngestionProgress(
+          message.organization_id,
+          message.document_id,
+          "FINAL_STORAGE",
+        );
+        const storage = await resolveStorage();
+        if (!storage) return { status: "STORAGE_NOT_CONFIGURED" };
         syncedProviderFileId = await this.syncToProvider(storage, doc, message, bytes);
         if (syncedProviderFileId) {
           await documents.attachProviderFile(
@@ -178,6 +209,11 @@ export class IngestionService {
         "NORMALIZE",
       );
       clock.mark("normalize_ms");
+      await documents.markIngestionProgress(
+        message.organization_id,
+        message.document_id,
+        "NORMALIZATION",
+      );
 
       const key = documentMirrorKey(
         message.organization_id,
@@ -199,6 +235,11 @@ export class IngestionService {
         },
       });
       clock.mark("r2_ms");
+      await documents.markIngestionProgress(
+        message.organization_id,
+        message.document_id,
+        "AI_SEARCH",
+      );
 
       stage = "AI_SEARCH_UPLOAD";
       await uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
@@ -237,7 +278,13 @@ export class IngestionService {
         stage,
         ...safeIngestionError(error),
       });
-      await documents.markIngestionFailed(message.organization_id, message.document_id);
+      await documents.markIngestionFailedAt(
+        message.organization_id,
+        message.document_id,
+        FAILURE_STAGE[stage] ?? "UNKNOWN",
+        error instanceof Error ? error.name : "UNKNOWN",
+        error instanceof Error ? error.message : "error desconocido",
+      );
       return {
         status: "ERROR",
         detail: error instanceof Error ? error.message : "error desconocido",
@@ -295,6 +342,16 @@ export class IngestionService {
     return folders.uploaded;
   }
 }
+
+/** Etapa técnica → clasificación estable que se persiste para soporte. */
+const FAILURE_STAGE: Record<string, string> = {
+  PROVIDER_SYNC: "FINAL_STORAGE",
+  DRIVE_DOWNLOAD: "DOWNLOAD",
+  NORMALIZE: "NORMALIZATION",
+  R2_PUT: "INGRESS",
+  AI_SEARCH_UPLOAD: "AI_SEARCH",
+  D1_MARK_INDEXED: "FINALIZATION",
+};
 
 export type IngestionStage =
   | "PROVIDER_SYNC"

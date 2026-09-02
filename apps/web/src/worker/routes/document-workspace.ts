@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   batchProgress,
+  documentIntelligenceState,
   documentIngressKey,
   documentTypeForIntent,
   newId,
@@ -306,6 +307,9 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
     size_bytes: d.sizeBytes,
     ingestion_status: d.ingestionStatus,
     updated_at: d.updatedAt,
+    // Señal de vida del trabajo de fondo. La UI la usa para no declarar muerto lo que
+    // sigue avanzando; no es dato de negocio y no se muestra.
+    ingestion_heartbeat_at: d.ingestionHeartbeatAt,
     content_source: d.contentSource,
     // Provenance visible del entregable: de qué plantilla y con qué agente salió.
     generated_from_template_id: d.generatedFromTemplateId,
@@ -1232,7 +1236,11 @@ documentWorkspaceRoutes.get("/matters/:matterId/uploads/:batchId", async (c) => 
 
   return c.json({
     batch_id: batchId,
-    ...batchProgress(items.map((i) => i.ingestion_status)),
+    ...batchProgress(
+      docs.map((d) =>
+        documentIntelligenceState(d.ingestionStatus, d.updatedAt, new Date(), d.ingestionHeartbeatAt),
+      ),
+    ),
     documents: items,
   });
 });

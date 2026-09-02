@@ -476,6 +476,31 @@ function Documentos({ data }: { data: MatterDetail }) {
   const workspace = useQuery({
     queryKey: ["workspace", matterId],
     queryFn: () => api.matterWorkspace(matterId),
+    /*
+      El abogado tuvo que RECARGAR la página para ver que cinco documentos habían
+      dejado de procesarse. La carpeta se consultaba una vez y no volvía a mirar.
+
+      Ahora se refresca sola mientras haya algo en movimiento —subiendo, cargado o
+      procesando— y se detiene cuando todos alcanzan un estado terminal. Es UNA consulta
+      de la carpeta entera, no una por documento: quince archivos no son quince sondeos.
+    */
+    refetchInterval: (query) => {
+      const docs = query.state.data?.uploaded ?? [];
+      return shouldPollIngestion(
+        docs.map((d) => ({
+          ingestion_status: d.ingestion_status,
+          updated_at: d.updated_at,
+        })),
+      )
+        ? 3000
+        : false;
+    },
+    // Volver a la pestaña del navegador trae el estado real de inmediato, sin esperar
+    // al siguiente ciclo y sin recargar. `staleTime: 0` es lo que hace que ese refresco
+    // ocurra de verdad: con los 10 s por defecto, volver antes de ese margen devolvía
+    // la copia en caché — exactamente la sensación de «no se actualiza».
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 
   const fileInput = useRef<HTMLInputElement>(null);
@@ -589,9 +614,14 @@ function DocFolder({
   onRetry?: (documentId: string) => void;
   retryingId?: string | null;
 }) {
-  // Progreso agregado: con quince archivos el abogado necesita saber cuánto falta de
-  // un vistazo, no contar quince chips uno por uno.
-  const progress = batchProgress(docs.map((d) => d.ingestion_status));
+  // Progreso agregado derivado de LOS MISMOS estados que muestran las filas. Leer
+  // `ingestion_status` aquí y `documentIntelligenceState` abajo era lo que producía
+  // «5 procesando» en la cabecera con cinco filas en «Procesamiento detenido».
+  const progress = batchProgress(
+    docs.map((d) =>
+      documentIntelligenceState(d.ingestion_status, d.updated_at, new Date(), d.ingestion_heartbeat_at),
+    ),
+  );
   return (
     <Module
       title={title}
@@ -623,7 +653,12 @@ function DocFolder({
             // La pregunta del abogado aquí es «¿IUSIA puede usar esto?», no «¿alguien
             // lo revisó?». La fuente es `ingestion_status`; el ciclo de revisión
             // jurídica es otro eje y se muestra aparte.
-            const intel = documentIntelligenceState(d.ingestion_status, d.updated_at);
+            const intel = documentIntelligenceState(
+              d.ingestion_status,
+              d.updated_at,
+              new Date(),
+              d.ingestion_heartbeat_at,
+            );
             const st = DOCUMENT_INTELLIGENCE_TERMS[intel];
             const Icon = documentIcon(d.mime_type, d.name);
             return (

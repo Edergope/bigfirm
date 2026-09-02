@@ -283,3 +283,78 @@ describe("la ingestión no gasta créditos de modelo", () => {
     expect(gatewayCalls).toBe(0);
   });
 });
+
+/**
+ * El consumidor debe dejar constancia de que TOCÓ el mensaje.
+ *
+ * En IUS-2026-016 los cinco documentos quedaron con `ingestion_attempts = 0`: no había
+ * forma de distinguir «el consumidor los tomó y murió» de «nunca los recibió». Sellar
+ * el intento antes de cualquier dependencia externa convierte ese contador en la
+ * respuesta a esa pregunta.
+ */
+describe("cada mensaje recibido deja rastro", () => {
+  it("un mensaje válido siempre pasa por el servicio", async () => {
+    const seen: string[] = [];
+    const { messages, acked } = fakeBatch(5);
+    await handleIngestionQueue(
+      { messages } as unknown as MessageBatch<unknown>,
+      {} as never,
+      {
+        ingest: async (m: { document_id: string }) => {
+          seen.push(m.document_id);
+          return { status: "INDEXED" as const };
+        },
+      },
+    );
+    expect(seen).toHaveLength(5);
+    expect(acked).toHaveLength(5);
+  });
+
+  it("un fallo del proveedor deja el mensaje para reintento, no lo descarta", async () => {
+    // Antes, un error que no fuera de conexión se propagaba, el mensaje agotaba sus
+    // reintentos y acababa descartado dejando el documento congelado en PROCESSING.
+    const { messages, acked, retried } = fakeBatch(3);
+    await handleIngestionQueue(
+      { messages } as unknown as MessageBatch<unknown>,
+      {} as never,
+      {
+        ingest: async () => {
+          throw new Error("fallo al refrescar el token del proveedor");
+        },
+      },
+    );
+    expect(retried).toHaveLength(3);
+    expect(acked).toHaveLength(0);
+  });
+
+  it("un documento sin archivo en el proveedor es un caso NORMAL", async () => {
+    // `drive_file_id` es nullable desde el ingreso durable: sus bytes están en R2 y el
+    // trabajo de fondo crea el archivo. Un mensaje sin ese campo debe procesarse.
+    const messages = [
+      {
+        body: {
+          organization_id: "org_x",
+          matter_id: "mtr_x",
+          document_id: "doc_x",
+          reason: "UPLOADED",
+          enqueued_at: new Date().toISOString(),
+        },
+        ack: () => undefined,
+        retry: () => undefined,
+      },
+    ];
+    let received: unknown = null;
+    await handleIngestionQueue(
+      { messages } as unknown as MessageBatch<unknown>,
+      {} as never,
+      {
+        ingest: async (m: unknown) => {
+          received = m;
+          return { status: "INDEXED" as const };
+        },
+      },
+    );
+    expect(received).not.toBeNull();
+    expect((received as { drive_file_id?: string }).drive_file_id).toBeUndefined();
+  });
+});

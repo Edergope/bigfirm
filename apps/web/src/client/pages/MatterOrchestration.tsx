@@ -15,6 +15,7 @@ import {
   deriveProgressStages,
   humanizeAgentId,
   convocationReadiness,
+  documentIntelligenceState,
   groundingNotice,
   shouldKeepPolling,
   shouldRefreshHistory,
@@ -132,7 +133,9 @@ export function MatterOrchestration({
         error={start.error}
         hasRuns={roots.length > 0}
         documentCount={data.documents.length}
-        ingestionStatuses={data.documents.map((d) => d.ingestionStatus)}
+        ingestionStatuses={data.documents.map((d) =>
+          documentIntelligenceState(d.ingestionStatus, d.updatedAt),
+        )}
       />
 
       {selectedRoot ? (

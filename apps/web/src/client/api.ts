@@ -59,6 +59,8 @@ export interface DocumentEntry {
   size_bytes: number | null;
   ingestion_status: string;
   updated_at: string;
+  /** Señal de vida del proceso de fondo. Operación, no negocio: nunca se muestra. */
+  ingestion_heartbeat_at: string | null;
   /** Provenance del entregable generado por IUSIA. Null en documentos aportados. */
   content_source: string | null;
   generated_from_template_id: string | null;
@@ -141,6 +143,8 @@ export interface MatterDetail {
     ingestionStatus: string;
     driveFileId: string | null;
     updatedAt: string;
+    /** Señal de vida del proceso de fondo. Operación, no negocio. */
+    ingestionHeartbeatAt: string | null;
   }>;
   executions: ExecutionRow[];
   facts: Array<{

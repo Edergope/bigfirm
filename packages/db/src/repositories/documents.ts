@@ -398,11 +398,52 @@ export class DocumentRepository {
   }
 
   async markIngestionStarted(organizationId: string, documentId: string) {
+    const now = new Date().toISOString();
     await this.db
       .update(documents)
       .set({
-        ingestionStartedAt: new Date().toISOString(),
+        ingestionStartedAt: now,
+        ingestionHeartbeatAt: now,
+        ingestionStage: "INGRESS",
         ingestionAttempts: sql`${documents.ingestionAttempts} + 1`,
+        ingestionFailureCode: null,
+        ingestionFailureMessage: null,
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /**
+   * Latido: la etapa terminó y el trabajo sigue vivo.
+   *
+   * Sin esto, declarar «detenido» era pura aritmética sobre `updated_at`, y una
+   * conversión legítimamente lenta se declaraba muerta mientras trabajaba. Con el
+   * latido, la UI sólo llama muerto a lo que de verdad dejó de dar señales.
+   */
+  async markIngestionProgress(organizationId: string, documentId: string, stage: string) {
+    await this.db
+      .update(documents)
+      .set({ ingestionHeartbeatAt: new Date().toISOString(), ingestionStage: stage })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /** Deja constancia de DÓNDE y POR QUÉ se detuvo. El abogado ve otra cosa. */
+  async markIngestionFailedAt(
+    organizationId: string,
+    documentId: string,
+    stage: string,
+    code: string,
+    safeMessage: string,
+  ) {
+    const now = new Date().toISOString();
+    await this.db
+      .update(documents)
+      .set({
+        ingestionStatus: "ERROR",
+        ingestionStage: stage,
+        ingestionFailureCode: code,
+        ingestionFailureMessage: safeMessage.slice(0, 300),
+        ingestionHeartbeatAt: now,
+        updatedAt: now,
       })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
