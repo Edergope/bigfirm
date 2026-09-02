@@ -90,6 +90,9 @@ export function ingestionLifecycle(
   if (status === "ERROR") return "ERROR";
   if (status === "UPLOAD_FAILED") return "UPLOAD_FAILED";
   if (status === "UPLOADING" || status === "FILE_STORED") return "UPLOADING";
+  // Subido al índice, pendiente de confirmar que se recupera. Sigue en curso: para el
+  // abogado es «Procesando», y el sondeo debe continuar hasta que se confirme.
+  if (status === "INDEXING") return attempts < 1 ? "QUEUED" : "PROCESSING";
 
   const olderThan = (iso: string | null | undefined, minutes: number): boolean => {
     if (!iso) return false;

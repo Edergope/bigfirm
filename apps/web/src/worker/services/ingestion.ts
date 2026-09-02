@@ -82,6 +82,26 @@ export interface QueueDelivery {
 }
 export const AI_SEARCH_DEADLINE_MS = 150_000;
 
+/**
+ * Cuánto se espera a que el índice confirme, DENTRO del trabajo de ingestión.
+ *
+ * MEDIDO en los cinco documentos de IUS-2026-016: el índice tardó entre 77 y 112
+ * segundos, y ocupó el 98,8 %–99,4 % del tiempo total. La normalización fueron 94-261 ms
+ * y la descarga menos de 550: no había nada que optimizar ahí.
+ *
+ * El sondeo estaba fijado en 120 s, es decir, 7,9 segundos por encima del peor caso
+ * observado. `Cedula extrangeria Maria.pdf` cruzó ese margen en su primer intento y el
+ * abogado vio «Error de procesamiento» en un documento que estaba perfectamente bien:
+ * la reentrega lo indexó a los 112 s.
+ *
+ * Subir el techo sólo movería el precipicio. Lo que se corrige es la premisa: cuando el
+ * sondeo vence, el item YA SE SUBIÓ —`uploadAndPoll` sube primero y luego consulta—, así
+ * que declarar un fallo es falso y volver a subirlo en el reintento, desperdicio. El
+ * documento queda INDEXANDO y la confirmación pasa a la barrida, que la hace con una
+ * recuperación real. Nadie bloquea un consumidor durante dos minutos.
+ */
+export const AI_SEARCH_POLL_MS = 25_000;
+
 export type StageTimings = Record<string, number>;
 
 export class IngestionTimeoutError extends Error {
@@ -279,7 +299,7 @@ export class IngestionService {
 
         stage = "AI_SEARCH_UPLOAD";
         await heartbeat("AI_SEARCH");
-        await withDeadline(
+        const indexed = await withDeadline(
           uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
             organization_id: message.organization_id,
             matter_id: message.matter_id,
@@ -294,13 +314,26 @@ export class IngestionService {
         clock.mark("ai_search_ms");
 
         stage = "D1_MARK_INDEXED";
-        await documents.markIndexed(
-          message.organization_id,
-          message.document_id,
-          key,
-          await sha256Hex(text),
-          clock.finish(),
-        );
+        const hash = await sha256Hex(text);
+        if (indexed?.status === "completed") {
+          await documents.markIndexed(
+            message.organization_id,
+            message.document_id,
+            key,
+            hash,
+            clock.finish(),
+          );
+        } else {
+          // Subido pero sin confirmar todavía. NO es un error: el espejo está escrito y
+          // la barrida confirmará con una recuperación real.
+          await documents.markIndexing(
+            message.organization_id,
+            message.document_id,
+            key,
+            hash,
+            clock.finish(),
+          );
+        }
       }
 
       /*
@@ -313,7 +346,18 @@ export class IngestionService {
         await heartbeat("FINAL_STORAGE");
         try {
           const storage = await this.resolveStorage(documents, message);
-          if (storage) {
+          if (!storage) {
+            // Sin credenciales del proveedor no hay nada que sincronizar AHORA, pero
+            // dejarlo en silencio creaba deuda invisible: los cinco documentos de
+            // IUS-2026-016 quedaron indexados con `provider_sync_state` nulo, así que la
+            // barrida nunca los vería y su original jamás saldría del ingreso.
+            await this.deferProviderSync(
+              documents,
+              doc,
+              message,
+              new Error("DRIVE_NOT_AVAILABLE"),
+            );
+          } else {
             const providerFileId = await withDeadline(
               this.syncToProvider(storage, doc, message, bytes),
               PROVIDER_SYNC_DEADLINE_MS,
@@ -636,12 +680,11 @@ export async function uploadToAiSearch(
   const item = await aiSearch.items.uploadAndPoll(key, text, {
     metadata,
     pollIntervalMs: 1000,
-    timeoutMs: 120000,
+    timeoutMs: AI_SEARCH_POLL_MS,
   });
-  if (item.status !== "completed") {
-    throw new Error(
-      `AI Search uploadAndPoll finalizó con status=${item.status ?? "unknown"}${item.error ? `: ${item.error}` : ""}`,
-    );
+  if (item.status === "error") {
+    // El proveedor rechazó el contenido: eso sí es un fallo real.
+    throw new Error(`AI Search rechazó el item${item.error ? `: ${item.error}` : ""}`);
   }
   return item;
 }

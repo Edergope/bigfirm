@@ -172,6 +172,10 @@ export function documentStatusLabel(ingestionStatus: string): {
       return { label: "Vista disponible · no indexado", tone: "neutral" };
     case "ERROR":
       return { label: "Error de procesamiento", tone: "critical" };
+    case "INDEXING":
+      // Subido al índice, pendiente de confirmar que se recupera. Para el abogado es
+      // proceso en curso; el estado sólo avanza cuando una recuperación real responde.
+      return { label: "Procesando", tone: "warning" };
     case "UPLOADING":
     case "FILE_STORED":
       // «Subiendo» dura EXACTAMENTE la transferencia. Antes cubría también la creación

@@ -1,5 +1,6 @@
 import { DocumentRepository, createDb } from "@iusia/db";
 import type { Env } from "./env.js";
+import { AiSearchRetrievalProvider } from "./integrations/ai-search.js";
 
 /**
  * Barrida de reconciliación de la sincronización con el proveedor.
@@ -17,6 +18,53 @@ import type { Env } from "./env.js";
  * Es deliberadamente pequeña: consulta lo vencido, lo reencola con tope y termina. No
  * procesa documentos ni habla con el proveedor — de eso ya se encarga el consumidor.
  */
+/**
+ * Confirma que un documento subido al índice se RECUPERA de verdad.
+ *
+ * Es el gate que faltaba: hasta ahora `AI_INDEXED` significaba «el proveedor dijo
+ * completado», y ya sabemos por experiencia que eso no garantiza que el RAG devuelva
+ * nada —un filtro de metadata mal puesto dejó la recuperación en cero durante días sin
+ * que ningún estado lo delatara—. Ahora el estado sólo avanza cuando una consulta real,
+ * con el alcance real, devuelve fragmentos del documento.
+ *
+ * Sin LLM: es una consulta al índice, no un análisis.
+ */
+export async function confirmIndexReadiness(env: Env): Promise<{ confirmed: number; pending: number }> {
+  const documents = new DocumentRepository(createDb(env.DB));
+  const awaiting = await documents.listAwaitingIndexConfirmation(SWEEP_BATCH_LIMIT);
+  const retrieval = new AiSearchRetrievalProvider(env.AI_SEARCH ?? null);
+
+  let confirmed = 0;
+  let pending = 0;
+  for (const doc of awaiting) {
+    try {
+      const chunks = await retrieval.search({
+        scope: { organization_id: doc.organizationId, authorized_matter_ids: [doc.matterId] },
+        query: "documento del expediente",
+        max_results: 5,
+      });
+      // Ha de recuperarse ESTE documento, no cualquiera del expediente.
+      const mine = chunks.filter((c) => c.document_id === doc.id);
+      if (mine.length > 0) {
+        await documents.markIndexed(
+          doc.organizationId,
+          doc.id,
+          doc.r2MirrorKey ?? "",
+          doc.contentHash ?? "",
+        );
+        confirmed += 1;
+      } else {
+        pending += 1;
+      }
+    } catch {
+      // El índice no responde ahora: se reintenta en la próxima barrida. Un fallo aquí
+      // nunca degrada el estado del documento.
+      pending += 1;
+    }
+  }
+  return { confirmed, pending };
+}
+
 export async function handleProviderSyncSweep(env: Env): Promise<{ requeued: number }> {
   const documents = new DocumentRepository(createDb(env.DB));
   const due = await documents.listProviderSyncDue(new Date().toISOString(), SWEEP_BATCH_LIMIT);

@@ -3,6 +3,7 @@ import {
   DOWNLOAD_DEADLINE_MS,
   IngestionTimeoutError,
   NORMALIZE_DEADLINE_MS,
+  AI_SEARCH_POLL_MS,
   StageClock,
   isIndexableMimeType,
   normalizeToText,
@@ -106,7 +107,7 @@ describe("normalización documental", () => {
           is_current: "true",
         },
         pollIntervalMs: 1000,
-        timeoutMs: 120000,
+        timeoutMs: 25000,
       },
     );
   });
@@ -117,7 +118,7 @@ describe("normalización documental", () => {
     );
   });
 
-  it("falla cerrado si AI Search no confirma status completed", async () => {
+  it("falla cerrado si AI Search RECHAZA el contenido", async () => {
     const uploadAndPoll = vi.fn().mockResolvedValue({
       id: "item-err",
       key: "doc.txt",
@@ -133,7 +134,7 @@ describe("normalización documental", () => {
         document_version: "1",
         is_current: "true",
       }),
-    ).rejects.toThrow("status=error: unsupported content");
+    ).rejects.toThrow("AI Search rechazó el item: unsupported content");
   });
 });
 
@@ -186,8 +187,20 @@ describe("cronómetro por etapa", () => {
  * indexado después. Un `status` distinto de `completed` lanza, así que un documento a
  * medio indexar nunca llega a AI_INDEXED.
  */
+/**
+ * SEMÁNTICA DE AI_INDEXED — el contrato cambió, y a mejor.
+ *
+ * MEDIDO en los cinco documentos de IUS-2026-016: el índice tardó entre 77 y 112 s y
+ * fue el 98,8 %–99,4 % del tiempo total. El sondeo estaba en 120 s, es decir 7,9 s por
+ * encima del peor caso; `Cedula extrangeria Maria.pdf` cruzó ese margen y el abogado vio
+ * «Error de procesamiento» en un documento que estaba perfectamente bien.
+ *
+ * Un sondeo que vence NO es un fallo: `uploadAndPoll` sube primero y consulta después,
+ * así que el item ya está enviado. Lo que antes garantizaba el `status: completed` lo
+ * garantiza ahora algo más fuerte: una recuperación real desde el índice.
+ */
 describe("semántica de AI_INDEXED", () => {
-  it("un item que no completó impide marcar indexado", async () => {
+  it("un contenido RECHAZADO por el proveedor sigue siendo un fallo", async () => {
     const aiSearch = {
       items: {
         uploadAndPoll: async () => ({ status: "error" as const, error: "conversion failed" }),
@@ -195,20 +208,30 @@ describe("semántica de AI_INDEXED", () => {
     };
     await expect(
       uploadToAiSearch(aiSearch, "org/x/doc.txt", "contenido", { organization_id: "org" }),
-    ).rejects.toThrow(/error/);
+    ).rejects.toThrow(/rechazó/);
   });
 
-  it("sólo `completed` se acepta como indexado", async () => {
-    for (const status of ["queued", "running", "outdated", "skipped"] as const) {
+  it("un sondeo sin confirmar NO lanza: el item ya se subió", async () => {
+    // Subir de nuevo en el reintento sería desperdicio, y declarar error sería falso.
+    for (const status of ["queued", "running"] as const) {
       const aiSearch = { items: { uploadAndPoll: async () => ({ status }) } };
       await expect(
         uploadToAiSearch(aiSearch, "org/x/doc.txt", "contenido", { organization_id: "org" }),
-      ).rejects.toThrow();
+      ).resolves.toMatchObject({ status });
     }
+  });
+
+  it("confirmado de inmediato se acepta igual", async () => {
     const ok = { items: { uploadAndPoll: async () => ({ status: "completed" as const }) } };
     await expect(
       uploadToAiSearch(ok, "org/x/doc.txt", "contenido", { organization_id: "org" }),
     ).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("el sondeo se acota muy por debajo del tiempo del índice", async () => {
+    // Deliberado: no se espera a que el índice termine dentro del consumidor. Bloquearlo
+    // 110 s por documento era el 99 % del tiempo de un lote.
+    expect(AI_SEARCH_POLL_MS).toBeLessThan(60_000);
   });
 });
 

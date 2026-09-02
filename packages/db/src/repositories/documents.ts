@@ -526,6 +526,51 @@ export class DocumentRepository {
   }
 
   /**
+   * Subido al índice, pendiente de confirmar que se recupera.
+   *
+   * El espejo normalizado YA está escrito y el item YA se envió: lo único que falta es
+   * la confirmación, que la barrida hace con una recuperación real. Era esta espera la
+   * que bloqueaba al consumidor 110 segundos y convertía un índice lento en un falso
+   * «error de procesamiento».
+   */
+  async markIndexing(
+    organizationId: string,
+    documentId: string,
+    r2MirrorKey: string,
+    contentHash: string,
+    timings?: Record<string, number>,
+  ) {
+    const now = new Date().toISOString();
+    await this.db
+      .update(documents)
+      .set({
+        r2MirrorKey,
+        contentHash,
+        ingestionStatus: "INDEXING",
+        ingestionStage: "AI_SEARCH",
+        ingestionHeartbeatAt: now,
+        ingestionTimings: timings ? JSON.stringify(timings) : null,
+        updatedAt: now,
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /** Documentos subidos al índice cuya recuperabilidad falta confirmar. */
+  async listAwaitingIndexConfirmation(limit = 25) {
+    return this.db
+      .select({
+        id: documents.id,
+        organizationId: documents.organizationId,
+        matterId: documents.matterId,
+        r2MirrorKey: documents.r2MirrorKey,
+        contentHash: documents.contentHash,
+      })
+      .from(documents)
+      .where(and(eq(documents.ingestionStatus, "INDEXING"), isNull(documents.retiredAt)))
+      .limit(limit);
+  }
+
+  /**
    * Latido: la etapa terminó y el trabajo sigue vivo.
    *
    * Sin esto, declarar «detenido» era pura aritmética sobre `updated_at`, y una

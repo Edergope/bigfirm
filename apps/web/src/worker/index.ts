@@ -11,7 +11,7 @@ import { practiceRoutes } from "./routes/practice.js";
 import { adminRoutes } from "./routes/admin.js";
 import { devRoutes } from "./routes/dev.js";
 import { handleIngestionQueue } from "./queue-consumer.js";
-import { handleProviderSyncSweep } from "./scheduled.js";
+import { confirmIndexReadiness, handleProviderSyncSweep } from "./scheduled.js";
 
 const app = new Hono<AppBindings>();
 
@@ -82,7 +82,11 @@ export default {
   queue: handleIngestionQueue,
   // Red de seguridad de la sincronización con el proveedor. Ver `scheduled.ts`.
   scheduled: async (_event: unknown, env: Env) => {
-    await handleProviderSyncSweep(env);
+    // Dos responsabilidades independientes: confirmar que lo subido al índice se
+    // recupera de verdad, y recuperar la sincronización con el proveedor que quedó
+    // aplazada. Ninguna puede impedir la otra.
+    await confirmIndexReadiness(env).catch(() => undefined);
+    await handleProviderSyncSweep(env).catch(() => undefined);
   },
 };
 
@@ -90,5 +94,5 @@ export default {
 // wrangler.jsonc y sobrevivir al bundling (ver vite.config.ts, keepNames).
 export { LegalWorker } from "./agents/legal-worker.js";
 export { MatterOrchestrationWorkflow } from "./workflows/matter-orchestration.js";
-export { handleIngestionQueue, handleProviderSyncSweep };
+export { handleIngestionQueue, handleProviderSyncSweep, confirmIndexReadiness };
 export type { Env };
