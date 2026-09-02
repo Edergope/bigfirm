@@ -59,7 +59,15 @@ export interface DocumentEntry {
   size_bytes: number | null;
   ingestion_status: string;
   updated_at: string;
-  /** Señal de vida del proceso de fondo. Operación, no negocio: nunca se muestra. */
+  /**
+   * Señales de operación del procesamiento. Nunca se muestran: la pantalla deriva de
+   * ellas el estado que sí lee el abogado.
+   *
+   * `ingestion_attempts` es la decisiva: mientras valga 0, ningún consumidor ha tomado
+   * el trabajo, y llamar «Procesando» a eso describía trabajo que no existía.
+   */
+  ingestion_attempts: number;
+  ingestion_enqueued_at: string | null;
   ingestion_heartbeat_at: string | null;
   /** Provenance del entregable generado por IUSIA. Null en documentos aportados. */
   content_source: string | null;

@@ -284,9 +284,7 @@ export function shouldPollIngestion(
   );
 }
 
-/** ¿Puede reintentarse la indexación de este documento? */
-export function canRetryIngestion(state: DocumentIntelligenceState): boolean {
-  // Una carga interrumpida también se reintenta: el archivo nunca llegó y el abogado
-  // debe poder recuperarlo sin rehacer el expediente entero.
-  return state === "ERROR" || state === "STALLED" || state === "UPLOAD_FAILED";
-}
+// `canRetryIngestion` vivía aquí y decidía a partir del estado derivado, mientras el
+// endpoint decidía a partir de la columna cruda. Esa duplicidad es exactamente lo que
+// hizo que «Reintentar» devolviera un 409 silencioso, así que la definición única vive
+// ahora en `ingestion-lifecycle.ts` y la consumen ambos lados.

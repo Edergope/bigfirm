@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   batchProgress,
+  canRetryIngestion,
   documentIntelligenceState,
+  ingestionLifecycle,
   documentIngressKey,
   documentTypeForIntent,
   newId,
@@ -307,8 +309,11 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
     size_bytes: d.sizeBytes,
     ingestion_status: d.ingestionStatus,
     updated_at: d.updatedAt,
-    // Señal de vida del trabajo de fondo. La UI la usa para no declarar muerto lo que
-    // sigue avanzando; no es dato de negocio y no se muestra.
+    // Señales de operación del procesamiento. No son dato de negocio y no se muestran:
+    // la pantalla deriva de ellas el estado que lee el abogado, con la MISMA función
+    // que usa el endpoint de reintento.
+    ingestion_attempts: d.ingestionAttempts,
+    ingestion_enqueued_at: d.ingestionEnqueuedAt,
     ingestion_heartbeat_at: d.ingestionHeartbeatAt,
     content_source: d.contentSource,
     // Provenance visible del entregable: de qué plantilla y con qué agente salió.
@@ -1153,17 +1158,30 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
   if (!doc || doc.matterId !== matterId) {
     throw new IusiaError("NOT_FOUND", "Documento no encontrado en este expediente");
   }
-  // Se reintenta tanto lo que no se pudo procesar como lo que no llegó a subirse: en
-  // ambos casos hay una fila durable y el abogado debe poder recuperarla sin rehacer
-  // nada. Un documento sin archivo en el proveedor es normal ahora — sus bytes están en
-  // el ingreso durable y el trabajo de fondo los sincroniza.
-  if (doc.ingestionStatus !== "ERROR" && doc.ingestionStatus !== "UPLOAD_FAILED") {
+  /*
+    LA MISMA definición de «reintentable» que usa la pantalla.
+
+    Antes eran dos: el botón aparecía a partir del estado DERIVADO —«detenido», por
+    antigüedad— y aquí se validaba la COLUMNA CRUDA, que decía `PROCESSING`. El
+    resultado fue que `CC JFRR.pdf` mostró «Reintentando…», recibió un 409 y volvió a
+    su sitio sin que la fila se tocara siquiera: su `updated_at` seguía siendo el
+    segundo de la carga original.
+  */
+  const state = ingestionLifecycle({
+    status: doc.ingestionStatus,
+    attempts: doc.ingestionAttempts,
+    heartbeatAt: doc.ingestionHeartbeatAt,
+    enqueuedAt: doc.ingestionEnqueuedAt,
+    updatedAt: doc.updatedAt,
+  });
+  if (!canRetryIngestion(state)) {
     throw new IusiaError(
       "CONFLICT",
-      "Este documento no está en error, así que no hay nada que reintentar",
-      { code: "NOT_RETRYABLE", ingestion_status: doc.ingestionStatus },
+      "Este documento no necesita reintento ahora mismo.",
+      { code: "NOT_RETRYABLE", state },
     );
   }
+
   const hasBytes =
     doc.driveFileId !== null ||
     (await c.env.ARTIFACTS.head(documentIngressKey(organizationId, matterId, documentId))) !== null;
@@ -1177,25 +1195,47 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
     );
   }
 
-  // La transición a PROCESSING es la que autoriza el reencolado: si otra pestaña ya lo
-  // reintentó, ésta no encuentra el documento en ERROR y no encola un segundo mensaje.
-  const claimed = await documents.markIngestionRetrying(organizationId, documentId, doc.ingestionStatus);
+  // Reclamo del reintento: dos clics seguidos no pueden encolar dos mensajes. La
+  // transición desde el estado observado es lo que autoriza: si otra pestaña ya
+  // reintentó, esta condición no encuentra la fila.
+  const claimed = await documents.markIngestionRetrying(
+    organizationId,
+    documentId,
+    doc.ingestionStatus,
+  );
   if (!claimed) {
     throw new IusiaError("CONFLICT", "El documento ya se está reprocesando", {
       code: "ALREADY_RETRYING",
     });
   }
 
-  await c.env.DOCUMENT_INGESTION.send({
-    organization_id: organizationId,
-    matter_id: matterId,
-    document_id: documentId,
-    // Sin `drive_file_id` el trabajo de fondo lee del ingreso durable y sincroniza el
-    // proveedor. Con él, reprocesa desde el archivo que ya existe allí.
-    ...(doc.driveFileId ? { drive_file_id: doc.driveFileId } : {}),
-    reason: "RETRY",
-    enqueued_at: new Date().toISOString(),
-  });
+  try {
+    await c.env.DOCUMENT_INGESTION.send({
+      organization_id: organizationId,
+      matter_id: matterId,
+      document_id: documentId,
+      // Sin `drive_file_id` el trabajo de fondo lee del ingreso durable y sincroniza el
+      // proveedor. Con él, reprocesa desde el archivo que ya existe allí.
+      ...(doc.driveFileId ? { drive_file_id: doc.driveFileId } : {}),
+      reason: "RETRY",
+      enqueued_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    // Si la cola NO aceptó el mensaje, el documento no puede quedarse diciendo que está
+    // en camino: no lo está. Se devuelve a un estado reintentable y se dice la verdad.
+    await documents.markIngestionFailedAt(
+      organizationId,
+      documentId,
+      "INGRESS",
+      "QUEUE_SEND_FAILED",
+      error instanceof Error ? error.message : "no fue posible encolar el reprocesamiento",
+    );
+    throw new IusiaError(
+      "CONFLICT",
+      "No fue posible poner el documento en cola de procesamiento. Vuelve a intentarlo.",
+      { code: "QUEUE_SEND_FAILED" },
+    );
+  }
 
   await audit.record({
     organizationId,

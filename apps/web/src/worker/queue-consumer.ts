@@ -1,4 +1,5 @@
 import { DocumentIngestionMessage } from "@iusia/domain";
+import { DocumentRepository, createDb } from "@iusia/db";
 import type { Env } from "./env.js";
 import { IngestionService } from "./services/ingestion.js";
 
@@ -11,14 +12,16 @@ import { IngestionService } from "./services/ingestion.js";
  * fallo que ningún reintento resolverá — el documento queda PENDIENTE de indexar.
  *
  * PARALELISMO. Los documentos de un lote son INDEPENDIENTES: cada uno se descarga,
- * normaliza, escribe en R2 e indexa por su cuenta, sin leer nada de los demás. Aun así
- * se procesaban en serie —`for (…) { await ingest(…) }`—, de modo que un lote de cuatro
- * tardaba la suma de sus cuatro tiempos en vez del más lento de ellos. Con expedientes
- * reales de 10 o 15 archivos eso convierte la espera en minutos que no hacían falta.
+ * normaliza, escribe en R2 e indexa por su cuenta, sin leer nada de los demás. El
+ * reparto es acotado para no abrir a la vez tantas descargas y llamadas al índice como
+ * mensajes traiga el lote, y un fallo individual no arrastra a los demás: cada mensaje
+ * decide su propio ack o retry.
  *
- * El reparto es acotado: la concurrencia tiene techo para no abrir a la vez tantas
- * descargas y llamadas al índice como mensajes traiga el lote. Un fallo individual no
- * arrastra a los demás: cada mensaje decide su propio ack o retry.
+ * RASTRO DE ENTREGA. Todo mensaje que llega aquí deja constancia en la fila del
+ * documento ANTES de tocar ninguna dependencia externa. Los cinco documentos de
+ * IUS-2026-016 quedaron con `ingestion_attempts = 0` y no hubo forma de saber si el
+ * consumidor los había tomado y muerto o si nunca los recibió; esa pregunta no puede
+ * volver a quedar sin respuesta.
  */
 export async function handleIngestionQueue(
   batch: MessageBatch<unknown>,
@@ -32,7 +35,11 @@ export async function handleIngestionQueue(
   await mapWithConcurrency(batch.messages, INGESTION_CONCURRENCY, async (message) => {
     const parsed = DocumentIngestionMessage.safeParse(message.body);
     if (!parsed.success) {
-      message.ack(); // mensaje malformado: no se reintenta
+      // Un mensaje que no cumple el contrato NO desaparece en silencio. Se ACK-ea
+      // —reintentarlo daría el mismo resultado— pero se deja constancia en el documento
+      // que nombra, si es que nombra alguno, para que quede visible y reintentable.
+      await recordUndeliverable(env, message.body, parsed.error.issues.length);
+      message.ack();
       return;
     }
     try {
@@ -49,6 +56,42 @@ export async function handleIngestionQueue(
       message.retry();
     }
   });
+}
+
+/**
+ * Deja rastro de un mensaje que no se pudo interpretar.
+ *
+ * Se hace con el mínimo de suposiciones: si el cuerpo trae algo que parece una
+ * organización y un documento, se marca esa fila; si no, no hay nada que marcar y el
+ * mensaje se descarta sin más. Nunca lanza: el rastro no puede convertirse en la causa
+ * de que el lote falle.
+ */
+async function recordUndeliverable(
+  env: Env,
+  body: unknown,
+  issueCount: number,
+): Promise<void> {
+  const shape = body as { organization_id?: unknown; document_id?: unknown } | null;
+  if (
+    shape === null ||
+    typeof shape !== "object" ||
+    typeof shape.organization_id !== "string" ||
+    typeof shape.document_id !== "string"
+  ) {
+    return;
+  }
+  try {
+    const documents = new DocumentRepository(createDb(env.DB));
+    await documents.markIngestionFailedAt(
+      shape.organization_id,
+      shape.document_id,
+      "INGRESS",
+      "MESSAGE_SCHEMA_INVALID",
+      `El mensaje de ingestión no cumple el contrato (${issueCount} campos inválidos).`,
+    );
+  } catch {
+    // Sin base de datos no hay rastro que dejar; el mensaje se descarta igualmente.
+  }
 }
 
 /**

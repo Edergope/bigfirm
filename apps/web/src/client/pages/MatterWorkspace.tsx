@@ -37,14 +37,15 @@ import {
   Users,
 } from "lucide-react";
 import {
-  DOCUMENT_INTELLIGENCE_TERMS,
+  INGESTION_LIFECYCLE_TERMS,
   TASK_ACTION_LABEL,
   batchProgress,
   batchProgressLabel,
   TASK_GROUPS,
   TASK_GROUP_LABEL,
   canRetryIngestion,
-  documentIntelligenceState,
+  ingestionLifecycle,
+  isIngestionInFlight,
   isTaskCompleted,
   matterLoadFailure,
   shouldPollIngestion,
@@ -486,14 +487,18 @@ function Documentos({ data }: { data: MatterDetail }) {
     */
     refetchInterval: (query) => {
       const docs = query.state.data?.uploaded ?? [];
-      return shouldPollIngestion(
-        docs.map((d) => ({
-          ingestion_status: d.ingestion_status,
-          updated_at: d.updated_at,
-        })),
-      )
-        ? 3000
-        : false;
+      const moving = docs.some((d) =>
+        isIngestionInFlight(
+          ingestionLifecycle({
+            status: d.ingestion_status,
+            attempts: d.ingestion_attempts,
+            heartbeatAt: d.ingestion_heartbeat_at,
+            enqueuedAt: d.ingestion_enqueued_at,
+            updatedAt: d.updated_at,
+          }),
+        ),
+      );
+      return moving ? 3000 : false;
     },
     // Volver a la pestaña del navegador trae el estado real de inmediato, sin esperar
     // al siguiente ciclo y sin recargar. `staleTime: 0` es lo que hace que ese refresco
@@ -518,10 +523,20 @@ function Documentos({ data }: { data: MatterDetail }) {
 
   // Reintenta UN documento: los otros catorce de un lote de quince no se tocan.
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const retry = useMutation({
     mutationFn: (documentId: string) => api.retryDocumentIngestion(matterId, documentId),
-    onMutate: (documentId: string) => setRetryingId(documentId),
+    onMutate: (documentId: string) => {
+      setRetryingId(documentId);
+      setRetryError(null);
+    },
     onSuccess: refreshDocuments,
+    // Sin esto, el 409 del endpoint se tragaba: la fila decía «Reintentando…», volvía a
+    // su estado anterior y el abogado no sabía que había sido rechazado.
+    onError: (e: unknown) =>
+      setRetryError(
+        e instanceof ApiError ? e.message : "No fue posible reintentar el procesamiento.",
+      ),
     onSettled: () => setRetryingId(null),
   });
 
@@ -561,6 +576,7 @@ function Documentos({ data }: { data: MatterDetail }) {
         }
         onRetry={(documentId) => retry.mutate(documentId)}
         retryingId={retryingId}
+        retryError={retryError}
       />
 
       <DocFolder
@@ -603,6 +619,7 @@ function DocFolder({
   action,
   onRetry,
   retryingId,
+  retryError,
 }: {
   title: string;
   subtitle: string;
@@ -613,15 +630,25 @@ function DocFolder({
   /** Reintenta UN documento. Ausente en la carpeta de generados. */
   onRetry?: (documentId: string) => void;
   retryingId?: string | null;
+  /** Motivo por el que el servidor rechazó el reintento. Antes se tragaba. */
+  retryError?: string | null;
 }) {
   // Progreso agregado derivado de LOS MISMOS estados que muestran las filas. Leer
   // `ingestion_status` aquí y `documentIntelligenceState` abajo era lo que producía
   // «5 procesando» en la cabecera con cinco filas en «Procesamiento detenido».
-  const progress = batchProgress(
-    docs.map((d) =>
-      documentIntelligenceState(d.ingestion_status, d.updated_at, new Date(), d.ingestion_heartbeat_at),
-    ),
-  );
+  const now = new Date();
+  const stateOf = (d: import("../api.js").DocumentEntry) =>
+    ingestionLifecycle(
+      {
+        status: d.ingestion_status,
+        attempts: d.ingestion_attempts,
+        heartbeatAt: d.ingestion_heartbeat_at,
+        enqueuedAt: d.ingestion_enqueued_at,
+        updatedAt: d.updated_at,
+      },
+      now,
+    );
+  const progress = batchProgress(docs.map(stateOf));
   return (
     <Module
       title={title}
@@ -629,13 +656,24 @@ function DocFolder({
       padded={false}
       action={action}
     >
-      {progress.processing > 0 ? (
+      {retryError ? (
+        <p
+          role="alert"
+          className="mx-5 mb-3 rounded-[10px] border border-iusia-critical/35 bg-iusia-critical/8 px-4 py-2.5 text-[12.5px] leading-relaxed text-iusia-critical"
+        >
+          {retryError}
+        </p>
+      ) : null}
+
+      {progress.processing + progress.queued > 0 ? (
         <div className="px-5 pb-3">
           <span className="block h-1 overflow-hidden rounded-full bg-iusia-mist/25">
             <span
               className="block h-full rounded-full bg-iusia-intel transition-[width] duration-500"
               style={{
-                width: `${Math.round(((progress.indexed + progress.notIndexable) / progress.total) * 100)}%`,
+                // Avance por estados reales: cuántos alcanzaron un destino, sin
+                // porcentajes inventados. Llega al final también cuando todo falló.
+                width: `${Math.round(((progress.total - progress.processing - progress.queued - progress.uploading) / progress.total) * 100)}%`,
               }}
             />
           </span>
@@ -653,13 +691,8 @@ function DocFolder({
             // La pregunta del abogado aquí es «¿IUSIA puede usar esto?», no «¿alguien
             // lo revisó?». La fuente es `ingestion_status`; el ciclo de revisión
             // jurídica es otro eje y se muestra aparte.
-            const intel = documentIntelligenceState(
-              d.ingestion_status,
-              d.updated_at,
-              new Date(),
-              d.ingestion_heartbeat_at,
-            );
-            const st = DOCUMENT_INTELLIGENCE_TERMS[intel];
+            const intel = stateOf(d);
+            const st = INGESTION_LIFECYCLE_TERMS[intel];
             const Icon = documentIcon(d.mime_type, d.name);
             return (
               <li

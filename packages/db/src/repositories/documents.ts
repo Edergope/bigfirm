@@ -345,8 +345,18 @@ export class DocumentRepository {
     const updated = await this.db
       .update(documents)
       .set({
+        // QUEUED, no PROCESSING: encolar no es procesar. Marcarlo «procesando» aquí
+        // describía trabajo que ningún consumidor había empezado, y era lo que diez
+        // minutos después se convertía en un falso «procesamiento detenido».
         ingestionStatus: "PROCESSING",
         ingestionEnqueuedAt: new Date().toISOString(),
+        // El contador vuelve a cero: este reintento aún no lo ha tomado nadie, y es
+        // `attempts` lo que distingue «en cola» de «procesando».
+        ingestionAttempts: 0,
+        ingestionHeartbeatAt: null,
+        ingestionStage: null,
+        ingestionFailureCode: null,
+        ingestionFailureMessage: null,
         updatedAt: new Date().toISOString(),
       })
       .where(

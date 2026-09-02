@@ -45,6 +45,8 @@ export interface BatchProgress {
   processing: number;
   /** Dejaron de avanzar. Reintentables, y NO deben contarse como «procesando». */
   stalled: number;
+  /** Cargados y esperando turno. Nadie los ha tomado todavía. */
+  queued: number;
   /** Nada en curso: el lote ya no va a cambiar por sí solo. */
   settled: boolean;
 }
@@ -67,6 +69,7 @@ export function batchProgress(states: readonly string[]): BatchProgress {
   let failed = 0;
   let processing = 0;
   let stalled = 0;
+  let queued = 0;
   for (const state of states) {
     switch (state) {
       case "INDEXED":
@@ -78,10 +81,19 @@ export function batchProgress(states: readonly string[]): BatchProgress {
         break;
       case "ERROR":
       case "UPLOAD_FAILED":
+      case "DELIVERY_FAILED":
+        // Que la preparación no llegara a empezar es un fallo con todas las letras: el
+        // documento no va a avanzar solo y hay que reintentarlo.
         failed += 1;
         break;
       case "STALLED":
+      case "PROCESSING_STALLED":
         stalled += 1;
+        break;
+      case "QUEUED":
+        // A salvo y esperando turno. Cuenta como cargado y como pendiente, nunca como
+        // trabajo en curso: nadie lo ha tomado todavía.
+        queued += 1;
         break;
       case "UPLOADING":
       case "FILE_STORED":
@@ -100,8 +112,11 @@ export function batchProgress(states: readonly string[]): BatchProgress {
     notIndexable,
     failed,
     stalled,
+    queued,
     processing,
-    settled: processing === 0 && uploading === 0,
+    // El lote sigue vivo mientras algo se transfiera, espere turno o se esté
+    // procesando. Un lote donde todo falló también está asentado: no cambiará solo.
+    settled: processing === 0 && uploading === 0 && queued === 0,
   };
 }
 
@@ -124,6 +139,7 @@ export function batchProgressLabel(progress: BatchProgress): string {
     return `${progress.uploaded} de ${progress.total} archivos cargados · ${progress.uploading} subiendo`;
   }
   if (progress.indexed > 0) parts.push(`${progress.indexed} indexados por IUSIA`);
+  if (progress.queued > 0) parts.push(`${progress.queued} en preparación`);
   if (progress.processing > 0) parts.push(`${progress.processing} procesando`);
   if (progress.stalled > 0) {
     parts.push(

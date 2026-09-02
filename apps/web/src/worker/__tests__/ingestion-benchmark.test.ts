@@ -358,3 +358,61 @@ describe("cada mensaje recibido deja rastro", () => {
     expect((received as { drive_file_id?: string }).drive_file_id).toBeUndefined();
   });
 });
+
+/**
+ * Un mensaje que no cumple el contrato NO puede desaparecer en silencio.
+ *
+ * Es el modo de fallo que dejaría un documento congelado sin una sola pista, que es
+ * exactamente lo que pasó con los cinco de IUS-2026-016.
+ */
+describe("mensajes indescifrables dejan rastro", () => {
+  it("se ACK-ea pero se marca el documento que nombra", async () => {
+    const failures: Array<{ documentId: string; code: string }> = [];
+    const env = {
+      DB: {},
+      __recorded: failures,
+    };
+    const messages = [
+      {
+        // Nombra un documento pero le falta el resto del contrato.
+        body: { organization_id: "org_x", document_id: "doc_roto" },
+        ack: () => failures.push({ documentId: "acked", code: "ACK" }),
+        retry: () => failures.push({ documentId: "retried", code: "RETRY" }),
+      },
+    ];
+    await handleIngestionQueue(
+      { messages } as unknown as MessageBatch<unknown>,
+      env as never,
+      { ingest: async () => ({ status: "INDEXED" as const }) },
+    );
+    // Se ACK-ea: reintentarlo daría el mismo resultado. Lo que no puede es evaporarse.
+    expect(failures.some((f) => f.code === "ACK")).toBe(true);
+    expect(failures.some((f) => f.code === "RETRY")).toBe(false);
+  });
+
+  it("un mensaje ilegible no impide que sus compañeros de lote se resuelvan", async () => {
+    const acked: string[] = [];
+    const messages = [
+      { body: { basura: true }, ack: () => acked.push("malo"), retry: () => undefined },
+      ...Array.from({ length: 3 }, (_, i) => ({
+        body: {
+          organization_id: "org_x",
+          matter_id: "mtr_x",
+          document_id: `doc_${i}`,
+          reason: "UPLOADED" as const,
+          enqueued_at: new Date().toISOString(),
+        },
+        ack: () => acked.push(`doc_${i}`),
+        retry: () => undefined,
+      })),
+    ];
+    await handleIngestionQueue(
+      { messages } as unknown as MessageBatch<unknown>,
+      { DB: {} } as never,
+      { ingest: async () => ({ status: "INDEXED" as const }) },
+    );
+    expect(acked).toHaveLength(4);
+    expect(acked).toContain("doc_0");
+    expect(acked).toContain("doc_2");
+  });
+});

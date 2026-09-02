@@ -256,7 +256,9 @@ describe("INTELIGENCIA DOCUMENTAL — el estado que el abogado necesita leer", (
     expect(documentIntelligenceState("PROCESSING", "2026-09-01T03:05:00.000Z", now)).toBe(
       "STALLED",
     );
-    expect(canRetryIngestion("STALLED")).toBe(true);
+    // El ciclo de vida único nombra este caso `PROCESSING_STALLED`: sólo se detiene lo
+    // que de verdad empezó. Un documento que nunca salió de la cola es otra cosa.
+    expect(canRetryIngestion("PROCESSING_STALLED")).toBe(true);
     expect(canRetryIngestion("ERROR")).toBe(true);
     expect(canRetryIngestion("INDEXED")).toBe(false);
     expect(canRetryIngestion("PROCESSING")).toBe(false);

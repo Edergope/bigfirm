@@ -9,10 +9,10 @@ import {
 import {
   DOCUMENT_INTELLIGENCE_TERMS,
   INGESTION_STALLED_AFTER_MINUTES,
-  canRetryIngestion,
   documentIntelligenceState,
   shouldPollIngestion,
 } from "../document-workspace.js";
+import { canRetryIngestion } from "../ingestion-lifecycle.js";
 
 /**
  * Carga múltiple y disponibilidad parcial.
@@ -237,7 +237,7 @@ describe("navegar no altera la realidad de los archivos", () => {
     // la vuelva a tocar. Pasado el margen se declara detenida y se puede reintentar.
     const old = new Date(Date.now() - (INGESTION_STALLED_AFTER_MINUTES + 5) * 60_000).toISOString();
     expect(documentIntelligenceState("UPLOADING", old)).toBe("STALLED");
-    expect(canRetryIngestion("STALLED")).toBe(true);
+    expect(canRetryIngestion("PROCESSING_STALLED")).toBe(true);
   });
 
   it("una carga reciente NO se confunde con una detenida", () => {
@@ -249,7 +249,7 @@ describe("navegar no altera la realidad de los archivos", () => {
     expect(canRetryIngestion("ERROR")).toBe(true);
     // Lo que sigue avanzando no ofrece reintento: no hay nada que recuperar todavía.
     expect(canRetryIngestion("UPLOADING")).toBe(false);
-    expect(canRetryIngestion("UPLOADED")).toBe(false);
+    expect(canRetryIngestion("QUEUED")).toBe(false);
     expect(canRetryIngestion("INDEXED")).toBe(false);
   });
 
