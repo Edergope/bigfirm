@@ -158,15 +158,49 @@ export class GoogleDriveAdapter implements DocumentStorageProvider {
   }
 
   /** Sube un archivo (multipart) a una carpeta. Devuelve la metadata del creado. */
+  /**
+   * Busca un archivo por una propiedad de aplicación dentro de una carpeta.
+   *
+   * Cierra la ventana de crash de la sincronización: si el Worker muere DESPUÉS de subir
+   * el archivo pero ANTES de guardar su id en D1, el reintento encontraría
+   * `drive_file_id` nulo y subiría un segundo archivo. Consultando primero por una
+   * identidad que nosotros mismos escribimos, el reintento adopta el que ya existe.
+   */
+  async findFileByAppProperty(
+    key: string,
+    value: string,
+    parentId: string,
+  ): Promise<string | null> {
+    const token = this.requireToken();
+    const q = [
+      `appProperties has { key='${escapeQ(key)}' and value='${escapeQ(value)}' }`,
+      `'${escapeQ(parentId)}' in parents`,
+      "trashed = false",
+    ].join(" and ");
+    const url = new URL("https://www.googleapis.com/drive/v3/files");
+    url.searchParams.set("q", q);
+    url.searchParams.set("fields", "files(id)");
+    url.searchParams.set("pageSize", "1");
+    const res = await this.call(url, token, "findFileByAppProperty");
+    const body = (await res.json()) as { files?: Array<{ id?: string }> };
+    return body.files?.[0]?.id ?? null;
+  }
+
   async uploadFile(input: {
     name: string;
     parentId: string;
     mimeType: string;
     content: ArrayBuffer | Uint8Array;
+    /** Identidad propia del archivo, para poder reconocerlo en un reintento. */
+    appProperties?: Record<string, string>;
   }): Promise<StoredFileMetadata> {
     const token = this.requireToken();
     const boundary = `iusia-${crypto.randomUUID()}`;
-    const metadata = JSON.stringify({ name: input.name, parents: [input.parentId] });
+    const metadata = JSON.stringify({
+      name: input.name,
+      parents: [input.parentId],
+      ...(input.appProperties ? { appProperties: input.appProperties } : {}),
+    });
     const bytes = input.content instanceof Uint8Array ? input.content : new Uint8Array(input.content);
     const enc = new TextEncoder();
     const pre = enc.encode(

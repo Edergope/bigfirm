@@ -38,7 +38,7 @@ describe("la inteligencia no espera al proveedor de almacenamiento", () => {
 
   it("un fallo del proveedor NO deja el documento sin analizar", () => {
     // La sincronización va en su propio try/catch y sólo marca procedencia pendiente.
-    expect(src).toContain("markProviderSyncPending");
+    expect(src).toContain("deferProviderSync");
     expect(src).toContain("provider_sync_deferred");
   });
 

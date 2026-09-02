@@ -11,6 +11,7 @@ import { practiceRoutes } from "./routes/practice.js";
 import { adminRoutes } from "./routes/admin.js";
 import { devRoutes } from "./routes/dev.js";
 import { handleIngestionQueue } from "./queue-consumer.js";
+import { handleProviderSyncSweep } from "./scheduled.js";
 
 const app = new Hono<AppBindings>();
 
@@ -79,11 +80,15 @@ app.route("/api/dev", devRoutes);
 export default {
   fetch: app.fetch,
   queue: handleIngestionQueue,
+  // Red de seguridad de la sincronización con el proveedor. Ver `scheduled.ts`.
+  scheduled: async (_event: unknown, env: Env) => {
+    await handleProviderSyncSweep(env);
+  },
 };
 
 // Runtime multiagente y motor durable. Los nombres de clase deben coincidir con
 // wrangler.jsonc y sobrevivir al bundling (ver vite.config.ts, keepNames).
 export { LegalWorker } from "./agents/legal-worker.js";
 export { MatterOrchestrationWorkflow } from "./workflows/matter-orchestration.js";
-export { handleIngestionQueue };
+export { handleIngestionQueue, handleProviderSyncSweep };
 export type { Env };

@@ -71,7 +71,15 @@ export async function ingestBatch(
       return;
     }
     try {
-      const outcome = await service.ingest(parsed.data);
+      // Lo que Cloudflare afirma del mensaje viaja al servicio para persistirse. Sin
+      // esto, `ingestion_attempts` era el único dato y había que leer el código para
+      // saber qué significaba.
+      const delivery = {
+        messageId: (message as { id?: string }).id,
+        attempt: (message as { attempts?: number }).attempts,
+        timestamp: (message as { timestamp?: Date }).timestamp?.toISOString?.(),
+      };
+      const outcome = await service.ingest(parsed.data, delivery);
       if (outcome.status === "ERROR") {
         message.retry(); // fallo transitorio: reintentar (o a la DLQ tras max_retries)
       } else {

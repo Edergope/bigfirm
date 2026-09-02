@@ -50,6 +50,36 @@ export const NORMALIZE_DEADLINE_MS = 120_000;
  * es el techo duro por si ese sondeo tampoco vuelve.
  */
 export const PROVIDER_SYNC_DEADLINE_MS = 45_000;
+
+/**
+ * Reintentos de la sincronización con el proveedor.
+ *
+ * Contador PROPIO y espera creciente, porque una caída de Drive puede durar horas y los
+ * tres reintentos que Cloudflare da al mensaje se agotarían en segundos. Tras el último
+ * intento el documento queda en estado terminal para soporte — nunca en un bucle.
+ */
+export const PROVIDER_SYNC_MAX_ATTEMPTS = 8;
+
+/**
+ * Propiedad con la que IUSIA marca sus archivos en el proveedor.
+ *
+ * Es la identidad determinista que permite reconocer un archivo ya subido cuando un
+ * reintento no sabe que lo estaba: cierra la ventana entre la subida y la escritura en
+ * D1, que de otro modo crearía duplicados.
+ */
+export const PROVIDER_DOCUMENT_PROPERTY = "iusia_document_id";
+
+/** Espera antes del intento N: 1 min, 2, 4, 8… con techo de una hora. */
+export function providerSyncBackoffMs(attempt: number): number {
+  return Math.min(60_000 * 2 ** Math.max(0, attempt - 1), 3_600_000);
+}
+
+/** Lo que Cloudflare afirma del mensaje entregado. */
+export interface QueueDelivery {
+  messageId?: string;
+  attempt?: number;
+  timestamp?: string;
+}
 export const AI_SEARCH_DEADLINE_MS = 150_000;
 
 export type StageTimings = Record<string, number>;
@@ -105,7 +135,11 @@ export class IngestionService {
     return new IngestionService(env, OrganizationStorageResolver.forEnv(env));
   }
 
-  async ingest(message: DocumentIngestionMessage): Promise<IngestionOutcome> {
+  async ingest(
+    message: DocumentIngestionMessage,
+    /** Lo que Cloudflare afirma del mensaje. Se persiste para no tener que inferirlo. */
+    delivery?: QueueDelivery,
+  ): Promise<IngestionOutcome> {
     const db = createDb(this.env.DB);
     const documents = new DocumentRepository(db);
 
@@ -118,7 +152,7 @@ export class IngestionService {
       proveedor o el índice convierte ese contador en la respuesta a esa pregunta.
     */
     await documents
-      .markIngestionStarted(message.organization_id, message.document_id)
+      .markIngestionStarted(message.organization_id, message.document_id, delivery)
       .catch(() => undefined);
 
     const doc = await documents.findById(message.organization_id, message.document_id);
@@ -159,11 +193,16 @@ export class IngestionService {
       El original ya está a salvo en el ingreso durable, así que Drive no aporta NADA a
       la comprensión del documento: es procedencia y respaldo, no una dependencia del
       análisis. Que el proveedor esté lento o caído ya no impide que IUSIA entienda el
-      expediente; sólo deja pendiente una sincronización que se reintenta sola.
+      expediente; deja pendiente una sincronización con su propio contador, su propia
+      espera creciente y una barrida de reconciliación que la recupera (ver
+      `deferProviderSync` y `scheduled.ts`).
     */
     let stage: IngestionStage = "NORMALIZE";
     const clock = new StageClock();
-    await documents.markIngestionStarted(message.organization_id, message.document_id);
+    // NO se vuelve a sellar aquí. Había una segunda llamada a `markIngestionStarted` en
+    // este punto, así que cada entrega de Cloudflare sumaba dos al contador y
+    // `ingestion_attempts` dejaba de significar «entregas que empezaron a procesarse».
+    // A partir de aquí las etapas sólo actualizan latido y progreso.
     const heartbeat = (at: string) =>
       documents.markIngestionProgress(message.organization_id, message.document_id, at);
 
@@ -298,11 +337,7 @@ export class IngestionService {
             document_id: message.document_id,
             ...safeIngestionError(error),
           });
-          await documents.markProviderSyncPending(
-            message.organization_id,
-            message.document_id,
-            error instanceof Error ? error.name : "UNKNOWN",
-          );
+          await this.deferProviderSync(documents, doc, message, error);
         }
       }
 
@@ -330,6 +365,53 @@ export class IngestionService {
         detail: error instanceof Error ? error.message : "error desconocido",
       };
     }
+  }
+
+  /**
+   * Aplaza la sincronización con el proveedor y PROGRAMA un reintento real.
+   *
+   * Antes esto sólo escribía `DEFERRED` y el comentario afirmaba que «se reintenta
+   * sola». No era cierto: nadie leía ese estado. Un documento con Drive aplazado se
+   * quedaba así para siempre y sus bytes originales nunca salían del ingreso.
+   *
+   * Ahora encola un trabajo PROPIO —con su contador y su espera creciente— y, si agota
+   * los intentos, queda en estado terminal visible para soporte. En ningún caso cambia
+   * lo que el abogado ve: el documento ya es analizable.
+   */
+  private async deferProviderSync(
+    documents: DocumentRepository,
+    doc: { providerSyncAttempts: number },
+    message: DocumentIngestionMessage,
+    error: unknown,
+  ): Promise<void> {
+    const attempt = (doc.providerSyncAttempts ?? 0) + 1;
+    const code = error instanceof Error ? error.name : "UNKNOWN";
+
+    if (attempt >= PROVIDER_SYNC_MAX_ATTEMPTS) {
+      await documents.markProviderSyncTerminal(
+        message.organization_id,
+        message.document_id,
+        code,
+      );
+      return;
+    }
+
+    const nextAt = new Date(Date.now() + providerSyncBackoffMs(attempt)).toISOString();
+    await documents.deferProviderSync(
+      message.organization_id,
+      message.document_id,
+      code,
+      nextAt,
+    );
+    // El reintento se encola como trabajo independiente: una caída del proveedor no
+    // puede gastar los reintentos del mensaje de inteligencia, que es otra cosa.
+    await this.env.DOCUMENT_INGESTION.send({
+      organization_id: message.organization_id,
+      matter_id: message.matter_id,
+      document_id: message.document_id,
+      reason: "PROVIDER_SYNC",
+      enqueued_at: new Date().toISOString(),
+    }).catch(() => undefined);
   }
 
   /**
@@ -362,18 +444,48 @@ export class IngestionService {
    * Drive sigue siendo invisible para el abogado: esto es infraestructura.
    */
   private async syncToProvider(
-    storage: { uploadFile: (input: { name: string; parentId: string; mimeType: string; content: ArrayBuffer }) => Promise<{ provider_file_id: string }> },
+    storage: {
+      uploadFile: (input: {
+        name: string;
+        parentId: string;
+        mimeType: string;
+        content: ArrayBuffer;
+        appProperties?: Record<string, string>;
+      }) => Promise<{ provider_file_id: string }>;
+      findFileByAppProperty?: (
+        key: string,
+        value: string,
+        parentId: string,
+      ) => Promise<string | null>;
+    },
     doc: { name: string; mimeType: string },
     message: DocumentIngestionMessage,
     bytes: ArrayBuffer,
   ): Promise<string | null> {
     const folders = await this.folders(message);
     if (!folders) return null;
+
+    /*
+      VENTANA DE CRASH. Si el Worker muere DESPUÉS de subir el archivo pero ANTES de
+      guardar su id en D1, el reintento vería `drive_file_id` nulo y subiría un segundo
+      archivo. `if (!doc.driveFileId)` no basta para eso.
+
+      Se consulta primero por una identidad que escribimos nosotros: si el archivo ya
+      está allí, se adopta. El proveedor es la fuente de verdad de su propio contenido.
+    */
+    const existing = await storage.findFileByAppProperty?.(
+      PROVIDER_DOCUMENT_PROPERTY,
+      message.document_id,
+      folders,
+    );
+    if (existing) return existing;
+
     const meta = await storage.uploadFile({
       name: doc.name,
       parentId: folders,
       mimeType: doc.mimeType,
       content: bytes,
+      appProperties: { [PROVIDER_DOCUMENT_PROPERTY]: message.document_id },
     });
     return meta.provider_file_id;
   }

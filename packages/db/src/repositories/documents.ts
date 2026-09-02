@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lte, sql } from "drizzle-orm";
 import { newId } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { documents, documentVersions } from "../schema/iusia.js";
@@ -345,9 +345,17 @@ export class DocumentRepository {
     const updated = await this.db
       .update(documents)
       .set({
-        // QUEUED, no PROCESSING: encolar no es procesar. Marcarlo «procesando» aquí
-        // describía trabajo que ningún consumidor había empezado, y era lo que diez
-        // minutos después se convertía en un falso «procesamiento detenido».
+        /*
+          Se persiste `PROCESSING` y el ciclo de vida lo lee como QUEUED mientras
+          `ingestion_attempts` valga 0. El comentario anterior decía «QUEUED, no
+          PROCESSING» mientras el código escribía PROCESSING: describía una intención,
+          no lo que pasaba.
+
+          La distinción entre encolado y procesando es REAL y la hace `attempts`, que es
+          la única señal que prueba que un consumidor empezó. Cambiar el valor crudo
+          exigiría migrar 35 filas y todas las comprobaciones que lo comparan, sin ganar
+          nada que el ciclo de vida no dé ya. Queda documentado, no disimulado.
+        */
         ingestionStatus: "PROCESSING",
         ingestionEnqueuedAt: new Date().toISOString(),
         // El contador vuelve a cero: este reintento aún no lo ha tomado nadie, y es
@@ -425,7 +433,22 @@ export class DocumentRepository {
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
 
-  async markIngestionStarted(organizationId: string, documentId: string) {
+  /**
+   * Sella que el consumidor recibió el trabajo y EMPEZÓ. Una vez por entrega.
+   *
+   * Había dos llamadas a este método en el mismo `ingest()`, así que cada entrega de
+   * Cloudflare sumaba DOS al contador: `ingestion_attempts = 2` en CC JFRR.pdf no
+   * probaba dos entregas, probaba una. Un contador que significa dos cosas distintas no
+   * significa ninguna.
+   *
+   * `delivery` guarda lo que Cloudflare mismo afirma sobre el mensaje, de modo que la
+   * próxima autopsia no dependa de leer el código para interpretar un número.
+   */
+  async markIngestionStarted(
+    organizationId: string,
+    documentId: string,
+    delivery?: { messageId?: string; attempt?: number },
+  ) {
     const now = new Date().toISOString();
     await this.db
       .update(documents)
@@ -434,10 +457,72 @@ export class DocumentRepository {
         ingestionHeartbeatAt: now,
         ingestionStage: "INGRESS",
         ingestionAttempts: sql`${documents.ingestionAttempts} + 1`,
+        cfQueueMessageId: delivery?.messageId ?? null,
+        cfQueueAttempt: delivery?.attempt ?? null,
         ingestionFailureCode: null,
         ingestionFailureMessage: null,
       })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /**
+   * Aplaza la sincronización con el proveedor y fija cuándo reintentarla.
+   *
+   * El backoff vive en la fila y no en la cola porque una caída de Drive puede durar
+   * horas: agotar ahí los tres reintentos del mensaje de inteligencia dejaría el
+   * documento sin respaldo y sin nadie que volviera. `provider_sync_next_at` es lo que
+   * la barrida de reconciliación consulta.
+   */
+  async deferProviderSync(
+    organizationId: string,
+    documentId: string,
+    code: string,
+    nextAt: string,
+  ) {
+    await this.db
+      .update(documents)
+      .set({
+        providerSyncState: "DEFERRED",
+        providerSyncError: code.slice(0, 120),
+        providerSyncAttempts: sql`${documents.providerSyncAttempts} + 1`,
+        providerSyncNextAt: nextAt,
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /** Fallo definitivo de sincronización: deja de reintentarse y queda para soporte. */
+  async markProviderSyncTerminal(organizationId: string, documentId: string, code: string) {
+    await this.db
+      .update(documents)
+      .set({
+        providerSyncState: "FAILED_TERMINAL",
+        providerSyncError: code.slice(0, 120),
+        providerSyncNextAt: null,
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /**
+   * Documentos cuya sincronización con el proveedor toca reintentar.
+   *
+   * Acotado por diseño: la barrida no puede reencolar un expediente entero de golpe.
+   */
+  async listProviderSyncDue(now: string, limit = 25) {
+    return this.db
+      .select({
+        id: documents.id,
+        organizationId: documents.organizationId,
+        matterId: documents.matterId,
+      })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.providerSyncState, "DEFERRED"),
+          isNull(documents.retiredAt),
+          lte(documents.providerSyncNextAt, now),
+        ),
+      )
+      .limit(limit);
   }
 
   /**

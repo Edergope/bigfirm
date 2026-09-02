@@ -149,7 +149,14 @@
         ]
       },
       "ai_search": [{ "binding": "AI_SEARCH", "instance_name": "iusia-rag-e2e" }],
-      "ai": { "binding": "AI" }
+      "ai": { "binding": "AI" },
+      // Red de seguridad de la sincronización con el proveedor: reencola lo aplazado
+      // que ya venció. No procesa nada por su cuenta (ver scheduled.ts).
+      //
+      // Se escribe minuto a minuto en vez de con paso: la forma abreviada contiene la
+      // secuencia que cierra un comentario de bloque y rompía al analizador de esta
+      // misma configuración. Cada diez minutos, igual.
+      "triggers": { "crons": ["0,10,20,30,40,50 * * * *"] }
       // NOTA: `analytics_engine_datasets` (USAGE_ANALYTICS) se omite en staging hasta
       // habilitar Analytics Engine en la cuenta (backlog/observabilidad). La escritura
       // en legal-worker.ts es opcional (`?.`) → no-op seguro sin el binding.

@@ -51,9 +51,11 @@ describe("document ingestion queue consumer", () => {
     );
 
     expect(ingest).toHaveBeenCalledTimes(3);
-    expect(ingest).toHaveBeenNthCalledWith(1, indexed.body);
-    expect(ingest).toHaveBeenNthCalledWith(2, storageNotConfigured.body);
-    expect(ingest).toHaveBeenNthCalledWith(3, failed.body);
+    // El segundo argumento es la identidad que Cloudflare da al mensaje: se persiste
+    // para que una autopsia no dependa de interpretar un contador.
+    expect(ingest).toHaveBeenNthCalledWith(1, indexed.body, expect.any(Object));
+    expect(ingest).toHaveBeenNthCalledWith(2, storageNotConfigured.body, expect.any(Object));
+    expect(ingest).toHaveBeenNthCalledWith(3, failed.body, expect.any(Object));
 
     expect(malformed.ack).toHaveBeenCalledTimes(1);
     expect(malformed.retry).not.toHaveBeenCalled();

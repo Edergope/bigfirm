@@ -144,6 +144,12 @@ export const documents = sqliteTable(
     /** PENDING | SYNCED | DEFERRED. Procedencia, no inteligencia: puede ir por detrás. */
     providerSyncState: text("provider_sync_state"),
     providerSyncError: text("provider_sync_error"),
+    /** Contador PROPIO: una caída del proveedor no gasta los reintentos de la ingestión. */
+    providerSyncAttempts: integer("provider_sync_attempts").notNull().default(0),
+    providerSyncNextAt: text("provider_sync_next_at"),
+    /** Identidad que asigna Cloudflare al mensaje, y su número de entrega. */
+    cfQueueMessageId: text("cf_queue_message_id"),
+    cfQueueAttempt: integer("cf_queue_attempt"),
     /** Lote de carga. Correlación, NO transacción: un fallo no toca a los demás. */
     uploadBatchId: text("upload_batch_id"),
     /**

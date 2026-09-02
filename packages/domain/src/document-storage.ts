@@ -148,7 +148,18 @@ export const DocumentIngestionMessage = z.object({
    */
   drive_file_id: z.string().min(1).optional(),
   /** Qué disparó la ingestión; sólo trazabilidad, nunca instrucciones. */
-  reason: z.enum(["LINKED", "DRIVE_CHANGE", "MANUAL_REINDEX", "UPLOADED", "RETRY"]),
+  reason: z.enum([
+    "LINKED",
+    "DRIVE_CHANGE",
+    "MANUAL_REINDEX",
+    "UPLOADED",
+    "RETRY",
+    /**
+     * Sólo sincronización con el proveedor. Trabajo SEPARADO del de inteligencia: una
+     * caída de Drive no puede gastar los reintentos de un documento que ya se entendió.
+     */
+    "PROVIDER_SYNC",
+  ]),
   /** Marca de idempotencia adicional para deduplicar reintentos de Queue. */
   enqueued_at: z.string().datetime(),
 });
