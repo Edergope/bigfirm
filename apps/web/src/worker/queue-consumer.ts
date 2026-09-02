@@ -27,10 +27,38 @@ export async function handleIngestionQueue(
   batch: MessageBatch<unknown>,
   env: Env,
   /**
-   * Costura para medir el reparto con dependencias controladas. En producción se
-   * resuelve del entorno; ningún llamador real la pasa.
+   * Tercer argumento del runtime: `ExecutionContext`. No se usa, pero DEBE figurar en
+   * la firma.
+   *
+   * Aquí estuvo el fallo que dejó cinco documentos sin procesar durante días. La firma
+   * era `(batch, env, service = IngestionService.forEnv(env))`, con el servicio como
+   * costura de pruebas en la tercera posición. Cloudflare invoca
+   * `queue(batch, env, ctx)`, así que ese valor por defecto NUNCA se aplicaba:
+   * `service` era el `ExecutionContext`, `service.ingest` no existía, cada mensaje
+   * lanzaba un TypeError, el catch lo mandaba a reintentar y tras agotar los tres
+   * intentos acababa en la cola de descarte. Sin una sola escritura en D1, que es por
+   * lo que `ingestion_attempts` se quedó en 0 y no había ni etapa ni código de fallo.
+   *
+   * Las pruebas pasaban porque llamaban a la función con el servicio en esa posición
+   * —exactamente la forma que producción no usa nunca—. La costura ahora es
+   * `ingestBatch`, que no puede colisionar con la convención del runtime.
    */
-  service: Pick<IngestionService, "ingest"> = IngestionService.forEnv(env),
+  _ctx?: unknown,
+): Promise<void> {
+  return ingestBatch(batch, IngestionService.forEnv(env), env);
+}
+
+/**
+ * Procesa un lote con un servicio de ingestión dado.
+ *
+ * Es el cuerpo real y la costura de pruebas. Separarlo del handler es deliberado: el
+ * handler tiene la firma que el runtime impone y nada más, de modo que ningún parámetro
+ * de conveniencia pueda volver a ocupar una posición que Cloudflare ya usa.
+ */
+export async function ingestBatch(
+  batch: MessageBatch<unknown>,
+  service: Pick<IngestionService, "ingest">,
+  env: Env,
 ): Promise<void> {
   await mapWithConcurrency(batch.messages, INGESTION_CONCURRENCY, async (message) => {
     const parsed = DocumentIngestionMessage.safeParse(message.body);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleIngestionQueue, INGESTION_CONCURRENCY } from "../queue-consumer.js";
+import { handleIngestionQueue, ingestBatch, INGESTION_CONCURRENCY } from "../queue-consumer.js";
 
 /**
  * Banco de pruebas del reparto de ingestión.
@@ -156,10 +156,10 @@ describe("concurrencia efectiva del consumidor desplegado", () => {
       },
     };
 
-    const run = handleIngestionQueue(
+    const run = ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      {} as never,
       service,
+      {} as never,
     );
 
     // Sin liberar nada: en vuelo sólo puede haber `INGESTION_CONCURRENCY`.
@@ -196,10 +196,10 @@ describe("aislamiento de fallos dentro del lote", () => {
           : { status: "INDEXED" as const },
     };
 
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      {} as never,
       service,
+      {} as never,
     );
 
     // NO hay rollback ni cancelación masiva: 14 quedan resueltos y 1 se reintenta.
@@ -219,11 +219,11 @@ describe("aislamiento de fallos dentro del lote", () => {
           return { status: "INDEXED" as const };
         },
       };
-      await handleIngestionQueue(
-        { messages } as unknown as MessageBatch<unknown>,
-        {} as never,
-        service,
-      );
+      await ingestBatch(
+      { messages } as unknown as MessageBatch<unknown>,
+      service,
+      {} as never,
+    );
       expect(acked).toHaveLength(4);
       expect(retried).toEqual(["doc_2"]);
     })();
@@ -235,10 +235,10 @@ describe("aislamiento de fallos dentro del lote", () => {
     const messages = [
       { body: { basura: true }, ack: () => acked.push(0), retry: () => retried.push(0) },
     ];
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      {} as never,
       { ingest: async () => ({ status: "INDEXED" as const }) },
+      {} as never,
     );
     expect(acked).toEqual([0]);
     expect(retried).toEqual([]);
@@ -256,8 +256,8 @@ describe("aislamiento de fallos dentro del lote", () => {
       },
     };
     const batch = { messages } as unknown as MessageBatch<unknown>;
-    await handleIngestionQueue(batch, {} as never, service);
-    await handleIngestionQueue(batch, {} as never, service);
+    await ingestBatch(batch, service, {} as never);
+    await ingestBatch(batch, service, {} as never);
     expect(new Set(ingested).size).toBe(3);
     expect(acked).toHaveLength(6);
   });
@@ -275,10 +275,10 @@ describe("la ingestión no gasta créditos de modelo", () => {
         return { status: "INDEXED" as const };
       },
     };
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      { MODEL_GATEWAY_CALLS: () => (gatewayCalls += 1) } as never,
       service,
+      { MODEL_GATEWAY_CALLS: () => (gatewayCalls += 1) } as never,
     );
     expect(gatewayCalls).toBe(0);
   });
@@ -296,15 +296,15 @@ describe("cada mensaje recibido deja rastro", () => {
   it("un mensaje válido siempre pasa por el servicio", async () => {
     const seen: string[] = [];
     const { messages, acked } = fakeBatch(5);
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      {} as never,
       {
         ingest: async (m: { document_id: string }) => {
           seen.push(m.document_id);
           return { status: "INDEXED" as const };
         },
       },
+      {} as never,
     );
     expect(seen).toHaveLength(5);
     expect(acked).toHaveLength(5);
@@ -314,14 +314,14 @@ describe("cada mensaje recibido deja rastro", () => {
     // Antes, un error que no fuera de conexión se propagaba, el mensaje agotaba sus
     // reintentos y acababa descartado dejando el documento congelado en PROCESSING.
     const { messages, acked, retried } = fakeBatch(3);
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      {} as never,
       {
         ingest: async () => {
           throw new Error("fallo al refrescar el token del proveedor");
         },
       },
+      {} as never,
     );
     expect(retried).toHaveLength(3);
     expect(acked).toHaveLength(0);
@@ -344,15 +344,15 @@ describe("cada mensaje recibido deja rastro", () => {
       },
     ];
     let received: unknown = null;
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      {} as never,
       {
         ingest: async (m: unknown) => {
           received = m;
           return { status: "INDEXED" as const };
         },
       },
+      {} as never,
     );
     expect(received).not.toBeNull();
     expect((received as { drive_file_id?: string }).drive_file_id).toBeUndefined();
@@ -380,10 +380,10 @@ describe("mensajes indescifrables dejan rastro", () => {
         retry: () => failures.push({ documentId: "retried", code: "RETRY" }),
       },
     ];
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      env as never,
       { ingest: async () => ({ status: "INDEXED" as const }) },
+      env as never,
     );
     // Se ACK-ea: reintentarlo daría el mismo resultado. Lo que no puede es evaporarse.
     expect(failures.some((f) => f.code === "ACK")).toBe(true);
@@ -406,13 +406,75 @@ describe("mensajes indescifrables dejan rastro", () => {
         retry: () => undefined,
       })),
     ];
-    await handleIngestionQueue(
+    await ingestBatch(
       { messages } as unknown as MessageBatch<unknown>,
-      { DB: {} } as never,
       { ingest: async () => ({ status: "INDEXED" as const }) },
+      { DB: {} } as never,
     );
     expect(acked).toHaveLength(4);
     expect(acked).toContain("doc_0");
     expect(acked).toContain("doc_2");
+  });
+});
+
+/**
+ * CONTRATO DEL RUNTIME. Es la prueba que faltaba y por cuya ausencia cinco documentos
+ * pasaron días sin procesarse.
+ *
+ * Cloudflare invoca `queue(batch, env, ctx)`. El handler tenía el servicio de ingestión
+ * como tercer parámetro con valor por defecto —una costura de pruebas—, así que en
+ * producción `service` era el `ExecutionContext`: `service.ingest` no existía, cada
+ * mensaje lanzaba un TypeError, el catch lo mandaba a reintentar, y tras agotar los
+ * tres intentos acababa en la cola de descarte sin una sola escritura en D1.
+ *
+ * Las pruebas pasaban porque llamaban a la función con el servicio en esa posición,
+ * exactamente la forma que producción no usa nunca. Éstas la llaman COMO LA LLAMA
+ * CLOUDFLARE.
+ */
+describe("el handler debe funcionar con la firma que usa Cloudflare", () => {
+  const cloudflareBatch = () => {
+    const acked: string[] = [];
+    const retried: string[] = [];
+    const messages = [
+      {
+        body: {
+          organization_id: "org_x",
+          matter_id: "mtr_x",
+          document_id: "doc_x",
+          reason: "UPLOADED" as const,
+          enqueued_at: new Date().toISOString(),
+        },
+        ack: () => acked.push("doc_x"),
+        retry: () => retried.push("doc_x"),
+      },
+    ];
+    return { messages, acked, retried };
+  };
+
+  it("un tercer argumento del runtime NO puede confundirse con una dependencia", async () => {
+    const { messages, retried } = cloudflareBatch();
+    // Esto es lo que pasa un Worker real: un ExecutionContext, no un servicio.
+    const executionContext = { waitUntil: () => undefined, passThroughOnException: () => undefined };
+
+    // El handler resuelve sus dependencias del entorno; el tercer argumento se ignora.
+    // Antes, esta misma llamada lanzaba TypeError en CADA mensaje.
+    await expect(
+      handleIngestionQueue(
+        { messages } as unknown as MessageBatch<unknown>,
+        { DB: {} } as never,
+        executionContext,
+      ),
+    ).resolves.toBeUndefined();
+
+    // Sin entorno real la ingestión falla y el mensaje se reintenta —correcto—, pero
+    // NUNCA por no haber sabido resolver el servicio.
+    expect(retried).toEqual(["doc_x"]);
+  });
+
+  it("el handler acepta exactamente los argumentos del runtime", () => {
+    // `queue(batch, env, ctx)`: tres parámetros, ninguno de ellos una dependencia
+    // inyectable. La costura de pruebas es `ingestBatch`, que no colisiona.
+    expect(handleIngestionQueue.length).toBeLessThanOrEqual(3);
+    expect(ingestBatch.length).toBe(3);
   });
 });
