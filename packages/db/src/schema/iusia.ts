@@ -141,6 +141,9 @@ export const documents = sqliteTable(
     /** Clasificación del fallo. Para soporte; nunca se muestra al abogado. */
     ingestionFailureCode: text("ingestion_failure_code"),
     ingestionFailureMessage: text("ingestion_failure_message"),
+    /** PENDING | SYNCED | DEFERRED. Procedencia, no inteligencia: puede ir por detrás. */
+    providerSyncState: text("provider_sync_state"),
+    providerSyncError: text("provider_sync_error"),
     /** Lote de carga. Correlación, NO transacción: un fallo no toca a los demás. */
     uploadBatchId: text("upload_batch_id"),
     /**

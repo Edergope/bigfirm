@@ -41,6 +41,17 @@ export interface IngestionOutcome {
 export const DOWNLOAD_DEADLINE_MS = 60_000;
 export const NORMALIZE_DEADLINE_MS = 120_000;
 
+/**
+ * Cotas de las dos dependencias que quedaban sin techo.
+ *
+ * `PROVIDER_SYNC` cubre `ensureMatterFolders` —ocho llamadas encadenadas a Drive— más
+ * la subida del archivo. Era el único tramo del pipeline sin límite, y es donde se
+ * detuvo `CC JFRR.pdf`. `AI_SEARCH` tiene su propio sondeo interno de 120 s; esta cota
+ * es el techo duro por si ese sondeo tampoco vuelve.
+ */
+export const PROVIDER_SYNC_DEADLINE_MS = 45_000;
+export const AI_SEARCH_DEADLINE_MS = 150_000;
+
 export type StageTimings = Record<string, number>;
 
 export class IngestionTimeoutError extends Error {
@@ -133,43 +144,46 @@ export class IngestionService {
       sincronización final. Si esa parte falla, el documento queda en ERROR con su etapa
       registrada y es reintentable, en vez de desaparecer del mundo.
     */
-    const resolveStorage = async () => {
-      try {
-        return await this.storage.resolveAdapter(message.organization_id);
-      } catch (error) {
-        if (error instanceof DriveConnectionError) {
-          await documents.setStatus(message.organization_id, message.document_id, "PENDIENTE");
-          return null;
-        }
-        throw error;
-      }
-    };
+    /*
+      ORDEN DEL PIPELINE — la corrección arquitectónica de este sprint.
 
-    let stage: IngestionStage = "PROVIDER_SYNC";
-    // Reloj por etapa. Sin esto, la única evidencia era `indexed_at` —cuándo terminó—,
-    // así que no se podía saber si los segundos se iban en la descarga, en la
-    // conversión o en el índice. «Optimizar la ingestión» era adivinar.
+      Antes: bytes → SINCRONIZAR CON DRIVE → normalizar → indexar. La sincronización con
+      el proveedor era prerrequisito SERIAL de todo lo demás y, además, no tenía cota:
+      `ensureMatterFolders` encadena ocho llamadas a Drive sin techo. `CC JFRR.pdf` —dos
+      páginas— se quedó exactamente ahí: `ingestion_stage = FINAL_STORAGE`, último latido
+      387 ms después de empezar, `drive_file_id` nulo, y dos entregas de cola agotadas
+      esperando algo que nunca respondió.
+
+      Ahora: bytes → normalizar → indexar → (aparte) sincronizar con Drive.
+
+      El original ya está a salvo en el ingreso durable, así que Drive no aporta NADA a
+      la comprensión del documento: es procedencia y respaldo, no una dependencia del
+      análisis. Que el proveedor esté lento o caído ya no impide que IUSIA entienda el
+      expediente; sólo deja pendiente una sincronización que se reintenta sola.
+    */
+    let stage: IngestionStage = "NORMALIZE";
     const clock = new StageClock();
     await documents.markIngestionStarted(message.organization_id, message.document_id);
-    try {
-      /*
-        ORIGEN DE LOS BYTES.
+    const heartbeat = (at: string) =>
+      documents.markIngestionProgress(message.organization_id, message.document_id, at);
 
-        Si el documento todavía no tiene archivo en el proveedor definitivo, sus bytes
-        están en el ingreso durable: la petición del navegador los dejó allí y terminó,
-        que es precisamente lo que evita que una subida se quede cinco minutos colgada
-        creando carpetas en Drive. Aquí, en segundo plano, se hace esa parte lenta.
-      */
+    try {
       const ingressKey = documentIngressKey(
         message.organization_id,
         message.matter_id,
         message.document_id,
       );
-      let bytes: ArrayBuffer;
-      let syncedProviderFileId: string | null = null;
 
-      if (doc.driveFileId) {
-        const storage = await resolveStorage();
+      // 1. BYTES. Del ingreso durable si están; del proveedor sólo si el documento ya
+      //    se sincronizó y el ingreso se limpió.
+      await heartbeat("INGRESS");
+      let bytes: ArrayBuffer;
+      const ingress = await this.env.ARTIFACTS.get(ingressKey);
+      if (ingress) {
+        bytes = await ingress.arrayBuffer();
+      } else if (doc.driveFileId) {
+        stage = "DRIVE_DOWNLOAD";
+        const storage = await this.resolveStorage(documents, message);
         if (!storage) return { status: "STORAGE_NOT_CONFIGURED" };
         bytes = await withDeadline(
           storage.download(doc.driveFileId),
@@ -177,95 +191,121 @@ export class IngestionService {
           "DRIVE_DOWNLOAD",
         );
       } else {
-        const ingress = await this.env.ARTIFACTS.get(ingressKey);
-        if (!ingress) {
-          // Sin bytes no hay nada que ingerir, y fingir lo contrario dejaría un
-          // documento «procesando» eternamente.
-          await documents.markIngestionFailed(message.organization_id, message.document_id);
-          return { status: "ERROR", detail: "los bytes del documento no están disponibles" };
-        }
-        bytes = await ingress.arrayBuffer();
-        await documents.markIngestionProgress(
+        // Sin bytes no hay nada que ingerir, y fingir lo contrario dejaría un documento
+        // «procesando» eternamente.
+        await documents.markIngestionFailedAt(
           message.organization_id,
           message.document_id,
-          "FINAL_STORAGE",
+          "INGRESS",
+          "SOURCE_BYTES_MISSING",
+          "No se conserva el contenido del archivo.",
         );
-        const storage = await resolveStorage();
-        if (!storage) return { status: "STORAGE_NOT_CONFIGURED" };
-        syncedProviderFileId = await this.syncToProvider(storage, doc, message, bytes);
-        if (syncedProviderFileId) {
-          await documents.attachProviderFile(
-            message.organization_id,
-            message.document_id,
-            syncedProviderFileId,
-          );
-        }
+        return { status: "ERROR", detail: "los bytes del documento no están disponibles" };
       }
       clock.mark("download_ms");
-      stage = "NORMALIZE";
-      const text = await withDeadline(
-        normalizeToText(bytes, doc.mimeType, doc.name, this.env.AI),
-        NORMALIZE_DEADLINE_MS,
-        "NORMALIZE",
-      );
-      clock.mark("normalize_ms");
-      await documents.markIngestionProgress(
-        message.organization_id,
-        message.document_id,
-        "NORMALIZATION",
-      );
 
+      // 2. INTELIGENCIA. Sin tocar el proveedor. Si el espejo y el índice ya existen de
+      //    un intento anterior, no se rehace: el reintento reanuda, no reempieza.
       const key = documentMirrorKey(
         message.organization_id,
         message.matter_id,
         message.document_id,
       );
-      // Metadata de R2 → la usa AI Search como folder/tenant para el filtrado.
-      stage = "R2_PUT";
-      await this.env.ARTIFACTS.put(key, text, {
-        httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-        customMetadata: {
-          organization_id: message.organization_id,
-          matter_id: message.matter_id,
-          document_id: message.document_id,
-          document_version: String(doc.currentVersion),
-          is_current: "true",
-          is_active: "true",
-          source_mime_type: doc.mimeType,
-        },
-      });
-      clock.mark("r2_ms");
-      await documents.markIngestionProgress(
-        message.organization_id,
-        message.document_id,
-        "AI_SEARCH",
-      );
+      const alreadyIndexed = doc.r2MirrorKey === key && doc.indexedAt !== null;
+      if (!alreadyIndexed && isIndexableMimeType(doc.mimeType)) {
+        stage = "NORMALIZE";
+        await heartbeat("NORMALIZATION");
+        const text = await withDeadline(
+          normalizeToText(bytes, doc.mimeType, doc.name, this.env.AI),
+          NORMALIZE_DEADLINE_MS,
+          "NORMALIZE",
+        );
+        clock.mark("normalize_ms");
 
-      stage = "AI_SEARCH_UPLOAD";
-      await uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
-        organization_id: message.organization_id,
-        matter_id: message.matter_id,
-        document_id: message.document_id,
-        document_version: String(doc.currentVersion),
-        is_current: "true",
-        is_active: "true",
-      });
-      clock.mark("ai_search_ms");
+        stage = "R2_PUT";
+        // Metadata de R2 → la usa AI Search como folder/tenant para el filtrado.
+        await this.env.ARTIFACTS.put(key, text, {
+          httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+          customMetadata: {
+            organization_id: message.organization_id,
+            matter_id: message.matter_id,
+            document_id: message.document_id,
+            document_version: String(doc.currentVersion),
+            is_current: "true",
+            is_active: "true",
+            source_mime_type: doc.mimeType,
+          },
+        });
+        clock.mark("r2_ms");
 
-      stage = "D1_MARK_INDEXED";
-      await documents.markIndexed(
-        message.organization_id,
-        message.document_id,
-        key,
-        await sha256Hex(text),
-        clock.finish(),
-      );
-      // El ingreso durable ya cumplió su función: el archivo está en el proveedor
-      // definitivo y su espejo normalizado en el índice. Conservar el binario aquí
-      // sería pagar dos veces por lo mismo.
-      if (syncedProviderFileId) {
-        await this.env.ARTIFACTS.delete(ingressKey).catch(() => undefined);
+        stage = "AI_SEARCH_UPLOAD";
+        await heartbeat("AI_SEARCH");
+        await withDeadline(
+          uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, {
+            organization_id: message.organization_id,
+            matter_id: message.matter_id,
+            document_id: message.document_id,
+            document_version: String(doc.currentVersion),
+            is_current: "true",
+            is_active: "true",
+          }),
+          AI_SEARCH_DEADLINE_MS,
+          "AI_SEARCH_UPLOAD",
+        );
+        clock.mark("ai_search_ms");
+
+        stage = "D1_MARK_INDEXED";
+        await documents.markIndexed(
+          message.organization_id,
+          message.document_id,
+          key,
+          await sha256Hex(text),
+          clock.finish(),
+        );
       }
+
+      /*
+        3. PROCEDENCIA. La sincronización con el proveedor ocurre AL FINAL, acotada, y
+           su fallo NO deshace nada: el documento ya es utilizable. Queda pendiente y se
+           reintenta; los bytes originales permanecen en el ingreso hasta que aterrice.
+      */
+      if (!doc.driveFileId) {
+        stage = "PROVIDER_SYNC";
+        await heartbeat("FINAL_STORAGE");
+        try {
+          const storage = await this.resolveStorage(documents, message);
+          if (storage) {
+            const providerFileId = await withDeadline(
+              this.syncToProvider(storage, doc, message, bytes),
+              PROVIDER_SYNC_DEADLINE_MS,
+              "PROVIDER_SYNC",
+            );
+            if (providerFileId) {
+              await documents.attachProviderFile(
+                message.organization_id,
+                message.document_id,
+                providerFileId,
+              );
+              // El ingreso ya cumplió su función: el original está en el proveedor y su
+              // espejo normalizado en el índice. Conservarlo sería pagar dos veces.
+              await this.env.ARTIFACTS.delete(ingressKey).catch(() => undefined);
+            }
+          }
+        } catch (error) {
+          // Se registra y se sigue: un proveedor lento no puede volver a dejar un
+          // documento sin analizar, que es exactamente lo que pasó con CC JFRR.pdf.
+          console.warn("provider_sync_deferred", {
+            document_id: message.document_id,
+            ...safeIngestionError(error),
+          });
+          await documents.markProviderSyncPending(
+            message.organization_id,
+            message.document_id,
+            error instanceof Error ? error.name : "UNKNOWN",
+          );
+        }
+      }
+
       return { status: "INDEXED", detail: key, timings: clock.timings };
     } catch (error) {
       if (error instanceof StorageNotConfiguredError) {
@@ -289,6 +329,25 @@ export class IngestionService {
         status: "ERROR",
         detail: error instanceof Error ? error.message : "error desconocido",
       };
+    }
+  }
+
+  /**
+   * Resuelve el almacenamiento de la ORGANIZACIÓN. Nunca el OAuth personal de nadie:
+   * una ingestión de fondo no puede depender de quién subió el archivo.
+   */
+  private async resolveStorage(
+    documents: DocumentRepository,
+    message: DocumentIngestionMessage,
+  ) {
+    try {
+      return await this.storage.resolveAdapter(message.organization_id);
+    } catch (error) {
+      if (error instanceof DriveConnectionError) {
+        await documents.setStatus(message.organization_id, message.document_id, "PENDIENTE");
+        return null;
+      }
+      throw error;
     }
   }
 

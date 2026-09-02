@@ -403,7 +403,25 @@ export class DocumentRepository {
   async attachProviderFile(organizationId: string, documentId: string, driveFileId: string) {
     await this.db
       .update(documents)
-      .set({ driveFileId, updatedAt: new Date().toISOString() })
+      .set({
+        driveFileId,
+        providerSyncState: "SYNCED",
+        providerSyncError: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /**
+   * La sincronización con el proveedor quedó pendiente.
+   *
+   * NO toca `ingestion_status`: el documento ya es analizable y decir lo contrario sería
+   * mentir. Esto es procedencia atrasada, no un fallo de ingestión.
+   */
+  async markProviderSyncPending(organizationId: string, documentId: string, code: string) {
+    await this.db
+      .update(documents)
+      .set({ providerSyncState: "DEFERRED", providerSyncError: code.slice(0, 120) })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
 

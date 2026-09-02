@@ -248,6 +248,12 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
         }
 
         // 3. A partir de aquí el archivo es de IUSIA. Lo demás ocurre en segundo plano.
+        //
+        //    SE ENCOLA SIEMPRE, también lo no indexable. Antes sólo se encolaba lo que
+        //    iba al índice, así que los bytes de una imagen se quedaban para siempre en
+        //    el ingreso durable y nunca llegaban al proveedor: el expediente perdía su
+        //    respaldo sin que nadie se enterara. El trabajo de fondo se salta la
+        //    inteligencia para estos formatos y hace sólo la sincronización.
         const nextStatus = initialIngestionStatus(mime);
         await documents.markUploadDurable(organizationId, documentId, nextStatus);
         await c.env.DOCUMENT_INGESTION.send({
