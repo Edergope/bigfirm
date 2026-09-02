@@ -43,6 +43,7 @@ import {
   batchProgressLabel,
   TASK_GROUPS,
   TASK_GROUP_LABEL,
+  canRetryIngestion,
   documentIntelligenceState,
   isTaskCompleted,
   matterLoadFailure,
@@ -647,7 +648,7 @@ function DocFolder({
                   </span>
                 </span>
                 <StatusChip label={st.label} tone={st.tone} title={st.hint} />
-                {onRetry && d.ingestion_status === "ERROR" ? (
+                {onRetry && canRetryIngestion(intel) ? (
                   <button
                     type="button"
                     onClick={() => onRetry(d.id)}

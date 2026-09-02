@@ -382,13 +382,36 @@ function NewMatterForm({
         request_key: requestKey,
         confirm_different: opts.confirmDifferent,
       });
-      // Los documentos aportados en la creación se incorporan al expediente recién
-      // creado y quedan encolados para su procesamiento. Un fallo de subida no
-      // deshace el expediente —ya existe y es utilizable—; se informa.
+      /*
+        Los documentos aportados en la creación se incorporan al expediente recién
+        creado. Un fallo de subida NO deshace el expediente —ya existe y es utilizable—,
+        pero tampoco puede desaparecer en silencio: en IUS-2026-016 el abogado
+        seleccionó cinco PDF, el expediente se creó, y los cinco se esfumaron sin
+        error, sin fila y sin rastro.
+
+        Ahora el resultado se INSPECCIONA. La ruta devuelve el destino de cada archivo,
+        así que si alguno no entró se dice cuál y cuántos, y el abogado decide.
+      */
+      let uploadFailure: string | null = null;
       if (files.length > 0) {
-        await api.uploadDocuments(res.matter.id, files);
+        try {
+          const upload = await api.uploadDocuments(res.matter.id, files);
+          const failed = upload.uploaded.filter(
+            (u) => u.status === "UPLOAD_FAILED" || u.status === "UNSUPPORTED",
+          );
+          if (failed.length > 0) {
+            uploadFailure =
+              `El expediente se creó, pero ${failed.length} de ${files.length} ` +
+              `${files.length === 1 ? "archivo no pudo adjuntarse" : "archivos no pudieron adjuntarse"}: ` +
+              `${failed.map((f) => f.name).join(", ")}. Adjúntalos de nuevo desde Documentos.`;
+          }
+        } catch {
+          uploadFailure =
+            `El expediente se creó, pero no pudimos iniciar la carga de ${files.length} ` +
+            `${files.length === 1 ? "documento" : "documentos"}. Adjúntalos desde Documentos.`;
+        }
       }
-      return res;
+      return { ...res, uploadFailure };
     },
     onError: (error) => {
       if (error instanceof ApiError && error.details?.reason === "POSSIBLE_DUPLICATE_MATTER") {

@@ -6,6 +6,13 @@ import {
   documentStatusLabel,
   isTerminalIngestion,
 } from "../upload-batch.js";
+import {
+  DOCUMENT_INTELLIGENCE_TERMS,
+  INGESTION_STALLED_AFTER_MINUTES,
+  canRetryIngestion,
+  documentIntelligenceState,
+  shouldPollIngestion,
+} from "../document-workspace.js";
 
 /**
  * Carga múltiple y disponibilidad parcial.
@@ -25,22 +32,42 @@ describe("progreso agregado del lote", () => {
     expect(p.indexed).toBe(12);
     expect(p.processing).toBe(3);
     expect(p.settled).toBe(false);
-    expect(batchProgressLabel(p)).toBe("12 de 15 documentos preparados");
+    // Se distingue tener el archivo a salvo de poder analizarlo: son cosas distintas y
+    // la copia anterior las fundía en un solo número ambiguo.
+    expect(batchProgressLabel(p)).toBe("15 archivos cargados · 12 indexados por IUSIA · 3 procesando");
   });
 
   it("un archivo con error no convierte el lote en un fallo", () => {
     const p = batchProgress(many({ AI_INDEXED: 14, ERROR: 1 }));
     expect(p.settled).toBe(true);
     // Ni «Error al procesar expediente» ni un lote cancelado: 14 sirven.
-    expect(batchProgressLabel(p)).toBe("14 preparados · 1 documento con error");
+    expect(batchProgressLabel(p)).toBe("15 archivos cargados · 14 indexados por IUSIA · 1 con error");
   });
 
-  it("las imágenes cuentan como preparadas aunque no se indexen", () => {
-    // El abogado puede abrirlas; contarlas como pendientes dejaría el lote en «0 de 5»
-    // para siempre.
+  it("las imágenes NO se presentan como indexadas por IUSIA", () => {
+    // Están cargadas y son consultables, pero IUSIA no las ha leído ni va a hacerlo.
+    // Contarlas como «preparadas» sonaba a que sí.
     const p = batchProgress(many({ NOT_INDEXABLE: 5 }));
     expect(p.settled).toBe(true);
-    expect(batchProgressLabel(p)).toBe("5 documentos preparados");
+    expect(p.indexed).toBe(0);
+    expect(p.uploaded).toBe(5);
+    expect(batchProgressLabel(p)).toBe("5 archivos cargados · 5 disponibles para consulta");
+  });
+
+  it("un lote mixto no afirma que los 15 estén indexados", () => {
+    const p = batchProgress(many({ AI_INDEXED: 10, NOT_INDEXABLE: 5 }));
+    const label = batchProgressLabel(p);
+    expect(label).toContain("15 archivos cargados");
+    expect(label).toContain("10 indexados por IUSIA");
+    expect(label).toContain("5 disponibles para consulta");
+    expect(label).not.toContain("15 indexados");
+  });
+
+  it("mientras hay transferencia, la frase habla de carga y no de análisis", () => {
+    const p = batchProgress(many({ UPLOADED: 2, UPLOADING: 3 }));
+    expect(p.uploading).toBe(3);
+    expect(p.uploaded).toBe(2);
+    expect(batchProgressLabel(p)).toBe("2 de 5 archivos cargados · 3 subiendo");
   });
 
   it("un lote terminado no deja nada en curso", () => {
@@ -119,5 +146,126 @@ describe("convocar a IUSIA con documentos aún en proceso", () => {
     const r = convocationReadiness([]);
     expect(r.ready).toBe(true);
     expect(r.statement).toContain("hechos que declares");
+  });
+});
+
+/**
+ * Regresión del incidente de IUS-2026-016 (2026-09-02).
+ *
+ * Dos fallos con UNA causa: la ruta de carga hablaba con Drive —cuatro carpetas
+ * secuenciales, sin cota— antes de escribir la primera fila durable, y sólo insertaba
+ * el documento DESPUÉS de que la subida al proveedor terminara. El ledger de aquel
+ * expediente tiene `matter.create` y nada más: cero documentos, cero carpetas, ni un
+ * evento `document.upload`. Eso es lo que vio el abogado — cinco archivos desaparecidos
+ * y, en el segundo intento, «Subiendo» durante más de cinco minutos.
+ */
+describe("carga durable: el archivo deja de depender del navegador", () => {
+  it("«Subiendo» sólo cubre la transferencia", () => {
+    expect(documentStatusLabel("UPLOADING").label).toBe("Subiendo");
+    // En cuanto los bytes están a salvo, la etiqueta cambia: lo que sigue es de fondo.
+    expect(documentStatusLabel("UPLOADED").label).toBe("Cargado · Procesando");
+  });
+
+  it("distingue no haber recibido el archivo de no haber podido procesarlo", () => {
+    // Un archivo que nunca llegó no puede aparentar estar en camino al índice.
+    expect(documentStatusLabel("UPLOAD_FAILED").label).toBe("Error al subir");
+    expect(documentStatusLabel("ERROR").label).toBe("Error de procesamiento");
+  });
+
+  it("una carga interrumpida es terminal y reintentable, no un limbo", () => {
+    expect(isTerminalIngestion("UPLOAD_FAILED")).toBe(true);
+    // Y sigue en curso mientras de verdad transfiere.
+    expect(isTerminalIngestion("UPLOADING")).toBe(false);
+    expect(isTerminalIngestion("UPLOADED")).toBe(false);
+  });
+
+  it("cinco archivos recién registrados NO son un expediente vacío", () => {
+    // La contradicción que vio el abogado: «Subiendo…» y, a la vez, «Aún no has
+    // aportado documentos». Con filas durables desde el primer instante, el total
+    // nunca es cero mientras haya archivos en camino.
+    const p = batchProgress(many({ UPLOADING: 5 }));
+    expect(p.total).toBe(5);
+    expect(p.uploading).toBe(5);
+    expect(p.uploaded).toBe(0);
+    expect(batchProgressLabel(p)).not.toBe("Sin documentos");
+  });
+
+  it("un archivo que falla al subir no arrastra a los otros cuatro", () => {
+    const p = batchProgress(many({ UPLOADED: 4, UPLOAD_FAILED: 1 }));
+    expect(p.total).toBe(5);
+    expect(p.failed).toBe(0);
+    // El fallido no se cuenta como cargado, y los cuatro siguen su curso.
+    expect(p.uploaded).toBe(5 - p.uploading);
+  });
+
+  it("no se puede convocar ignorando archivos que aún se están subiendo", () => {
+    // Antes sólo se miraba lo que estaba «procesando»: un archivo todavía en
+    // transferencia se habría quedado fuera de la evidencia sin decir nada.
+    const r = convocationReadiness(many({ AI_INDEXED: 3, UPLOADING: 2 }));
+    expect(r.ready).toBe(false);
+    expect(r.usableCount).toBe(3);
+    expect(r.pendingCount).toBe(2);
+    expect(r.statement).toContain("3 de 5");
+  });
+});
+
+/**
+ * Estado de carga como verdad del SERVIDOR, no del componente.
+ *
+ * El segundo incidente: el abogado cambió de pestaña, volvió, y «Subiendo…» había
+ * desaparecido junto con los archivos. El estado vivía en la mutación de React, así que
+ * desmontar el componente lo borraba. Ahora deriva del `ingestion_status` que devuelve
+ * el servidor: navegar no puede cambiar lo que hay en D1.
+ */
+describe("navegar no altera la realidad de los archivos", () => {
+  const asDocs = (statuses: string[]) =>
+    statuses.map((s) => ({ ingestion_status: s, updated_at: new Date().toISOString() }));
+
+  it("sigue consultando mientras algo está en movimiento", () => {
+    expect(shouldPollIngestion(asDocs(["UPLOADING"]))).toBe(true);
+    expect(shouldPollIngestion(asDocs(["UPLOADED"]))).toBe(true);
+    expect(shouldPollIngestion(asDocs(["PROCESSING"]))).toBe(true);
+  });
+
+  it("deja de consultar cuando todo llegó a su destino", () => {
+    expect(shouldPollIngestion(asDocs(["AI_INDEXED", "NOT_INDEXABLE", "ERROR"]))).toBe(false);
+    expect(shouldPollIngestion(asDocs(["UPLOAD_FAILED"]))).toBe(false);
+  });
+
+  it("una transferencia que se quedó a medias no espera para siempre", () => {
+    // Si el worker muere durante el envío, la fila quedaría en UPLOADING sin que nadie
+    // la vuelva a tocar. Pasado el margen se declara detenida y se puede reintentar.
+    const old = new Date(Date.now() - (INGESTION_STALLED_AFTER_MINUTES + 5) * 60_000).toISOString();
+    expect(documentIntelligenceState("UPLOADING", old)).toBe("STALLED");
+    expect(canRetryIngestion("STALLED")).toBe(true);
+  });
+
+  it("una carga reciente NO se confunde con una detenida", () => {
+    expect(documentIntelligenceState("UPLOADING", new Date().toISOString())).toBe("UPLOADING");
+  });
+
+  it("cada estado de carga es reintentable o terminal, nunca un limbo", () => {
+    expect(canRetryIngestion("UPLOAD_FAILED")).toBe(true);
+    expect(canRetryIngestion("ERROR")).toBe(true);
+    // Lo que sigue avanzando no ofrece reintento: no hay nada que recuperar todavía.
+    expect(canRetryIngestion("UPLOADING")).toBe(false);
+    expect(canRetryIngestion("UPLOADED")).toBe(false);
+    expect(canRetryIngestion("INDEXED")).toBe(false);
+  });
+
+  it("los términos de carga no mencionan la maquinaria", () => {
+    for (const state of ["UPLOADING", "UPLOAD_FAILED", "UPLOADED"] as const) {
+      const term = DOCUMENT_INTELLIGENCE_TERMS[state];
+      expect(term.label.length).toBeGreaterThan(0);
+      for (const jerga of ["R2", "Drive", "bucket", "OAuth", "provider", "queue"]) {
+        expect(`${term.label} ${term.hint}`).not.toContain(jerga);
+      }
+    }
+  });
+
+  it("«Cargado» dice explícitamente que el archivo ya es de IUSIA", () => {
+    // Es la frase que cierra la ansiedad: deja de depender del navegador del abogado.
+    expect(DOCUMENT_INTELLIGENCE_TERMS.UPLOADED.label).toBe("Cargado · Procesando");
+    expect(DOCUMENT_INTELLIGENCE_TERMS.UPLOADED.hint).toContain("ya está guardado en IUSIA");
   });
 });

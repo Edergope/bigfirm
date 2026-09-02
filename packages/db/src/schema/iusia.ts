@@ -180,7 +180,8 @@ export const documentVersions = sqliteTable(
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
     versionNumber: integer("version_number").notNull(),
-    driveFileId: text("drive_file_id").notNull(),
+    /** `null` mientras los bytes viven sólo en el ingreso durable. */
+    driveFileId: text("drive_file_id"),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes"),

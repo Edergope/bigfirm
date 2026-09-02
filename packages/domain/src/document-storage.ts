@@ -64,6 +64,26 @@ export function documentMirrorKey(
   return `${matterFolderPrefix(organizationId, matterId)}doc/${documentId}.txt`;
 }
 
+/**
+ * Clave del INGRESO DURABLE: los bytes tal como llegaron del navegador.
+ *
+ * Distinta del espejo normalizado (`documentMirrorKey`), que guarda el Markdown que
+ * consume el índice. Ésta guarda el binario original y existe por una razón concreta:
+ * la petición de carga debe poder terminar en cuanto los bytes están a salvo, sin
+ * esperar a Drive, a la normalización ni al índice.
+ *
+ * Es temporal por diseño: se borra en cuanto el proveedor definitivo confirma que tiene
+ * el archivo. Mientras exista, es la garantía de que un fallo o un cambio de pestaña no
+ * pierde lo que el abogado ya entregó.
+ */
+export function documentIngressKey(
+  organizationId: string,
+  matterId: string,
+  documentId: string,
+): string {
+  return `${matterFolderPrefix(organizationId, matterId)}ingress/${documentId}`;
+}
+
 export interface RetrievalScope {
   organization_id: string;
   /** Matters a los que el usuario tiene acceso autorizado. Vacío ⇒ sin resultados. */
@@ -121,9 +141,14 @@ export const DocumentIngestionMessage = z.object({
   organization_id: z.string().min(1),
   matter_id: z.string().min(1),
   document_id: z.string().min(1),
-  drive_file_id: z.string().min(1),
+  /**
+   * Archivo en el proveedor definitivo. AUSENTE cuando los bytes acaban de entrar y
+   * todavía no se han sincronizado con Drive: en ese caso el trabajo de fondo los lee
+   * del ingreso durable en R2 y crea el archivo allí.
+   */
+  drive_file_id: z.string().min(1).optional(),
   /** Qué disparó la ingestión; sólo trazabilidad, nunca instrucciones. */
-  reason: z.enum(["LINKED", "DRIVE_CHANGE", "MANUAL_REINDEX"]),
+  reason: z.enum(["LINKED", "DRIVE_CHANGE", "MANUAL_REINDEX", "UPLOADED", "RETRY"]),
   /** Marca de idempotencia adicional para deduplicar reintentos de Queue. */
   enqueued_at: z.string().datetime(),
 });

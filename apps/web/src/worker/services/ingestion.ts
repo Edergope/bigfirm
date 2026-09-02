@@ -1,11 +1,13 @@
 import {
   StorageNotConfiguredError,
+  documentIngressKey,
   documentMirrorKey,
   type DocumentIngestionMessage,
 } from "@iusia/domain";
-import { DocumentRepository, createDb } from "@iusia/db";
+import { DocumentRepository, MatterRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
 import { DriveConnectionError, OrganizationStorageResolver } from "./drive-credentials.js";
+import { DriveWorkspaceService } from "./drive-workspace.js";
 
 /**
  * Servicio de ingestión documental.
@@ -99,8 +101,10 @@ export class IngestionService {
     const doc = await documents.findById(message.organization_id, message.document_id);
     if (!doc) return { status: "SKIPPED", detail: "documento no encontrado en el registro" };
     if (doc.retiredAt) return { status: "SKIPPED", detail: "documento retirado" };
-    // Una cola retrasada de v1 nunca puede sobrescribir el espejo RAG de v2.
-    if (doc.driveFileId !== message.drive_file_id) {
+    // Una cola retrasada de v1 nunca puede sobrescribir el espejo RAG de v2. La
+    // comprobación sólo aplica cuando el mensaje declara un archivo del proveedor:
+    // los mensajes de carga (`UPLOADED`) llegan antes de que ese archivo exista.
+    if (message.drive_file_id !== undefined && doc.driveFileId !== message.drive_file_id) {
       return { status: "SKIPPED", detail: "versión no vigente" };
     }
 
@@ -119,18 +123,53 @@ export class IngestionService {
       throw error;
     }
 
-    let stage: IngestionStage = "DRIVE_DOWNLOAD";
+    let stage: IngestionStage = "PROVIDER_SYNC";
     // Reloj por etapa. Sin esto, la única evidencia era `indexed_at` —cuándo terminó—,
     // así que no se podía saber si los segundos se iban en la descarga, en la
     // conversión o en el índice. «Optimizar la ingestión» era adivinar.
     const clock = new StageClock();
     await documents.markIngestionStarted(message.organization_id, message.document_id);
     try {
-      const bytes = await withDeadline(
-        storage.download(message.drive_file_id),
-        DOWNLOAD_DEADLINE_MS,
-        "DRIVE_DOWNLOAD",
+      /*
+        ORIGEN DE LOS BYTES.
+
+        Si el documento todavía no tiene archivo en el proveedor definitivo, sus bytes
+        están en el ingreso durable: la petición del navegador los dejó allí y terminó,
+        que es precisamente lo que evita que una subida se quede cinco minutos colgada
+        creando carpetas en Drive. Aquí, en segundo plano, se hace esa parte lenta.
+      */
+      const ingressKey = documentIngressKey(
+        message.organization_id,
+        message.matter_id,
+        message.document_id,
       );
+      let bytes: ArrayBuffer;
+      let syncedProviderFileId: string | null = null;
+
+      if (doc.driveFileId) {
+        bytes = await withDeadline(
+          storage.download(doc.driveFileId),
+          DOWNLOAD_DEADLINE_MS,
+          "DRIVE_DOWNLOAD",
+        );
+      } else {
+        const ingress = await this.env.ARTIFACTS.get(ingressKey);
+        if (!ingress) {
+          // Sin bytes no hay nada que ingerir, y fingir lo contrario dejaría un
+          // documento «procesando» eternamente.
+          await documents.markIngestionFailed(message.organization_id, message.document_id);
+          return { status: "ERROR", detail: "los bytes del documento no están disponibles" };
+        }
+        bytes = await ingress.arrayBuffer();
+        syncedProviderFileId = await this.syncToProvider(storage, doc, message, bytes);
+        if (syncedProviderFileId) {
+          await documents.attachProviderFile(
+            message.organization_id,
+            message.document_id,
+            syncedProviderFileId,
+          );
+        }
+      }
       clock.mark("download_ms");
       stage = "NORMALIZE";
       const text = await withDeadline(
@@ -180,6 +219,12 @@ export class IngestionService {
         await sha256Hex(text),
         clock.finish(),
       );
+      // El ingreso durable ya cumplió su función: el archivo está en el proveedor
+      // definitivo y su espejo normalizado en el índice. Conservar el binario aquí
+      // sería pagar dos veces por lo mismo.
+      if (syncedProviderFileId) {
+        await this.env.ARTIFACTS.delete(ingressKey).catch(() => undefined);
+      }
       return { status: "INDEXED", detail: key, timings: clock.timings };
     } catch (error) {
       if (error instanceof StorageNotConfiguredError) {
@@ -199,9 +244,60 @@ export class IngestionService {
       };
     }
   }
+
+  /**
+   * Sube los bytes al proveedor definitivo y devuelve su identificador.
+   *
+   * Aquí es donde ocurre la parte lenta que ANTES bloqueaba al navegador: asegurar las
+   * carpetas del expediente en Drive y transferir el archivo. En segundo plano nadie
+   * espera, y si falla el documento queda en error reintentable con sus bytes intactos
+   * en el ingreso — nunca perdido.
+   *
+   * Drive sigue siendo invisible para el abogado: esto es infraestructura.
+   */
+  private async syncToProvider(
+    storage: { uploadFile: (input: { name: string; parentId: string; mimeType: string; content: ArrayBuffer }) => Promise<{ provider_file_id: string }> },
+    doc: { name: string; mimeType: string },
+    message: DocumentIngestionMessage,
+    bytes: ArrayBuffer,
+  ): Promise<string | null> {
+    const folders = await this.folders(message);
+    if (!folders) return null;
+    const meta = await storage.uploadFile({
+      name: doc.name,
+      parentId: folders,
+      mimeType: doc.mimeType,
+      content: bytes,
+    });
+    return meta.provider_file_id;
+  }
+
+  /**
+   * Carpeta de aportados del expediente en el proveedor, creándola si hace falta.
+   *
+   * Son varias llamadas secuenciales al proveedor. Ejecutarlas DENTRO de la petición de
+   * carga era la causa del cuelgue de más de cinco minutos: aquí, en segundo plano, esa
+   * lentitud no la sufre nadie.
+   */
+  private async folders(message: DocumentIngestionMessage): Promise<string | null> {
+    const db = createDb(this.env.DB);
+    const matters = new MatterRepository(db);
+    const matter = await matters.findById(message.organization_id, message.matter_id);
+    if (!matter) return null;
+    const workspace = DriveWorkspaceService.forEnv(this.env);
+    // El proveedor se resuelve por ORGANIZACIÓN, no por usuario: una ingestión de fondo
+    // no puede depender del OAuth personal de nadie. El parámetro se conserva por firma.
+    const folders = await workspace.ensureMatterFolders("", message.organization_id, {
+      id: matter.id,
+      reference: matter.reference,
+      title: matter.title,
+    });
+    return folders.uploaded;
+  }
 }
 
 export type IngestionStage =
+  | "PROVIDER_SYNC"
   | "DRIVE_DOWNLOAD"
   | "NORMALIZE"
   | "R2_PUT"

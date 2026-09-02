@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   batchProgress,
+  documentIngressKey,
   documentTypeForIntent,
   newId,
   producesDocument,
@@ -139,25 +140,8 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (files.length === 0) throw new IusiaError("VALIDATION_FAILED", "No se adjuntaron archivos");
 
-  const workspace = DriveWorkspaceService.forEnv(c.env);
-  let uploadedFolder: string;
-  try {
-    const folders = await workspace.ensureMatterFolders(userId, organizationId, {
-      id: matter.id,
-      reference: matter.reference,
-      title: matter.title,
-    });
-    uploadedFolder = folders.uploaded;
-  } catch (error) {
-    const code = driveErrorToCode(error);
-    throw new IusiaError("CONFLICT", documentErrorMessage(code), { code });
-  }
-
-  const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
-
-  // Identidad del LOTE. No es una transacción: no se confirma ni se revierte en
-  // bloque, y el fallo de un archivo no toca a los demás. Sólo correlaciona qué
-  // archivos entraron juntos, para poder decir «12 de 15 preparados».
+  // Identidad del LOTE. No es una transacción: no se confirma ni se revierte en bloque,
+  // y el fallo de un archivo no toca a los demás. Sólo correlaciona qué entró junto.
   const uploadBatchId = newId("uploadBatch");
   const enqueuedAt = new Date().toISOString();
 
@@ -167,19 +151,29 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
     status: string;
     deduplicated?: boolean;
   };
-  const results: UploadResult[] = new Array(files.length);
 
   /*
-    Los archivos se suben EN PARALELO acotado.
+    INGRESO DURABLE.
 
-    Antes era `for (const file of files) { await drive.uploadFile(…) }`: la petición
-    HTTP quedaba retenida la suma de las subidas, y con 15 archivos el abogado esperaba
-    quince veces lo que tarda uno. Ésta es la espera que él sufre de verdad —la cola
-    trabaja después, en segundo plano—, así que era la serialización más cara de las dos.
+    Esta petición NO habla con Drive. Antes sí, y ahí estaban los dos incidentes de
+    IUS-2026-016: la ruta empezaba creando cuatro carpetas en Drive —llamadas
+    secuenciales, sin cota— y sólo escribía la primera fila de documento DESPUÉS de que
+    la subida al proveedor hubiera terminado. Con eso, cualquier cuelgue, excepción o
+    aborto del navegador antes de ese punto no dejaba rastro: el ledger de aquel
+    expediente tiene el `matter.create` y NADA más —cero documentos, cero carpetas, ni
+    un solo evento `document.upload`—, que es exactamente lo que el abogado vio.
 
-    El techo evita abrir quince conexiones al proveedor a la vez. Cada archivo resuelve
-    su propio resultado y su propio fallo: uno que reviente no cancela el lote.
+    Ahora el orden se invierte. Los bytes van a R2, que es almacenamiento durable que ya
+    usamos, y la fila del documento se escribe inmediatamente después. En ese momento el
+    archivo YA ES DE IUSIA: cerrar la pestaña, perder la conexión o navegar a otra
+    sección no puede hacerlo desaparecer, porque su existencia vive en D1 y sus bytes en
+    R2, no en el estado de un componente de React.
+
+    Drive sigue siendo el proveedor definitivo y sigue siendo invisible para el abogado:
+    la sincronización ocurre en la cola, junto con la normalización y el índice.
   */
+  const results: UploadResult[] = new Array(files.length);
+
   await mapWithConcurrency(
     files.map((file, index) => ({ file, index })),
     UPLOAD_CONCURRENCY,
@@ -195,14 +189,10 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
       }
       try {
         const bytes = await file.arrayBuffer();
-        const ingestionStatus = initialIngestionStatus(mime);
-
-        // Un REINTENTO TÉCNICO no incorpora el documento dos veces. Se compara el
-        // binario por checksum contra lo que el expediente ya tiene: si es el mismo
-        // archivo, se devuelve el documento existente en vez de subirlo otra vez.
-        // Volver a aportar el mismo archivo a propósito es una acción distinta —crear
-        // una versión nueva— y tiene su propia ruta.
         const fileChecksum = await checksum(bytes);
+
+        // Un REINTENTO TÉCNICO no incorpora el documento dos veces. Volver a aportar el
+        // mismo archivo a propósito es otra acción —crear una versión— y tiene su ruta.
         const alreadyThere = await documents.findByChecksum(organizationId, matterId, fileChecksum);
         if (alreadyThere) {
           results[index] = {
@@ -214,39 +204,60 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
           return;
         }
 
-        const meta = await drive.uploadFile({
-          name: file.name,
-          parentId: uploadedFolder,
-          mimeType: mime,
-          content: bytes,
-        });
+        // 1. La fila PRIMERO, con los bytes todavía en vuelo. Así el expediente puede
+        //    mostrar el archivo como «Subiendo» desde el primer instante, y un fallo
+        //    posterior deja un registro reintentable en vez de un vacío.
         const documentId = await documents.link({
           organizationId,
           matterId,
-          driveFileId: meta.provider_file_id,
-          name: meta.name,
+          driveFileId: null,
+          name: file.name,
           mimeType: mime,
           classification: "FUENTE",
           linkedBy: userId,
           sizeBytes: file.size,
           checksum: fileChecksum,
-          ingestionStatus,
+          ingestionStatus: "UPLOADING",
           uploadBatchId,
-          ingestionEnqueuedAt: ingestionStatus === "PROCESSING" ? enqueuedAt : null,
+          ingestionEnqueuedAt: enqueuedAt,
         });
-        if (ingestionStatus === "PROCESSING") {
-          await c.env.DOCUMENT_INGESTION.send({
-            organization_id: organizationId,
-            matter_id: matterId,
-            document_id: documentId,
-            drive_file_id: meta.provider_file_id,
-            reason: "LINKED",
-            enqueued_at: enqueuedAt,
-          });
+
+        try {
+          // 2. Los bytes, a almacenamiento durable.
+          await c.env.ARTIFACTS.put(
+            documentIngressKey(organizationId, matterId, documentId),
+            bytes,
+            {
+              httpMetadata: { contentType: mime },
+              customMetadata: {
+                organization_id: organizationId,
+                matter_id: matterId,
+                document_id: documentId,
+                original_name: file.name,
+              },
+            },
+          );
+        } catch (error) {
+          // El archivo no llegó entero: se declara así, no como «procesando».
+          await documents.markUploadFailed(organizationId, documentId);
+          results[index] = { document_id: documentId, name: file.name, status: "UPLOAD_FAILED" };
+          throw error;
         }
-        results[index] = { document_id: documentId, name: meta.name, status: ingestionStatus };
+
+        // 3. A partir de aquí el archivo es de IUSIA. Lo demás ocurre en segundo plano.
+        const nextStatus = initialIngestionStatus(mime);
+        await documents.markUploadDurable(organizationId, documentId, nextStatus);
+        await c.env.DOCUMENT_INGESTION.send({
+          organization_id: organizationId,
+          matter_id: matterId,
+          document_id: documentId,
+          reason: "UPLOADED",
+          enqueued_at: enqueuedAt,
+        });
+        results[index] = { document_id: documentId, name: file.name, status: nextStatus };
       } catch {
-        results[index] = { document_id: "", name: file.name, status: "UPLOAD_FAILED" };
+        // Cada archivo resuelve su propio destino: uno que reviente no cancela el lote.
+        results[index] ??= { document_id: "", name: file.name, status: "UPLOAD_FAILED" };
       }
     },
   );
@@ -257,8 +268,12 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
     actorUserId: userId,
     action: "document.upload",
     resourceType: "document",
-    outcome: results.some((r) => r.status === "PROCESSING") ? "SUCCESS" : "FAILURE",
-    detail: { count: results.length, uploaded_folder: uploadedFolder },
+    outcome: results.some((r) => r.status !== "UPLOAD_FAILED") ? "SUCCESS" : "FAILURE",
+    detail: {
+      count: results.length,
+      batch_id: uploadBatchId,
+      failed: results.filter((r) => r.status === "UPLOAD_FAILED").length,
+    },
   });
 
   return c.json({ uploaded: results, batch_id: uploadBatchId }, 201);
@@ -357,9 +372,23 @@ documentWorkspaceRoutes.get("/matters/:matterId/documents/:documentId/content", 
   if (!version || version.matterId !== matterId) {
     throw new IusiaError("NOT_FOUND", "Versión no encontrada");
   }
-  // La ACL autoriza al solicitante; la firma provee el storage físico.
-  const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId);
-  const bytes = await drive.download(version.driveFileId);
+  // Un documento recién cargado todavía no está en el proveedor definitivo: sus bytes
+  // viven en el ingreso durable. Se sirven desde allí, de modo que el abogado puede
+  // abrir lo que acaba de aportar sin esperar a la sincronización de fondo.
+  let bytes: ArrayBuffer;
+  if (version.driveFileId === null) {
+    const ingress = await c.env.ARTIFACTS.get(
+      documentIngressKey(organizationId, matterId, documentId),
+    );
+    if (!ingress) {
+      throw new IusiaError("NOT_FOUND", "El documento todavía se está cargando");
+    }
+    bytes = await ingress.arrayBuffer();
+  } else {
+    // La ACL autoriza al solicitante; la firma provee el storage físico.
+    const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId);
+    bytes = await drive.download(version.driveFileId);
+  }
   const disposition = c.req.query("download") === "1" ? "attachment" : "inline";
   return new Response(bytes, {
     headers: {
@@ -479,7 +508,12 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retire", 
   const folders = await DriveWorkspaceService.forEnv(c.env).ensureMatterFolders(userId, organizationId, matter);
   const versions = await documents.listVersions(organizationId, documentId);
   const drive = await OrganizationStorageResolver.forEnv(c.env).resolveAdapter(organizationId, { requireWrite: true });
-  for (const version of versions) await drive.moveFile(version.driveFileId, folders.retired);
+  // Sólo se mueve lo que ya existe en el proveedor. Una versión aún sin sincronizar no
+  // tiene nada que mover allí; sus bytes se retiran del ingreso durable más abajo.
+  for (const version of versions) {
+    if (version.driveFileId) await drive.moveFile(version.driveFileId, folders.retired);
+  }
+  await c.env.ARTIFACTS.delete(documentIngressKey(organizationId, matterId, documentId));
   if (!await documents.retire({ organizationId, documentId, retiredBy: userId, reason: parsed.data.reason })) throw new IusiaError("CONFLICT", "El documento ya fue retirado");
   // El retiro llega HASTA EL ÍNDICE. Marcar `retired_at` en D1 y mover los binarios
   // dejaba el espejo publicado como activo: el documento retirado seguía siendo
@@ -1115,22 +1149,33 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
   if (!doc || doc.matterId !== matterId) {
     throw new IusiaError("NOT_FOUND", "Documento no encontrado en este expediente");
   }
-  if (doc.ingestionStatus !== "ERROR") {
+  // Se reintenta tanto lo que no se pudo procesar como lo que no llegó a subirse: en
+  // ambos casos hay una fila durable y el abogado debe poder recuperarla sin rehacer
+  // nada. Un documento sin archivo en el proveedor es normal ahora — sus bytes están en
+  // el ingreso durable y el trabajo de fondo los sincroniza.
+  if (doc.ingestionStatus !== "ERROR" && doc.ingestionStatus !== "UPLOAD_FAILED") {
     throw new IusiaError(
       "CONFLICT",
       "Este documento no está en error, así que no hay nada que reintentar",
       { code: "NOT_RETRYABLE", ingestion_status: doc.ingestionStatus },
     );
   }
-  if (!doc.driveFileId) {
-    throw new IusiaError("CONFLICT", "El documento no tiene archivo asociado", {
-      code: "NO_SOURCE_FILE",
-    });
+  const hasBytes =
+    doc.driveFileId !== null ||
+    (await c.env.ARTIFACTS.head(documentIngressKey(organizationId, matterId, documentId))) !== null;
+  if (!hasBytes) {
+    // Sin bytes no hay nada que reintentar, y decirlo es mejor que reencolar un trabajo
+    // que va a fallar igual. El abogado tiene que volver a aportar el archivo.
+    throw new IusiaError(
+      "CONFLICT",
+      "No conservamos el contenido de este archivo. Vuelve a adjuntarlo.",
+      { code: "NO_SOURCE_FILE" },
+    );
   }
 
   // La transición a PROCESSING es la que autoriza el reencolado: si otra pestaña ya lo
   // reintentó, ésta no encuentra el documento en ERROR y no encola un segundo mensaje.
-  const claimed = await documents.markIngestionRetrying(organizationId, documentId);
+  const claimed = await documents.markIngestionRetrying(organizationId, documentId, doc.ingestionStatus);
   if (!claimed) {
     throw new IusiaError("CONFLICT", "El documento ya se está reprocesando", {
       code: "ALREADY_RETRYING",
@@ -1141,7 +1186,9 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
     organization_id: organizationId,
     matter_id: matterId,
     document_id: documentId,
-    drive_file_id: doc.driveFileId,
+    // Sin `drive_file_id` el trabajo de fondo lee del ingreso durable y sincroniza el
+    // proveedor. Con él, reprocesa desde el archivo que ya existe allí.
+    ...(doc.driveFileId ? { drive_file_id: doc.driveFileId } : {}),
     reason: "RETRY",
     enqueued_at: new Date().toISOString(),
   });

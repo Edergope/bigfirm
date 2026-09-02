@@ -31,7 +31,8 @@ export class DocumentRepository {
   async link(input: {
     organizationId: string;
     matterId: string;
-    driveFileId: string;
+    /** `null` mientras los bytes viven sólo en el ingreso durable. */
+    driveFileId: string | null;
     name: string;
     mimeType: string;
     classification?: string;
@@ -107,6 +108,13 @@ export class DocumentRepository {
         isCurrent: true,
       });
       return inserted[0].id;
+    }
+
+    // Sin archivo del proveedor no hay clave de unicidad que pueda chocar: SQLite
+    // admite varios NULL en un índice único, así que la inserción no puede haber
+    // entrado en conflicto y llegar aquí sería un fallo real, no un re-link.
+    if (input.driveFileId === null) {
+      throw new Error("link: la inserción del documento no devolvió fila");
     }
 
     // Conflicto de unicidad: recupera el documento existente para esa clave.
@@ -329,7 +337,11 @@ export class DocumentRepository {
    * Sólo actúa sobre documentos en ERROR: reencolar uno que ya está indexado o en
    * curso duplicaría trabajo sin motivo.
    */
-  async markIngestionRetrying(organizationId: string, documentId: string): Promise<boolean> {
+  async markIngestionRetrying(
+    organizationId: string,
+    documentId: string,
+    fromStatus: string,
+  ): Promise<boolean> {
     const updated = await this.db
       .update(documents)
       .set({
@@ -341,11 +353,48 @@ export class DocumentRepository {
         and(
           eq(documents.organizationId, organizationId),
           eq(documents.id, documentId),
-          eq(documents.ingestionStatus, "ERROR"),
+          // La transición desde el estado observado es lo que AUTORIZA el reencolado:
+          // si otra pestaña ya reintentó, esta condición no encuentra la fila y no se
+          // encola un segundo mensaje para el mismo documento.
+          eq(documents.ingestionStatus, fromStatus),
         ),
       )
       .returning({ id: documents.id });
     return updated.length > 0;
+  }
+
+  /**
+   * La transferencia terminó y los bytes están a salvo en IUSIA.
+   *
+   * Es el instante que separa «Subiendo» de «Cargado · Procesando», y el que hace que
+   * cerrar la pestaña deje de poder perder el archivo.
+   */
+  async markUploadDurable(organizationId: string, documentId: string, nextStatus: string) {
+    await this.db
+      .update(documents)
+      .set({ ingestionStatus: nextStatus, updatedAt: new Date().toISOString() })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /**
+   * Los bytes NO llegaron completos.
+   *
+   * Se declara así y no como «procesando»: un documento que nunca se recibió no puede
+   * aparentar estar en camino al índice. Queda reintentable y visible.
+   */
+  async markUploadFailed(organizationId: string, documentId: string) {
+    await this.db
+      .update(documents)
+      .set({ ingestionStatus: "UPLOAD_FAILED", updatedAt: new Date().toISOString() })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /** Persiste el archivo del proveedor definitivo una vez sincronizado en segundo plano. */
+  async attachProviderFile(organizationId: string, documentId: string, driveFileId: string) {
+    await this.db
+      .update(documents)
+      .set({ driveFileId, updatedAt: new Date().toISOString() })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
 
   async markIngestionStarted(organizationId: string, documentId: string) {

@@ -14,6 +14,7 @@ import {
 import {
   deriveProgressStages,
   humanizeAgentId,
+  convocationReadiness,
   groundingNotice,
   shouldKeepPolling,
   shouldRefreshHistory,
@@ -131,6 +132,7 @@ export function MatterOrchestration({
         error={start.error}
         hasRuns={roots.length > 0}
         documentCount={data.documents.length}
+        ingestionStatuses={data.documents.map((d) => d.ingestionStatus)}
       />
 
       {selectedRoot ? (
@@ -215,6 +217,7 @@ function StartCard({
   error,
   hasRuns,
   documentCount,
+  ingestionStatuses,
 }: {
   objective: string;
   setObjective: (v: string) => void;
@@ -223,8 +226,12 @@ function StartCard({
   error: unknown;
   hasRuns: boolean;
   documentCount: number;
+  /** Estado de ingestión de cada documento del expediente. */
+  ingestionStatuses: readonly string[];
 }) {
   const insufficient = error instanceof ApiError && error.code === "INSUFFICIENT_CREDITS";
+  // Lo calcula el dominio: la UI no decide qué cuenta como preparado.
+  const readiness = convocationReadiness(ingestionStatuses);
   const tooShort = objective.trim().length < 10;
 
   return (
@@ -254,6 +261,17 @@ function StartCard({
           </BriefFact>
         </ul>
 
+        {/*
+          Disponibilidad parcial. Nunca se arranca en silencio ignorando archivos que el
+          abogado cree incluidos: si alguno sigue subiendo o procesándose, se dice
+          cuántos quedarían fuera de la evidencia y se le deja decidir.
+        */}
+        {!readiness.ready ? (
+          <div className="mt-3 rounded-[var(--radius-md)] border border-iusia-warning/35 bg-iusia-warning/10 px-4 py-3 text-[13px] leading-relaxed text-iusia-warning-text">
+            {readiness.statement}
+          </div>
+        ) : null}
+
         {insufficient ? (
           <div className="mt-3 rounded-[var(--radius-md)] bg-iusia-gold/12 px-4 py-2.5 text-[13px] text-iusia-gold-text">
             No hay créditos suficientes para iniciar el análisis. Contacta con la
@@ -267,7 +285,13 @@ function StartCard({
 
         <div className="mt-4 flex items-center gap-3">
           <Button onClick={onStart} disabled={pending || tooShort}>
-            {pending ? "Iniciando…" : hasRuns ? "Iniciar nuevo análisis" : "Iniciar análisis"}
+            {pending
+              ? "Iniciando…"
+              : !readiness.ready
+                ? `Analizar los ${readiness.usableCount} preparados`
+                : hasRuns
+                  ? "Iniciar nuevo análisis"
+                  : "Iniciar análisis"}
           </Button>
           {tooShort && objective.length > 0 ? (
             <span className="text-[12.5px] text-iusia-mist-text">

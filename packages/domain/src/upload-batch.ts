@@ -19,6 +19,7 @@ export const TERMINAL_INGESTION_STATUSES = new Set([
   "AI_INDEXED",
   "NOT_INDEXABLE",
   "ERROR",
+  "UPLOAD_FAILED",
 ]);
 
 export function isTerminalIngestion(status: string): boolean {
@@ -27,19 +28,27 @@ export function isTerminalIngestion(status: string): boolean {
 
 export interface BatchProgress {
   total: number;
+  /**
+   * Bytes ya a salvo en IUSIA. Es el número que cierra la ansiedad del abogado: el
+   * archivo ya no depende de su navegador ni de su conexión.
+   */
+  uploaded: number;
+  /** Todavía transfiriéndose. Aquí «Subiendo» significa de verdad subiendo. */
+  uploading: number;
   /** Documentos que ya pueden usarse en el análisis. */
   indexed: number;
-  /** Almacenados y visibles, pero fuera del RAG (imágenes, formatos no indexables). */
+  /** Almacenados y consultables, pero fuera del RAG (imágenes, formatos no indexables). */
   notIndexable: number;
   /** Terminaron mal. Cada uno es reintentable por separado. */
   failed: number;
-  /** Todavía en curso. */
+  /** Cargados y en proceso de inteligencia. */
   processing: number;
   /** Nada en curso: el lote ya no va a cambiar por sí solo. */
   settled: boolean;
 }
 
 export function batchProgress(statuses: readonly string[]): BatchProgress {
+  let uploading = 0;
   let indexed = 0;
   let notIndexable = 0;
   let failed = 0;
@@ -48,15 +57,19 @@ export function batchProgress(statuses: readonly string[]): BatchProgress {
     if (status === "AI_INDEXED") indexed += 1;
     else if (status === "NOT_INDEXABLE") notIndexable += 1;
     else if (status === "ERROR") failed += 1;
+    else if (status === "UPLOADING" || status === "FILE_STORED") uploading += 1;
     else processing += 1;
   }
   return {
     total: statuses.length,
+    // Todo lo que ya no está transfiriéndose tiene sus bytes a salvo.
+    uploaded: statuses.length - uploading,
+    uploading,
     indexed,
     notIndexable,
     failed,
     processing,
-    settled: processing === 0,
+    settled: processing === 0 && uploading === 0,
   };
 }
 
@@ -69,16 +82,24 @@ export function batchProgress(statuses: readonly string[]): BatchProgress {
  * siempre.
  */
 export function batchProgressLabel(progress: BatchProgress): string {
-  const ready = progress.indexed + progress.notIndexable;
   if (progress.total === 0) return "Sin documentos";
-  if (progress.processing > 0) {
-    return `${ready} de ${progress.total} documentos preparados`;
+
+  // Se cuentan por separado dos cosas que NO son la misma: tener el archivo a salvo y
+  // poder analizarlo. Un lote con imágenes decía «5 de 5 preparados» y sonaba a que
+  // IUSIA las había leído; no las había leído, ni va a hacerlo.
+  const parts = [`${progress.total} ${progress.total === 1 ? "archivo" : "archivos"} cargados`];
+  if (progress.uploading > 0) {
+    return `${progress.uploaded} de ${progress.total} archivos cargados · ${progress.uploading} subiendo`;
+  }
+  if (progress.indexed > 0) parts.push(`${progress.indexed} indexados por IUSIA`);
+  if (progress.processing > 0) parts.push(`${progress.processing} procesando`);
+  if (progress.notIndexable > 0) {
+    parts.push(`${progress.notIndexable} disponibles para consulta`);
   }
   if (progress.failed > 0) {
-    const plural = progress.failed === 1 ? "documento" : "documentos";
-    return `${ready} preparados · ${progress.failed} ${plural} con error`;
+    parts.push(`${progress.failed} con error`);
   }
-  return `${progress.total} ${progress.total === 1 ? "documento preparado" : "documentos preparados"}`;
+  return parts.join(" · ");
 }
 
 /**
@@ -98,8 +119,16 @@ export function documentStatusLabel(ingestionStatus: string): {
       return { label: "Vista disponible · no indexado", tone: "neutral" };
     case "ERROR":
       return { label: "Error de procesamiento", tone: "critical" };
+    case "UPLOADING":
     case "FILE_STORED":
+      // «Subiendo» dura EXACTAMENTE la transferencia. Antes cubría también la creación
+      // de carpetas en el proveedor y la subida a Drive, y por eso se quedaba minutos.
       return { label: "Subiendo", tone: "neutral" };
+    case "UPLOAD_FAILED":
+      return { label: "Error al subir", tone: "critical" };
+    case "UPLOADED":
+      // Los bytes ya están a salvo en IUSIA; lo que sigue ocurre en segundo plano.
+      return { label: "Cargado · Procesando", tone: "warning" };
     default:
       // PROCESSING y cualquier estado intermedio futuro: al abogado le basta saber que
       // está en curso. Distinguir «en cola» de «procesando» no cambia nada de lo que
@@ -135,7 +164,10 @@ export function convocationReadiness(statuses: readonly string[]): ReadinessDeci
       pendingCount: 0,
     };
   }
-  if (p.processing === 0) {
+  // Un archivo que todavía se está subiendo cuenta como pendiente igual que uno que
+  // se está procesando: en ambos casos NO entraría a la evidencia si se analiza ahora.
+  const pending = p.processing + p.uploading;
+  if (pending === 0) {
     return {
       ready: true,
       statement:
@@ -150,8 +182,8 @@ export function convocationReadiness(statuses: readonly string[]): ReadinessDeci
     ready: false,
     statement:
       `${usable} de ${p.total} documentos están preparados. ` +
-      `Si analizas ahora, ${p.processing} quedarán fuera de la evidencia.`,
+      `Si analizas ahora, ${pending} quedarán fuera de la evidencia.`,
     usableCount: usable,
-    pendingCount: p.processing,
+    pendingCount: pending,
   };
 }

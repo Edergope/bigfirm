@@ -163,6 +163,12 @@ function truncate(value: string, max: number): string {
  * esperaba a que pasara algo que ya había pasado.
  */
 export type DocumentIntelligenceState =
+  /** Los bytes todavía viajan del navegador a IUSIA. */
+  | "UPLOADING"
+  /** La transferencia se interrumpió: el archivo NO llegó. */
+  | "UPLOAD_FAILED"
+  /** Bytes a salvo en IUSIA; la inteligencia va después, en segundo plano. */
+  | "UPLOADED"
   | "PROCESSING"
   | "INDEXED"
   | "NOT_INDEXABLE"
@@ -184,13 +190,27 @@ export function documentIntelligenceState(
   if (ingestionStatus === "AI_INDEXED") return "INDEXED";
   if (ingestionStatus === "NOT_INDEXABLE") return "NOT_INDEXABLE";
   if (ingestionStatus === "ERROR") return "ERROR";
-  // PROCESSING o FILE_STORED: en camino… salvo que lleve demasiado tiempo.
-  if (updatedAt) {
-    const since = now.getTime() - Date.parse(updatedAt);
-    if (Number.isFinite(since) && since > INGESTION_STALLED_AFTER_MINUTES * 60_000) {
-      return "STALLED";
-    }
-  }
+  // Transferencia en curso o interrumpida: son estados de CARGA, no de inteligencia, y
+  // confundirlos fue lo que dejó «Subiendo» cinco minutos mientras se creaban carpetas
+  // en el proveedor.
+  if (ingestionStatus === "UPLOAD_FAILED") return "UPLOAD_FAILED";
+
+  // Nada puede quedarse «en camino» para siempre. Si el worker muere a mitad de la
+  // transferencia, la fila se quedaría en UPLOADING sin que nadie la volviera a tocar:
+  // pasado el margen se declara detenida y se ofrece reintentar, en vez de dejar al
+  // abogado ante un estado que ya no avanza.
+  const stalled =
+    updatedAt !== null &&
+    updatedAt !== undefined &&
+    (() => {
+      const since = now.getTime() - Date.parse(updatedAt);
+      return Number.isFinite(since) && since > INGESTION_STALLED_AFTER_MINUTES * 60_000;
+    })();
+  if (stalled) return "STALLED";
+
+  if (ingestionStatus === "UPLOADING") return "UPLOADING";
+  if (ingestionStatus === "UPLOADED") return "UPLOADED";
+  // PROCESSING o FILE_STORED: en camino.
   return "PROCESSING";
 }
 
@@ -198,6 +218,21 @@ export const DOCUMENT_INTELLIGENCE_TERMS: Record<
   DocumentIntelligenceState,
   { label: string; hint: string; tone: "info" | "success" | "neutral" | "critical" | "warning" }
 > = {
+  UPLOADING: {
+    label: "Subiendo",
+    hint: "El archivo se está transfiriendo a IUSIA.",
+    tone: "neutral",
+  },
+  UPLOAD_FAILED: {
+    label: "Error al subir",
+    hint: "El archivo no llegó completo. Puedes volver a intentarlo.",
+    tone: "critical",
+  },
+  UPLOADED: {
+    label: "Cargado · Procesando",
+    hint: "El archivo ya está guardado en IUSIA. Ahora se prepara para el análisis.",
+    tone: "info",
+  },
   PROCESSING: {
     label: "Procesando",
     hint: "IUSIA está leyendo el documento. Estará disponible para el análisis en unos minutos.",
@@ -230,12 +265,17 @@ export function shouldPollIngestion(
   documents: readonly { ingestion_status: string; updated_at?: string | null }[],
   now: Date = new Date(),
 ): boolean {
-  return documents.some(
-    (d) => documentIntelligenceState(d.ingestion_status, d.updated_at, now) === "PROCESSING",
+  // Se sigue consultando mientras haya algo en movimiento: transfiriéndose, recién
+  // cargado o procesándose. Los estados terminales detienen el sondeo por sí solos.
+  const inFlight = new Set<DocumentIntelligenceState>(["UPLOADING", "UPLOADED", "PROCESSING"]);
+  return documents.some((d) =>
+    inFlight.has(documentIntelligenceState(d.ingestion_status, d.updated_at, now)),
   );
 }
 
 /** ¿Puede reintentarse la indexación de este documento? */
 export function canRetryIngestion(state: DocumentIntelligenceState): boolean {
-  return state === "ERROR" || state === "STALLED";
+  // Una carga interrumpida también se reintenta: el archivo nunca llegó y el abogado
+  // debe poder recuperarlo sin rehacer el expediente entero.
+  return state === "ERROR" || state === "STALLED" || state === "UPLOAD_FAILED";
 }
