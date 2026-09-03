@@ -90,15 +90,30 @@ export function ingestionLifecycle(
   if (status === "ERROR") return "ERROR";
   if (status === "UPLOAD_FAILED") return "UPLOAD_FAILED";
   if (status === "UPLOADING" || status === "FILE_STORED") return "UPLOADING";
-  // Subido al índice, pendiente de confirmar que se recupera. Sigue en curso: para el
-  // abogado es «Procesando», y el sondeo debe continuar hasta que se confirme.
-  if (status === "INDEXING") return attempts < 1 ? "QUEUED" : "PROCESSING";
-
   const olderThan = (iso: string | null | undefined, minutes: number): boolean => {
     if (!iso) return false;
     const since = now.getTime() - Date.parse(iso);
     return Number.isFinite(since) && since > minutes * 60_000;
   };
+
+  /*
+    Subido al índice, pendiente de confirmar que se recupera.
+
+    Esto devolvía «Procesando» sin mirar nada más, y por eso un DOCX de ocho páginas
+    llevaba ocho minutos —y al escribir esto, más de una hora— con el mismo rótulo
+    tranquilizador. Su fila lo decía todo: etapa `INDEXING_DELAYED`, sin fecha de
+    próxima confirmación y sin código de fallo. Nadie iba a volver a por él nunca, y la
+    pantalla no ofrecía «Reintentar» porque, según ella, seguía trabajando.
+
+    Un trabajo que dejó de dar señales es un trabajo detenido, esté en la etapa que
+    esté. `INDEXING` se mide contra el latido igual que el resto.
+  */
+  if (status === "INDEXING") {
+    if (attempts < 1) return "QUEUED";
+    return olderThan(signals.heartbeatAt ?? signals.updatedAt, PROCESSING_STALL_MINUTES)
+      ? "PROCESSING_STALLED"
+      : "PROCESSING";
+  }
 
   if (attempts < 1) {
     // Nadie lo ha tomado. Si lleva demasiado esperando, el fallo es de ENTREGA.

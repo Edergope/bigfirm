@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { canRetryIngestion, ingestionLifecycle } from "../ingestion-lifecycle.js";
 import {
   MAX_FILES_PER_UPLOAD,
   batchProgress,
@@ -101,5 +102,39 @@ describe("la cuenta de la evidencia tiene que cuadrar", () => {
     expect(r.pendingCount).toBe(2);
     expect(r.statement).toContain("no pudo procesarse");
     expect(r.statement).toContain("no es analizable por su formato");
+  });
+});
+
+/**
+ * `ENSAYO ESPECIALIZACION xxx.docx` seguía diciendo «Procesando» ocho minutos después
+ * de subirse — y más de una hora después, cuando se escribió esto. Su fila lo explicaba:
+ * etapa `INDEXING_DELAYED`, `index_confirm_next_at` en nulo, sin código de fallo. La
+ * confirmación se había rendido, nadie iba a volver a por él, y la pantalla seguía
+ * mostrando trabajo en curso sin ofrecer «Reintentar».
+ */
+describe("INDEXING también puede detenerse", () => {
+  const iso = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+
+  it("subido al índice y con latido reciente: sigue en curso", () => {
+    expect(ingestionLifecycle({ status: "INDEXING", attempts: 1, heartbeatAt: iso(2) }))
+      .toBe("PROCESSING");
+  });
+
+  it("subido al índice y sin señales: detenido, no «Procesando» para siempre", () => {
+    // Es el caso exacto de ENSAYO: la confirmación se rindió y refrescó el latido; diez
+    // minutos después el abogado merece un botón, no un rótulo tranquilizador.
+    expect(ingestionLifecycle({ status: "INDEXING", attempts: 8, heartbeatAt: iso(45) }))
+      .toBe("PROCESSING_STALLED");
+  });
+
+  it("y entonces puede reintentarse", () => {
+    expect(canRetryIngestion(
+      ingestionLifecycle({ status: "INDEXING", attempts: 8, heartbeatAt: iso(45) }),
+    )).toBe(true);
+  });
+
+  it("encolado sin que nadie lo tome no se llama detenido aunque sea INDEXING", () => {
+    expect(ingestionLifecycle({ status: "INDEXING", attempts: 0, heartbeatAt: iso(45) }))
+      .toBe("QUEUED");
   });
 });
