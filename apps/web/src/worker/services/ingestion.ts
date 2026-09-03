@@ -1,4 +1,5 @@
 import {
+  isReadableMimeType,
   StorageNotConfiguredError,
   documentIngressKey,
   documentMirrorKey,
@@ -328,7 +329,20 @@ export class IngestionService {
         message.matter_id,
         message.document_id,
       );
-      const alreadyIndexed = doc.r2MirrorKey === key && doc.indexedAt !== null;
+      /*
+        LA INTELIGENCIA YA ESTÁ HECHA si el espejo existe Y el documento llegó al índice.
+        Basta con tener identidad de item: `INDEXING` significa subido y pendiente de
+        confirmar, no pendiente de subir.
+
+        La condición exigía `indexedAt !== null`, que sólo es cierto DESPUÉS de confirmar.
+        Así, cada reintento de sincronización con el proveedor volvía a normalizar y a
+        subir un documento que ya estaba en el índice, reiniciaba su contador de
+        confirmación y encolaba otra cadena — dejando `outdated` a la subida anterior.
+        `ENSAYO ESPECIALIZACION xxx.docx` acumuló 19 confirmaciones así y nunca convergió:
+        cada vuelta invalidaba el trabajo de la anterior.
+      */
+      const mirrorReady = doc.r2MirrorKey === key;
+      const alreadyIndexed = mirrorReady && (doc.indexedAt !== null || doc.aiSearchItemId !== null);
       if (!alreadyIndexed && isIndexableMimeType(doc.mimeType)) {
         stage = "NORMALIZE";
         await heartbeat("NORMALIZATION");
@@ -538,15 +552,25 @@ export class IngestionService {
       code,
       nextAt,
     );
-    // El reintento se encola como trabajo independiente: una caída del proveedor no
-    // puede gastar los reintentos del mensaje de inteligencia, que es otra cosa.
-    await this.env.DOCUMENT_INGESTION.send({
-      organization_id: message.organization_id,
-      matter_id: message.matter_id,
-      document_id: message.document_id,
-      reason: "PROVIDER_SYNC",
-      enqueued_at: new Date().toISOString(),
-    }).catch(() => undefined);
+    /*
+      El reintento se encola como trabajo independiente Y CON EL RETRASO CALCULADO.
+
+      Salía sin `delaySeconds`. La espera creciente se escribía en `provider_sync_next_at`
+      y el mensaje se enviaba de inmediato, así que los ocho intentos de un documento se
+      consumieron en 47 segundos —20:10:08 a 20:10:39 en el lote de IUS-2026-018— en vez
+      de repartirse entre un minuto y una hora. Escribir una fecha en D1 no retrasa nada:
+      es la tercera vez que este subsistema comete exactamente ese error.
+    */
+    await this.env.DOCUMENT_INGESTION.send(
+      {
+        organization_id: message.organization_id,
+        matter_id: message.matter_id,
+        document_id: message.document_id,
+        reason: "PROVIDER_SYNC",
+        enqueued_at: new Date().toISOString(),
+      },
+      { delaySeconds: Math.round(providerSyncBackoffMs(attempt) / 1000) },
+    ).catch(() => undefined);
   }
 
   /**
@@ -827,22 +851,16 @@ export async function uploadToAiSearch(
 }
 
 /**
- * MIME que el pipeline puede convertir en contenido indexable sin parsers propios.
- * Texto/JSON/XML conservan el decoder estable existente. Los formatos ricos usan
- * la capacidad nativa de Workers AI; audio, vídeo e imágenes siguen fuera del RAG.
+ * MIME que el pipeline puede convertir en contenido indexable.
+ *
+ * La lista ya NO vive aquí. Vivía aquí y a la vez, distinta, en la ruta de carga: ésta
+ * no tenía `.doc` ni imágenes y aquélla los aceptaba, así que dos documentos del lote
+ * de 17 subieron, esperaron turno, se procesaron y sólo entonces se declararon no
+ * indexables. La única definición está en `document-formats.ts`, y la usan la pantalla
+ * —para avisar al elegir el archivo—, la ruta de carga y esta ingestión.
  */
-const WORKERS_AI_MARKDOWN_MIME = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-]);
-
 export function isIndexableMimeType(mimeType: string): boolean {
-  return mimeType.startsWith("text/")
-    || mimeType === "application/json"
-    || mimeType === "application/xml"
-    || WORKERS_AI_MARKDOWN_MIME.has(mimeType);
+  return isReadableMimeType(mimeType);
 }
 
 /**
@@ -864,7 +882,7 @@ export async function normalizeToText(
     return new TextDecoder().decode(bytes);
   }
 
-  if (!WORKERS_AI_MARKDOWN_MIME.has(mimeType)) {
+  if (!isReadableMimeType(mimeType)) {
     throw new Error(`Formato no indexable: ${mimeType}`);
   }
   if (!ai) throw new Error("Workers AI toMarkdown no está configurado");

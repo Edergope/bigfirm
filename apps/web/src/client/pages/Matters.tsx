@@ -20,7 +20,7 @@ import {
   practiceAreaLabel,
   riskTerm,
 } from "@iusia/ui";
-import type { DuplicateCandidateView } from "@iusia/domain";
+import { planFileSelection, summarizeSelection, type DuplicateCandidateView } from "@iusia/domain";
 import { api, ApiError, type MatterSummary } from "../api.js";
 
 
@@ -363,6 +363,12 @@ function NewMatterForm({
   const [area, setArea] = useState("COMERCIAL_CONTRACTUAL");
   const [objective, setObjective] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
+  // Lo que se sabe del formato se sabe AHORA, no tres minutos después de subirlo.
+  const formatNotices = useMemo(
+    () => summarizeSelection(files.map((f) => ({ name: f.name, type: f.type }))).notices,
+    [files],
+  );
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Identidad de este alta. Un doble clic o un reintento devuelven el MISMO
@@ -474,13 +480,36 @@ function NewMatterForm({
             className="sr-only"
             aria-label="Adjuntar documentos al nuevo expediente"
             onChange={(e) => {
-              setFiles((f) => [...f, ...Array.from(e.target.files ?? [])].slice(0, 10));
+              // Sin recorte mudo. `slice(0, 10)` descartaba archivos en el navegador y
+              // nadie se enteraba: en la prueba real se seleccionaron 17 y sólo llegaron
+              // 10 al servidor. Si sobran, se dice cuántos y el abogado decide.
+              const next = [...files, ...Array.from(e.target.files ?? [])];
+              const plan = planFileSelection(next.map((f) => f.name));
+              setFiles(next.slice(0, plan.accepted));
+              setSelectionNotice(plan.notice);
               e.target.value = "";
             }}
           />
           <Button type="button" variant="secondary" size="sm" onClick={() => fileInput.current?.click()}>
             Adjuntar documentos
           </Button>
+          {selectionNotice ? (
+            <p
+              role="alert"
+              className="mt-2.5 rounded-[8px] border border-iusia-warning/35 bg-iusia-warning/10 px-3 py-2 text-[12.5px] leading-relaxed text-iusia-warning-text"
+            >
+              {selectionNotice}
+            </p>
+          ) : null}
+          {formatNotices.map((notice) => (
+            <p
+              key={notice}
+              role="alert"
+              className="mt-2.5 rounded-[8px] border border-iusia-warning/35 bg-iusia-warning/10 px-3 py-2 text-[12.5px] leading-relaxed text-iusia-warning-text"
+            >
+              {notice}
+            </p>
+          ))}
           {files.length > 0 ? (
             <ul className="mt-2.5 flex flex-col gap-1">
               {files.map((f, i) => (

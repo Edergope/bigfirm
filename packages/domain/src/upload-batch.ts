@@ -213,34 +213,112 @@ export interface ReadinessDecision {
 export function convocationReadiness(statuses: readonly string[]): ReadinessDecision {
   const p = batchProgress(statuses);
   const usable = p.indexed;
+
   if (p.total === 0) {
     return {
       ready: true,
-      statement: "Este expediente no tiene documentos: el análisis se apoyará en los hechos que declares.",
+      statement:
+        "Este expediente no tiene documentos: el análisis se apoyará en los hechos que declares.",
       usableCount: 0,
       pendingCount: 0,
     };
   }
-  // Un archivo que todavía se está subiendo cuenta como pendiente igual que uno que
-  // se está procesando: en ambos casos NO entraría a la evidencia si se analiza ahora.
-  const pending = p.processing + p.uploading;
-  if (pending === 0) {
+
+  /*
+    LA CUENTA TIENE QUE CUADRAR.
+
+    La frase anterior decía «6 de 9 documentos están preparados. Si analizas ahora, 1
+    quedarán fuera de la evidencia» sobre un expediente con 6 indexados, 1 procesando y 2
+    no indexables. Los dos no indexables no aparecían ni entre los preparados ni entre los
+    que quedaban fuera: sencillamente no existían para el mensaje, y 6 + 1 no suman 9.
+
+    Un abogado que lee eso no puede saber sobre qué va a trabajar IUSIA. Ahora cada
+    documento del expediente cae en exactamente una de tres categorías —entra, todavía
+    puede entrar, o no va a entrar nunca— y las tres se enuncian.
+  */
+  const willNeverEnter = p.notIndexable + p.failed + p.stalled;
+  const stillCould = p.processing + p.queued + p.uploading;
+
+  const excluded: string[] = [];
+  if (p.notIndexable > 0) {
+    excluded.push(
+      `${p.notIndexable} ${p.notIndexable === 1 ? "no es analizable" : "no son analizables"} por su formato`,
+    );
+  }
+  if (p.failed > 0) {
+    excluded.push(`${p.failed} no ${p.failed === 1 ? "pudo" : "pudieron"} procesarse`);
+  }
+  if (p.stalled > 0) {
+    excluded.push(`${p.stalled} ${p.stalled === 1 ? "quedó" : "quedaron"} a medio procesar`);
+  }
+  const excludedPhrase = excluded.length > 0 ? ` ${excluded.join(" y ")}.` : "";
+
+  if (stillCould === 0) {
     return {
       ready: true,
       statement:
-        p.failed > 0
-          ? `${usable} de ${p.total} documentos entrarán al análisis; ${p.failed} no pudieron procesarse.`
-          : `Los ${p.total} documentos del expediente están preparados.`,
+        willNeverEnter === 0
+          ? `Los ${p.total} documentos del expediente están preparados.`
+          : `${usable} de ${p.total} documentos entrarán al análisis:${excludedPhrase}`,
       usableCount: usable,
       pendingCount: 0,
     };
   }
+
   return {
     ready: false,
     statement:
       `${usable} de ${p.total} documentos están preparados. ` +
-      `Si analizas ahora, ${pending} quedarán fuera de la evidencia.`,
+      `Si analizas ahora, ${stillCould} ${stillCould === 1 ? "seguirá" : "seguirán"} sin estar listo ` +
+      `y ${stillCould === 1 ? "quedará" : "quedarán"} fuera de la evidencia.${excludedPhrase}`,
     usableCount: usable,
-    pendingCount: pending,
+    pendingCount: stillCould,
+  };
+}
+
+/**
+ * Archivos que se admiten en UNA operación de carga.
+ *
+ * El formulario de alta recortaba la selección con `slice(0, 10)` sin decir nada. En la
+ * prueba real se seleccionaron 17 documentos y sólo llegaron 10 al servidor: siete se
+ * descartaron en el navegador antes de que la petición saliera, y la auditoría registró
+ * `count: 10` como si eso fuera lo que el abogado había pedido.
+ *
+ * El límite existe —una sola petición multiparte no puede crecer sin fin— pero tiene que
+ * ser explícito, compartido por cliente y servidor, y NUNCA silencioso. El techo cubre
+ * con margen el objetivo de producto de 15 documentos por expediente.
+ */
+export const MAX_FILES_PER_UPLOAD = 25;
+
+export interface FileSelection {
+  /** Los que entran en esta carga. */
+  accepted: number;
+  /** Los que NO caben. Cero significa que no se descartó nada. */
+  rejected: number;
+  /** Qué decirle al abogado. `null` cuando la selección cabe entera. */
+  notice: string | null;
+}
+
+/**
+ * Decide qué archivos entran y qué se le dice al abogado.
+ *
+ * Nunca devuelve un recorte mudo: si sobran archivos, el aviso los nombra en número para
+ * que la decisión de cuáles quitar sea suya y no del componente.
+ */
+export function planFileSelection(
+  fileNames: readonly string[],
+  limit = MAX_FILES_PER_UPLOAD,
+): FileSelection {
+  if (fileNames.length <= limit) {
+    return { accepted: fileNames.length, rejected: 0, notice: null };
+  }
+  const rejected = fileNames.length - limit;
+  return {
+    accepted: limit,
+    rejected,
+    notice:
+      `Seleccionaste ${fileNames.length} archivos y en una sola carga caben ${limit}. ` +
+      `${rejected === 1 ? "Queda 1 fuera" : `Quedan ${rejected} fuera`}: quita los que no necesites ahora ` +
+      "o adjunta el resto en una segunda carga.",
   };
 }

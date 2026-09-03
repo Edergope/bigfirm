@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  isAcceptedUpload,
+  isReadableMimeType,
+  MAX_FILES_PER_UPLOAD,
   batchProgress,
   canRetryIngestion,
   documentIntelligenceState,
@@ -22,33 +25,19 @@ import {
 } from "../services/document-generation.js";
 import { DocumentDraftError, DocumentDraftService } from "../services/document-draft.js";
 import { SEED_TEMPLATE_IDS, seedOpinionTemplate } from "../services/template-seed.js";
-import { isIndexableMimeType, normalizeToText, setMirrorIndexActive } from "../services/ingestion.js";
+import { normalizeToText, setMirrorIndexActive } from "../services/ingestion.js";
 import { discoverTemplateVariables } from "../services/template-placeholders.js";
 
 export const documentWorkspaceRoutes = new Hono<AppBindings>();
 
-/** MIME aceptados: sólo lo que la ingestión ya sabe normalizar de forma segura. */
-const ACCEPTED_MIME = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-  "text/csv",
-  "text/plain",
-  "text/markdown",
-  "application/json",
-  "application/xml",
-  "text/xml",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "video/mp4",
-  "video/webm",
-  "audio/mpeg",
-  "audio/wav",
-]);
+/**
+ * Los MIME aceptados ya no se enumeran aquí.
+ *
+ * Esta lista y la de la ingestión eran distintas —ésta admitía `.doc` e imágenes que
+ * aquélla no sabía leer—, y esa diferencia fue lo que dejó dos documentos del lote de
+ * 17 esperando turno para acabar en «no indexado». `isAcceptedUpload` decide qué entra
+ * y `formatCoverage` explica por qué, con las mismas palabras en el navegador y aquí.
+ */
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const OFFICIAL_TEMPLATE_PREFIX = "official-templates/pisoso-legal/";
 
@@ -104,7 +93,7 @@ const OfficialTemplateManifest = z.object({
 const UPLOAD_CONCURRENCY = 6;
 
 function initialIngestionStatus(mime: string): "NOT_INDEXABLE" | "PROCESSING" {
-  return isIndexableMimeType(mime) ? "PROCESSING" : "NOT_INDEXABLE";
+  return isReadableMimeType(mime) ? "PROCESSING" : "NOT_INDEXABLE";
 }
 
 async function checksum(bytes: ArrayBuffer): Promise<string> {
@@ -142,6 +131,16 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
   const form = await c.req.formData();
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (files.length === 0) throw new IusiaError("VALIDATION_FAILED", "No se adjuntaron archivos");
+  // Defensa en profundidad: el mismo techo que aplica el cliente. Rechazar es preferible
+  // a recortar en silencio, que es como se perdieron siete archivos sin que nadie lo
+  // supiera —la auditoría registró `count: 10` de una selección de 17—.
+  if (files.length > MAX_FILES_PER_UPLOAD) {
+    throw new IusiaError(
+      "VALIDATION_FAILED",
+      `En una sola carga caben ${MAX_FILES_PER_UPLOAD} archivos; llegaron ${files.length}.`,
+      { code: "TOO_MANY_FILES", limit: MAX_FILES_PER_UPLOAD, received: files.length },
+    );
+  }
 
   // Identidad del LOTE. No es una transacción: no se confirma ni se revierte en bloque,
   // y el fallo de un archivo no toca a los demás. Sólo correlaciona qué entró junto.
@@ -186,7 +185,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
         return;
       }
       const mime = file.type || "application/octet-stream";
-      if (!ACCEPTED_MIME.has(mime)) {
+      if (!isAcceptedUpload(mime)) {
         results[index] = { document_id: "", name: file.name, status: "UNSUPPORTED" };
         return;
       }
@@ -451,7 +450,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/versions"
   }
   if (file.size > MAX_FILE_BYTES) throw new IusiaError("VALIDATION_FAILED", "El archivo supera 50 MB");
   const mime = file.type || "application/octet-stream";
-  if (!ACCEPTED_MIME.has(mime)) throw new IusiaError("VALIDATION_FAILED", "Tipo de archivo no admitido");
+  if (!isAcceptedUpload(mime)) throw new IusiaError("VALIDATION_FAILED", "Tipo de archivo no admitido");
 
   const workspace = DriveWorkspaceService.forEnv(c.env);
   const folders = await workspace.ensureMatterFolders(userId, organizationId, matter);
