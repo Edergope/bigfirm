@@ -91,9 +91,43 @@ export async function ingestBatch(
           matterId: parsed.data.matter_id,
           documentId: parsed.data.document_id,
         });
-        // PENDING ya se reprogramó con su propio retraso: este mensaje cumplió.
+
+        /*
+          REPROGRAMACIÓN REAL.
+
+          `confirmDocumentIndexed` decide y persiste `index_confirm_next_at`, pero
+          escribir una fecha en D1 no hace que nadie vuelva. Aquí se hacía `ack()` sin
+          más, con un comentario que afirmaba que el trabajo «ya se había reprogramado»:
+          no era cierto, y el único que rescataba la confirmación era la barrida de diez
+          minutos. Es decir, el cron era el camino normal justo después de haber
+          declarado que sería sólo una red de seguridad.
+
+          El mensaje siguiente se envía AQUÍ, que es donde está la cola, y el actual sólo
+          se confirma cuando ese envío ha resuelto.
+        */
+        if (outcome.status === "PENDING") {
+          try {
+            await env.DOCUMENT_INGESTION.send(
+              {
+                organization_id: parsed.data.organization_id,
+                matter_id: parsed.data.matter_id,
+                document_id: parsed.data.document_id,
+                reason: "AI_SEARCH_CONFIRM",
+                enqueued_at: new Date().toISOString(),
+              },
+              { delaySeconds: outcome.nextDelaySeconds },
+            );
+          } catch {
+            // La cola no aceptó el relevo: NO se confirma este mensaje. Reintentarlo es
+            // preferible a perder la confirmación, y la barrida sigue como respaldo.
+            message.retry();
+            return;
+          }
+        }
+
+        // CONFIRMED, FAILED, SKIPPED y DELAYED son desenlaces: no encadenan otro
+        // mensaje. PENDING sólo llega aquí con su relevo ya aceptado por la cola.
         message.ack();
-        void outcome;
         return;
       }
 

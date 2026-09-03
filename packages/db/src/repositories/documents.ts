@@ -564,7 +564,21 @@ export class DocumentRepository {
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
 
-  /** Programa la siguiente pregunta al índice y cuenta el intento. */
+  /**
+   * Anota CUÁNDO toca volver a preguntar y cuenta el intento.
+   *
+   * Esto NO reprograma nada por sí solo: escribir una fecha en D1 no hace que nadie
+   * vuelva. El relevo lo envía el consumidor a la cola con `delaySeconds`, y esta fecha
+   * es lo que la barrida consulta para recoger lo que ese relevo no cubrió.
+   *
+   * La distinción importa porque el comentario anterior daba por hecho lo contrario, y
+   * durante un despliegue entero el cron fue el camino normal en vez de la red de
+   * seguridad que se había declarado.
+   *
+   * `attempt` llega calculado por quien decide, y la escritura es monótona: dos
+   * confirmaciones concurrentes no pueden hacer retroceder el contador ni adelantar la
+   * próxima cita.
+   */
   async scheduleIndexConfirm(
     organizationId: string,
     documentId: string,
@@ -574,7 +588,9 @@ export class DocumentRepository {
     await this.db
       .update(documents)
       .set({
-        indexConfirmAttempts: attempt,
+        // `max` evita que una confirmación concurrente más lenta pise a la más
+        // avanzada: con at-least-once, dos mensajes pueden coincidir.
+        indexConfirmAttempts: sql`max(${documents.indexConfirmAttempts}, ${attempt})`,
         indexConfirmNextAt: nextAt,
         ingestionHeartbeatAt: new Date().toISOString(),
       })
