@@ -177,8 +177,19 @@ describe("la barrida sigue existiendo, sólo que ya no es imprescindible", () =>
       ),
       "utf8",
     );
-    const query = repo.slice(repo.indexOf("async listAwaitingIndexConfirmation"));
-    expect(query.slice(0, 900)).toContain("lte(documents.indexConfirmNextAt, now)");
+    const query = repo.slice(repo.indexOf("async listAwaitingIndexConfirmation"), );
+    const cuerpo = query.slice(0, 2200);
+    expect(cuerpo).toContain("lte(documents.indexConfirmNextAt, now)");
+    /*
+      Y también lo VARADO. La política anterior, al agotar la cadena rápida, dejaba
+      `index_confirm_next_at` en nulo y terminaba. La comparación `next_at <= ahora`
+      nunca es cierta sobre un nulo, así que esos documentos quedaban fuera del alcance
+      de la propia barrida que debía rescatarlos — cuatro del lote de 19 estaban así.
+      Se recogen sólo cuando llevan un rato callados, para no pisar una confirmación
+      que siga en vuelo.
+    */
+    expect(cuerpo).toContain("isNull(documents.indexConfirmNextAt)");
+    expect(cuerpo).toContain("lte(documents.ingestionHeartbeatAt, staleBefore)");
   });
 
   it("una confirmación duplicada no puede indexar dos veces", async () => {

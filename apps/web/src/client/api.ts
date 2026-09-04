@@ -71,6 +71,7 @@ export interface DocumentEntry {
   ingestion_enqueued_at: string | null;
   ingestion_heartbeat_at: string | null;
   ingestion_stage: string | null;
+  ingestion_confirm_attempts: number;
   /** Provenance del entregable generado por IUSIA. Null en documentos aportados. */
   content_source: string | null;
   generated_from_template_id: string | null;

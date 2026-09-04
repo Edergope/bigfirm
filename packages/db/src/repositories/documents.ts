@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { newId } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { documents, documentVersions } from "../schema/iusia.js";
@@ -655,7 +655,7 @@ export class DocumentRepository {
       .limit(limit);
   }
 
-  async listAwaitingIndexConfirmation(now: string, limit = 25) {
+  async listAwaitingIndexConfirmation(now: string, limit = 25, staleBefore = now) {
     return this.db
       .select({
         id: documents.id,
@@ -669,10 +669,28 @@ export class DocumentRepository {
         and(
           eq(documents.ingestionStatus, "INDEXING"),
           isNull(documents.retiredAt),
-          // Sólo lo VENCIDO. La confirmación normal la hace el mensaje con retraso; la
-          // barrida recoge lo que ese camino no cubrió —mensaje perdido, despliegue a
-          // mitad—, no adelanta lo que ya tiene turno.
-          lte(documents.indexConfirmNextAt, now),
+          /*
+            Lo VENCIDO, y lo VARADO.
+
+            «Vencido» es lo normal: la confirmación la hace el mensaje con retraso y esta
+            barrida sólo recoge lo que ese camino no cubrió —un mensaje perdido, un
+            despliegue a mitad—. No adelanta lo que ya tiene turno.
+
+            «Varado» es `index_confirm_next_at IS NULL`: nadie va a volver. Lo produjo la
+            política anterior, que al agotar la cadena rápida escribía nulo y terminaba.
+            Sin esta segunda condición, los cuatro documentos que quedaron así en el lote
+            de 19 no los rescataría el arreglo que sustituye a esa política: la
+            comparación `next_at <= ahora` NUNCA es cierta sobre un nulo, de modo que la
+            barrida pasaría por su lado sin verlos. Corregir el futuro no cura el pasado
+            si nadie va a mirarlo.
+          */
+          or(
+            lte(documents.indexConfirmNextAt, now),
+            and(
+              isNull(documents.indexConfirmNextAt),
+              lte(documents.ingestionHeartbeatAt, staleBefore),
+            ),
+          ),
         ),
       )
       .limit(limit);

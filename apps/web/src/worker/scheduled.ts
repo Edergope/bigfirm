@@ -35,6 +35,9 @@ export async function confirmIndexReadiness(env: Env): Promise<{ requeued: numbe
   const due = await documents.listAwaitingIndexConfirmation(
     new Date().toISOString(),
     SWEEP_BATCH_LIMIT,
+    // Un documento varado —sin próxima comprobación programada— se recoge sólo cuando
+    // lleva un rato callado, para no pisar a una confirmación que esté en vuelo.
+    new Date(Date.now() - ABANDONED_STALE_MINUTES * 60_000).toISOString(),
   );
 
   let requeued = 0;

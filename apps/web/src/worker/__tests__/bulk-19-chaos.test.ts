@@ -191,3 +191,76 @@ describe("la ingestión no depende del proveedor de almacenamiento", () => {
     expect(ingestion).not.toMatch(/\.run\(|chatCompletion|generateText/);
   });
 });
+
+/**
+ * Dos fallos MÍOS, encontrados observando el lote de 19 después de desplegar la
+ * corrección. Seis de los siete documentos muertos se recuperaron solos a las 19:53,
+ * sin que nadie tocara nada — incluidos los de 12,9 MB y 11,1 MB que mataban el
+ * aislamiento—. Los cuatro `Ejercicio-practico` no.
+ */
+describe("corregir el futuro no cura el pasado", () => {
+  it("la barrida también recoge lo VARADO, no sólo lo vencido", () => {
+    /*
+      Los cuatro quedaron con `index_confirm_next_at` en nulo, escrito por la política
+      anterior. La comparación `next_at <= ahora` NUNCA es cierta sobre un nulo, así que
+      la barrida pasaba por su lado sin verlos: mi arreglo evitaba crear limbo nuevo y
+      dejaba intacto el que ya existía.
+    */
+    const q = readFileSync(
+      join(root, "..", "..", "..", "..", "packages", "db", "src", "repositories", "documents.ts"),
+      "utf8",
+    );
+    const fn = q.slice(q.indexOf("async listAwaitingIndexConfirmation"));
+    expect(fn.slice(0, 2200)).toContain("isNull(documents.indexConfirmNextAt)");
+    expect(fn.slice(0, 2200)).toContain("or(");
+  });
+
+  it("y sólo cuando llevan un rato callados, para no pisar una confirmación en vuelo", () => {
+    const fn = sweeps.slice(sweeps.indexOf("export async function confirmIndexReadiness"));
+    expect(fn.slice(0, 900)).toContain("ABANDONED_STALE_MINUTES");
+  });
+});
+
+describe("la señal de «demorado» no puede ser una que otros pisen", () => {
+  const hace = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+
+  it("se deriva del contador de comprobaciones, que sólo crece", () => {
+    /*
+      Primero usé `ingestion_stage`, y era frágil: cualquier latido posterior lo
+      reescribe. Los cuatro documentos varados decían `FINAL_STORAGE` porque una
+      sincronización con el proveedor había pasado por encima horas después de que su
+      cadena de confirmación se agotara. Con la etapa como única señal, la pantalla los
+      habría llamado «Procesamiento detenido» y ofrecido un botón que los re-subía.
+    */
+    expect(ingestionLifecycle({
+      status: "INDEXING",
+      attempts: 11,
+      confirmAttempts: 12,
+      stage: "FINAL_STORAGE",
+      heartbeatAt: hace(240),
+    })).toBe("INDEXING_DELAYED");
+  });
+
+  it("por debajo del techo, un documento callado sigue siendo un documento detenido", () => {
+    expect(ingestionLifecycle({
+      status: "INDEXING",
+      attempts: 5,
+      confirmAttempts: 3,
+      heartbeatAt: hace(240),
+    })).toBe("PROCESSING_STALLED");
+  });
+
+  it("el endpoint de reintento lee la misma señal que la pantalla", () => {
+    const route = read("routes/document-workspace.ts");
+    const tramo = route.slice(route.indexOf("const state = ingestionLifecycle({"));
+    expect(tramo.slice(0, 400)).toContain("confirmAttempts: doc.indexConfirmAttempts");
+  });
+
+  it("el número vive en el dominio, no duplicado a cada lado", () => {
+    const dominio = readFileSync(
+      join(root, "..", "..", "..", "..", "packages", "domain", "src", "ingestion-lifecycle.ts"),
+      "utf8",
+    );
+    expect(dominio).toContain("export const INDEX_CONFIRM_EXHAUSTED_AT = 12;");
+  });
+});

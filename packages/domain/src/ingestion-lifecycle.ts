@@ -69,6 +69,15 @@ export const PROCESSING_STALL_MINUTES = 10;
  */
 export const QUEUE_DELIVERY_MINUTES = 5;
 
+/**
+ * Comprobaciones tras las cuales la indexación se considera demorada, no detenida.
+ *
+ * Debe coincidir con `INDEX_CONFIRM_MAX_ATTEMPTS` del servidor. Vive aquí porque la
+ * pantalla y el endpoint de reintento tienen que leer el mismo número: que fueran dos
+ * es como el botón «Reintentar» llegó a ofrecerse sobre documentos perfectamente sanos.
+ */
+export const INDEX_CONFIRM_EXHAUSTED_AT = 12;
+
 export interface IngestionSignals {
   /** Columna `ingestion_status`. */
   status: string;
@@ -78,8 +87,13 @@ export interface IngestionSignals {
   heartbeatAt?: string | null;
   /** Cuándo se puso el mensaje en la cola. */
   enqueuedAt?: string | null;
-  /** Etapa interna del procesamiento. Distingue «lento» de «detenido». */
+  /** Etapa interna del procesamiento. Orientativa: cualquier latido la sobrescribe. */
   stage?: string | null;
+  /**
+   * Comprobaciones de indexación ya hechas. Es la señal FIABLE de que la cadena rápida
+   * se agotó: sólo crece, y ningún otro trabajo la pisa.
+   */
+  confirmAttempts?: number | null;
   updatedAt?: string | null;
 }
 
@@ -135,6 +149,17 @@ export function ingestionLifecycle(
       comprobando a baja frecuencia, y NO se le pide al abogado que repare nada. Sólo
       es «detenido» lo que no tiene ningún trabajo futuro.
     */
+    /*
+      LA SEÑAL TIENE QUE SER LA QUE NO SE PISA.
+
+      Primero usé la etapa, y era frágil: `ingestion_stage` lo reescribe CUALQUIER
+      latido posterior. Lo comprobé sobre los cuatro documentos varados del lote de 19,
+      que decían `FINAL_STORAGE` porque una sincronización con el proveedor había pasado
+      por encima horas después de que la cadena de confirmación se agotara.
+
+      El número de comprobaciones sólo crece y nadie más lo toca.
+    */
+    if ((signals.confirmAttempts ?? 0) >= INDEX_CONFIRM_EXHAUSTED_AT) return "INDEXING_DELAYED";
     if (signals.stage === "INDEXING_DELAYED") return "INDEXING_DELAYED";
     return olderThan(signals.heartbeatAt ?? signals.updatedAt, PROCESSING_STALL_MINUTES)
       ? "PROCESSING_STALLED"

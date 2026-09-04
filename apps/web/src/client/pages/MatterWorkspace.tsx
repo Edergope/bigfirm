@@ -499,6 +499,7 @@ function Documentos({ data }: { data: MatterDetail }) {
             enqueuedAt: d.ingestion_enqueued_at,
             updatedAt: d.updated_at,
             stage: d.ingestion_stage,
+            confirmAttempts: d.ingestion_confirm_attempts,
           }),
         ),
       );
@@ -680,6 +681,7 @@ function DocFolder({
         enqueuedAt: d.ingestion_enqueued_at,
         updatedAt: d.updated_at,
         stage: d.ingestion_stage,
+        confirmAttempts: d.ingestion_confirm_attempts,
       },
       now,
     );

@@ -346,6 +346,7 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
     // acaba ofreciendo un botón de reintentar que vuelve a subirlo todo. No es dato de
     // negocio: es la misma clase de señal que los intentos y el latido.
     ingestion_stage: d.ingestionStage,
+    ingestion_confirm_attempts: d.indexConfirmAttempts,
     content_source: d.contentSource,
     // Provenance visible del entregable: de qué plantilla y con qué agente salió.
     generated_from_template_id: d.generatedFromTemplateId,
@@ -1205,6 +1206,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
     enqueuedAt: doc.ingestionEnqueuedAt,
     updatedAt: doc.updatedAt,
     stage: doc.ingestionStage,
+    confirmAttempts: doc.indexConfirmAttempts,
   });
   if (!canRetryIngestion(state)) {
     throw new IusiaError(
