@@ -52,6 +52,7 @@ import type { Env } from "../env.js";
 import type { LegalWorker, RunResult } from "../agents/legal-worker.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import { collectMatterEvidence } from "./rag-evidence.js";
+import { freezeEvidenceSet } from "@iusia/domain";
 import { NotificationService } from "../services/notifications.js";
 import { ModelGateway } from "../services/model-gateway.js";
 import { planTeam, type MatterBrief } from "../services/team-planner.js";
@@ -207,9 +208,18 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       });
     });
 
+    /*
+      CONJUNTO DE EVIDENCIA CONGELADO.
+
+      Se fija aquí, dentro de un `step.do`, así que sobrevive a los reintentos del
+      workflow y vale lo mismo en el minuto cero que en el minuto doce. Antes cada
+      misión preguntaba al expediente vivo: un documento que acabara de indexarse a los
+      treinta segundos entraba a mitad de ejecución sin que nadie lo hubiera decidido, y
+      el dictamen podía citar una fuente que no existía cuando el abogado pulsó el botón.
+    */
     const sourceContext = await step.do("collect-authorized-sources", async () => {
       const docs = await documents.listForMatter(params.organization_id, params.matter_id);
-      return { documentCount: docs.length, sources: docs.map((d) => ({
+      return { documentCount: docs.length, evidenceSet: freezeEvidenceSet(docs), sources: docs.map((d) => ({
         ref_id: d.id,
         kind: "DOCUMENT" as const,
         label: d.name,
@@ -222,12 +232,18 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       async (): Promise<DocumentExcerpt[]> => {
         if (sourceContext.documentCount === 0) return [];
         const docs = await documents.listForMatter(params.organization_id, params.matter_id);
+        // Sólo los del conjunto congelado. Los nombres se leen ahora —cambiar el
+        // nombre visible de un documento no altera qué se citó—, pero la pertenencia
+        // la decidió el arranque.
+        const frozen = new Set(sourceContext.evidenceSet.map((m) => m.document_id));
         return collectMatterEvidence({
           retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
           organizationId: params.organization_id,
           matterId: params.matter_id,
           objective: params.objective,
-          documentNames: new Map(docs.map((d) => [d.id, d.name])),
+          documentNames: new Map(
+            docs.filter((d) => frozen.has(d.id)).map((d) => [d.id, d.name]),
+          ),
           maxResults: 5,
         });
       },
@@ -245,6 +261,13 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           chunk_count: evidence.length,
           document_ids: [...new Set(evidence.map((e) => e.ref_id.split("#")[0] ?? e.ref_id))].join(","),
           query_source: "execution.objective",
+          // El conjunto congelado queda escrito y ligado a la ejecución raíz: con esto
+          // el análisis se puede reproducir, y se puede demostrar que un documento que
+          // se indexó más tarde NO participó.
+          evidence_set_size: sourceContext.evidenceSet.length,
+          evidence_set: sourceContext.evidenceSet
+            .map((m) => `${m.document_id}@v${m.version}`)
+            .join(","),
         },
       });
     });
@@ -544,7 +567,13 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
         practice_areas: matter.practiceAreas ?? [],
         document_count: docs.length,
         document_summary: docs.map((d) => `${d.name} (${d.classification})`),
-        document_names: docs.map((d) => [d.id, d.name] as const),
+        // El conjunto de evidencia se congela aquí, dentro del `step.do`, por la misma
+        // razón que en la ruta piloto: lo que se cita no puede depender del minuto en
+        // que cada misión llegue a preguntar.
+        evidence_set: freezeEvidenceSet(docs),
+        document_names: docs
+          .filter((d) => d.ingestionStatus === "AI_INDEXED" && !d.retiredAt)
+          .map((d) => [d.id, d.name] as const),
         // GROUNDING PACKAGE. El relato del abogado es contexto legítimo: un
         // expediente sin documentos NO es un expediente sin información.
         lawyer_context: buildLawyerContext(matter, params.objective),
@@ -563,6 +592,13 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
       };
     });
     const documentNames = new Map(ctx.document_names);
+    /*
+      Lo que se puede CITAR, que no es lo mismo que lo que hay en el expediente. Un
+      expediente con tres imágenes tiene tres documentos y cero evidencia: preguntarle
+      al índice por ellos es gastar una llamada para no encontrar nada, y presentarlos
+      como fuentes disponibles le promete al abogado algo que no va a recibir.
+    */
+    const evidenceCount = ctx.evidence_set.length;
 
     if (await isCancelled("pre-plan")) return abort("USER_CANCELLED", "cancelado antes de planificar");
 
@@ -987,7 +1023,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   });
                 }
                 // RAG por misión.
-                const excerpts = ctx.document_count === 0
+                const excerpts = evidenceCount === 0
                   ? []
                   : await collectMatterEvidence({
                       retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
@@ -997,7 +1033,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                       documentNames,
                       maxResults: 5,
                     });
-                if (ctx.document_count > 0) {
+                if (evidenceCount > 0) {
                   await events.append({
                     ...eventBase,
                     executionId,
@@ -1029,8 +1065,14 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                   upstream_outputs: resolvedUpstream,
                   constraints: [
                     `Contexto del encargo global (subordinado a tu rol): ${params.objective}`,
-                    ctx.document_count === 0
-                      ? "Este expediente no tiene documentación aportada: trabaja sobre los hechos informados por el abogado, califícalos como tales y señala qué requeriría prueba documental. La ausencia de documentos NO te impide emitir tu análisis."
+                    // Un expediente con tres imágenes tiene documentos y no tiene
+                    // evidencia. Decirle al especialista «no se recuperó soporte
+                    // relevante» le hace suponer que buscó y no encontró, cuando en
+                    // realidad no había nada que buscar.
+                    evidenceCount === 0
+                      ? ctx.document_count === 0
+                        ? "Este expediente no tiene documentación aportada: trabaja sobre los hechos informados por el abogado, califícalos como tales y señala qué requeriría prueba documental. La ausencia de documentos NO te impide emitir tu análisis."
+                        : "El expediente tiene documentos, pero ninguno es analizable por su formato: trabaja sobre los hechos informados, dilo expresamente y señala qué requeriría prueba documental."
                       : excerpts.length === 0
                         ? "No se recuperó soporte documental relevante para tu misión: trabaja sobre los hechos informados y dilo expresamente. No supongas el contenido de los documentos del expediente."
                         : "Trabaja únicamente con la evidencia autorizada del WorkPackage.",
@@ -1168,7 +1210,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
             summary: await this.readUpstreamSummary(o.output_ref),
           });
         }
-        const excerpts = ctx.document_count === 0
+        const excerpts = evidenceCount === 0
           ? []
           : await collectMatterEvidence({
               retrieval: new AiSearchRetrievalProvider(this.env.AI_SEARCH ?? null),
@@ -1196,8 +1238,10 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           upstream_outputs: upstream,
           constraints: [
             "Integra los hallazgos de los especialistas: compara, detecta contradicciones y prioriza la evidencia del expediente.",
-            ctx.document_count === 0
-              ? "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación que posteriormente se aporte. Dilo expresamente en tu conclusión."
+            evidenceCount === 0
+              ? ctx.document_count === 0
+                ? "Este análisis se basa en los hechos informados en el expediente y deberá contrastarse con la documentación que posteriormente se aporte. Dilo expresamente en tu conclusión."
+                : "El expediente tiene documentos aportados, pero ninguno pudo incorporarse al análisis por su formato. Apoya las conclusiones en los hechos informados y dilo expresamente."
               : excerpts.length === 0
                 ? "No se recuperó soporte documental relevante: apoya las conclusiones en los hechos informados y declara la ausencia de soporte documental."
                 : "Usa la evidencia documental recuperada únicamente cuando exista en el WorkPackage.",

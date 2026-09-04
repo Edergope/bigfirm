@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { planFileSelection } from "@iusia/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check, ChevronDown, ChevronRight, Download, File, FileArchive, FileAudio,
@@ -22,6 +23,7 @@ export function Documents() {
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [limitNotice, setLimitNotice] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -45,9 +47,19 @@ export function Documents() {
   }, [filtered, selectedId]);
   const selected = documents.find((doc) => doc.id === selectedId) ?? null;
 
+  /*
+    Esta pantalla manda UNA PETICIÓN POR ARCHIVO, no una por lote. Es la cuarta variante
+    del mismo gesto y la única que no comparte contrato con las demás. Se conserva
+    —muestra el progreso archivo a archivo, que aquí es lo útil— pero pasa por el mismo
+    límite: veinticinco peticiones son veinticinco peticiones.
+  */
   async function uploadFiles(fileList: FileList | File[]) {
     if (!matterId) return;
-    const files = Array.from(fileList);
+    const chosen = Array.from(fileList);
+    const plan = planFileSelection(chosen.map((f) => f.name));
+    setLimitNotice(plan.notice);
+    const files = chosen.slice(0, plan.accepted);
+    if (files.length === 0) return;
     const queued = files.map((file) => ({ id: crypto.randomUUID(), name: file.name, size: file.size, status: "uploading" as const }));
     setUploads((current) => [...queued, ...current].slice(0, 12));
     await Promise.all(files.map(async (file, index) => {
@@ -106,6 +118,7 @@ export function Documents() {
           </div>
           {folder === "uploaded" ? <div onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); void uploadFiles(event.dataTransfer.files); }} className={clsx("relative mx-2 mt-2 rounded-[10px] px-2 py-1 transition-colors", dragging ? "bg-iusia-action/8 ring-2 ring-iusia-action/35" : "")}>
             {dragging ? <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[10px] bg-iusia-paper/95 text-[12px] font-medium text-iusia-navy">Suelta aquí para subir al expediente</div> : null}<input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { if (event.target.files) void uploadFiles(event.target.files); event.target.value = ""; }} />
+            {limitNotice ? <p role="alert" className="mt-3 rounded-[8px] border border-iusia-warning/35 bg-iusia-warning/10 px-3 py-2 text-[12px] leading-relaxed text-iusia-warning-text">{limitNotice}</p> : null}
             {uploads.length > 0 ? <div className="mt-3 space-y-1.5 border-t border-iusia-mist/20 pt-2.5">{uploads.slice(0, 4).map((item) => <UploadRow key={item.id} item={item} />)}</div> : null}
           </div> : null}
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">

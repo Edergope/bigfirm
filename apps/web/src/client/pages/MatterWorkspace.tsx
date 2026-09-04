@@ -52,6 +52,9 @@ import {
   taskGroupOf,
   taskPrimaryAction,
   type RiskLevel,
+  accountUploads,
+  planFileSelection,
+  uploadAccountingStatement,
 } from "@iusia/domain";
 import {
   api,
@@ -516,9 +519,26 @@ function Documentos({ data }: { data: MatterDetail }) {
     void queryClient.invalidateQueries({ queryKey: ["matter", matterId] });
   };
 
+  /*
+    Esta entrada sube en cuanto se eligen los archivos, sin paso de confirmación. No
+    tenía techo —el formulario de alta recortaba a diez, el modal de Convocar a diez, y
+    aquí no había ninguno—, así que el mismo abogado obtenía tres respuestas distintas a
+    la misma pregunta. El límite es el del dominio, el mismo que aplica el servidor.
+  */
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const upload = useMutation({
     mutationFn: (files: File[]) => api.uploadDocuments(matterId, files),
-    onSuccess: refreshDocuments,
+    onSuccess: (result) => {
+      const acc = result.accounting
+        ?? accountUploads(result.uploaded.map((u) => ({
+          name: u.name, status: u.status, deduplicated: u.deduplicated,
+        })));
+      // Sólo se habla cuando hay algo que decir: si entraron todos, la lista ya lo
+      // muestra y un cartel de «subida completada» sobra.
+      setUploadNotice(acc.accepted < acc.requested ? uploadAccountingStatement(acc) : null);
+      refreshDocuments();
+    },
+    onError: () => setUploadNotice("No fue posible subir los documentos. Vuelve a intentarlo."),
   });
 
   // Reintenta UN documento: los otros catorce de un lote de quince no se tocan.
@@ -552,11 +572,24 @@ function Documentos({ data }: { data: MatterDetail }) {
         className="sr-only"
         aria-label="Adjuntar documentos"
         onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          if (files.length > 0) upload.mutate(files);
+          const chosen = Array.from(e.target.files ?? []);
           e.target.value = "";
+          if (chosen.length === 0) return;
+          const plan = planFileSelection(chosen.map((f) => f.name));
+          // Lo que no cabe se dice; no se recorta en silencio.
+          setUploadNotice(plan.notice);
+          upload.mutate(chosen.slice(0, plan.accepted));
         }}
       />
+
+      {uploadNotice ? (
+        <p
+          role="alert"
+          className="rounded-[8px] border border-iusia-warning/35 bg-iusia-warning/10 px-3 py-2 text-[12.5px] leading-relaxed text-iusia-warning-text"
+        >
+          {uploadNotice}
+        </p>
+      ) : null}
 
       <DocFolder
         title="Documentos aportados"

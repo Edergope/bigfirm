@@ -66,6 +66,12 @@ const VISION_ONLY_MIME = new Set([
   "image/bmp",
 ]);
 
+/**
+ * Motivo único para las imágenes, para que la pantalla y la matriz no diverjan.
+ */
+const IMAGE_REASON =
+  "La plataforma sabe describir imágenes con un modelo de visión, pero una descripción generada no es el texto del documento y no puede citarse como evidencia. Un escaneo necesita OCR, que es otra cosa.";
+
 /** Formatos legibles como texto plano, sin conversión de por medio. */
 function isPlainText(mimeType: string): boolean {
   return (
@@ -193,5 +199,78 @@ export function summarizeSelection(
     notices: [...notices].map(([reason, count]) =>
       count === 1 ? reason : `${count} archivos: ${reason}`,
     ),
+  };
+}
+
+
+/**
+ * Matriz de capacidad por formato, en una sola tabla.
+ *
+ * Es la fuente de la que sale lo que dice la pantalla. Antes cada respuesta se derivaba
+ * en su sitio —la carga por su lista, la ingestión por la suya, el rótulo por el estado
+ * final— y por eso un `.DOC` podía aceptarse, procesarse y acabar diciendo «no
+ * indexado» sin que en ningún punto se explicara por qué.
+ *
+ * `durable` es si los bytes se conservan; `preview`, si el abogado puede abrirlo desde
+ * el expediente; `extract`, si sacamos su texto; `index`, si IUSIA puede citarlo. Que
+ * un formato sea consultable NO implica que sea citable, y ésa es justamente la
+ * distinción que faltaba.
+ */
+export interface FormatCapability {
+  format: string;
+  mimeType: string;
+  durable: boolean;
+  preview: boolean;
+  extract: boolean;
+  index: boolean;
+  reason: string;
+}
+
+export const FORMAT_CAPABILITY_MATRIX: readonly FormatCapability[] = [
+  cap("PDF con texto", "application/pdf", true, "Se convierte a texto y se cita."),
+  cap(
+    "PDF escaneado",
+    "application/pdf",
+    true,
+    "Se acepta y se convierte. Si la página es sólo imagen, la conversión no devuelve texto y el documento queda consultable pero no citable.",
+  ),
+  cap("DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", true,
+    "Se convierte a texto y se cita."),
+  cap("DOC (Word 97-2003)", "application/msword", false,
+    "El formato binario antiguo no está soportado por la conversión. Guardar como .docx o PDF."),
+  cap("XLSX", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", true,
+    "Se convierte a texto y se cita."),
+  cap("XLS", "application/vnd.ms-excel", true, "Se convierte a texto y se cita."),
+  cap("ODT", "application/vnd.oasis.opendocument.text", true, "Se convierte a texto y se cita."),
+  cap("ODS", "application/vnd.oasis.opendocument.spreadsheet", true, "Se convierte a texto y se cita."),
+  cap("Numbers", "application/vnd.apple.numbers", true, "Se convierte a texto y se cita."),
+  cap("HTML", "text/html", true, "Se convierte a texto y se cita."),
+  cap("CSV", "text/csv", true, "Se lee como texto y se cita."),
+  cap("TXT", "text/plain", true, "Se lee como texto y se cita."),
+  cap("JPG", "image/jpeg", false, IMAGE_REASON),
+  cap("PNG", "image/png", false, IMAGE_REASON),
+  cap("WEBP", "image/webp", false, IMAGE_REASON),
+  cap("GIF", "image/gif", false, IMAGE_REASON),
+  cap("Vídeo MP4", "video/mp4", false, "Se conserva en el expediente. No se extrae contenido."),
+  cap("Audio MP3", "audio/mpeg", false, "Se conserva en el expediente. No se extrae contenido."),
+];
+
+function cap(
+  format: string,
+  mimeType: string,
+  index: boolean,
+  reason: string,
+): FormatCapability {
+  return {
+    format,
+    mimeType,
+    // Todo lo que se admite se guarda: el ingreso durable es previo a cualquier
+    // intento de leerlo, precisamente para que un formato ilegible no sea una pérdida.
+    durable: true,
+    preview: true,
+    // Extraer y citar van juntos hoy: lo que sacamos, lo indexamos.
+    extract: index,
+    index,
+    reason,
   };
 }

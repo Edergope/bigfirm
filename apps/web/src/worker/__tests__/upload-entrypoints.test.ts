@@ -43,7 +43,10 @@ describe("una sola vía de carga documental", () => {
   it("el alta de expediente inspecciona el resultado en vez de descartarlo", () => {
     // Los cinco archivos del incidente se perdieron porque la respuesta se ignoraba.
     const matters = read("pages/Matters.tsx");
-    expect(matters).toContain("upload.uploaded.filter");
-    expect(matters).toContain("no pudieron adjuntarse");
+    expect(matters).toContain("accountUploads(upload.uploaded");
+    // Y se contrasta contra lo PEDIDO, no contra lo que falló: en el lote de 17 el
+    // servidor no reportó un solo fallo y aun así faltaba un archivo.
+    expect(matters).toContain("acc.accepted < acc.requested");
+    expect(matters).toContain("uploadAccountingStatement(acc)");
   });
 });

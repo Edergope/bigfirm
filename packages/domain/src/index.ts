@@ -24,6 +24,7 @@ export * from "./task-action.js";
 export * from "./ingestion-lifecycle.js";
 export * from "./upload-batch.js";
 export * from "./document-formats.js";
+export * from "./evidence-set.js";
 export * from "./orchestration-safety.js";
 export * from "./team-plan.js";
 export * from "./errors.js";

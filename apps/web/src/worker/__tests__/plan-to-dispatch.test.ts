@@ -185,14 +185,19 @@ describe("DAG_CREATED → FIRST_SPECIALIST_DISPATCH — sin esperas lógicas", (
     expect(src).not.toMatch(/waitForIngestion/);
   });
 
-  it("[ZERO_DOCS_SKIPS_RETRIEVAL] con cero documentos no se instancia el proveedor de índice", () => {
+  it("[ZERO_DOCS_SKIPS_RETRIEVAL] sin evidencia citable no se instancia el proveedor de índice", () => {
     const src = dynamicSource();
-    // Cada uso de recuperación está guardado por `ctx.document_count === 0 ? [] : …`.
+    /*
+      La guarda era `ctx.document_count === 0`, que cuenta TODOS los documentos del
+      expediente. Un expediente con tres imágenes tiene tres documentos y cero
+      evidencia: se abría una llamada al índice para no encontrar nada. Ahora la guarda
+      es el conjunto congelado, que sólo cuenta lo que se puede citar.
+    */
     const uses = [...src.matchAll(/collectMatterEvidence\(/g)];
     expect(uses.length).toBeGreaterThan(0);
     for (const use of uses) {
       const before = src.slice(Math.max(0, use.index! - 260), use.index!);
-      expect(before).toMatch(/ctx\.document_count === 0\s*\n?\s*\?\s*\[\]/);
+      expect(before).toMatch(/evidenceCount === 0\s*\n?\s*\?\s*\[\]/);
     }
   });
 });

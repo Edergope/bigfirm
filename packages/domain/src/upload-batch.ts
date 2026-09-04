@@ -205,9 +205,23 @@ export interface ReadinessDecision {
   /** El conjunto está completo: se puede convocar sin advertencia. */
   ready: boolean;
   statement: string;
-  /** Documentos que SÍ entrarían al análisis si decide no esperar. */
+  /** Total de documentos del expediente. `usable + excludedNow` siempre lo iguala. */
+  total: number;
+  /**
+   * Documentos que SÍ entrarían al análisis si decide no esperar.
+   *
+   * Es exactamente el tamaño del conjunto que el servidor congela al arrancar
+   * (`freezeEvidenceSet`), y es el número que rotula el botón. Que estas tres cuentas
+   * fueran independientes es como el botón llegó a ofrecer «Analizar los 6 preparados»
+   * mientras el mensaje hablaba de un solo documento excluido sobre nueve.
+   */
   usableCount: number;
+  /** De los excluidos, los que TODAVÍA podrían entrar si espera. */
   pendingCount: number;
+  /** Todo lo que no entra hoy: los que aún pueden más los que nunca podrán. */
+  excludedNow: number;
+  /** Se conservan y se consultan, pero su formato los deja fuera del análisis. */
+  viewOnlyCount: number;
 }
 
 export function convocationReadiness(statuses: readonly string[]): ReadinessDecision {
@@ -219,8 +233,11 @@ export function convocationReadiness(statuses: readonly string[]): ReadinessDeci
       ready: true,
       statement:
         "Este expediente no tiene documentos: el análisis se apoyará en los hechos que declares.",
+      total: 0,
       usableCount: 0,
       pendingCount: 0,
+      excludedNow: 0,
+      viewOnlyCount: 0,
     };
   }
 
@@ -260,8 +277,11 @@ export function convocationReadiness(statuses: readonly string[]): ReadinessDeci
         willNeverEnter === 0
           ? `Los ${p.total} documentos del expediente están preparados.`
           : `${usable} de ${p.total} documentos entrarán al análisis:${excludedPhrase}`,
+      total: p.total,
       usableCount: usable,
       pendingCount: 0,
+      excludedNow: willNeverEnter,
+      viewOnlyCount: p.notIndexable,
     };
   }
 
@@ -271,8 +291,11 @@ export function convocationReadiness(statuses: readonly string[]): ReadinessDeci
       `${usable} de ${p.total} documentos están preparados. ` +
       `Si analizas ahora, ${stillCould} ${stillCould === 1 ? "seguirá" : "seguirán"} sin estar listo ` +
       `y ${stillCould === 1 ? "quedará" : "quedarán"} fuera de la evidencia.${excludedPhrase}`,
+    total: p.total,
     usableCount: usable,
     pendingCount: stillCould,
+    excludedNow: stillCould + willNeverEnter,
+    viewOnlyCount: p.notIndexable,
   };
 }
 
@@ -321,4 +344,108 @@ export function planFileSelection(
       `${rejected === 1 ? "Queda 1 fuera" : `Quedan ${rejected} fuera`}: quita los que no necesites ahora ` +
       "o adjunta el resto en una segunda carga.",
   };
+}
+
+/**
+ * Qué le pasó a cada archivo que el abogado pidió subir.
+ *
+ * En el lote de 17 el servidor respondió `count: 10, failed: 0` y sólo se crearon
+ * nueve filas. Los dos números eran ciertos y aun así el informe era falso: `failed`
+ * contaba únicamente `UPLOAD_FAILED`, y un archivo rechazado por formato o unificado
+ * con otro idéntico no es ninguna de esas cosas. La respuesta por archivo existía y
+ * nadie la miraba; nada quedaba escrito, así que la reconstrucción posterior no pudo
+ * decidir cuál de los dos caminos tomó el décimo.
+ *
+ * Ahora todo archivo pedido termina en exactamente una de estas casillas, y la suma de
+ * las cinco es el número que el abogado seleccionó.
+ */
+export interface UploadOutcome {
+  name: string;
+  status: string;
+  deduplicated?: boolean;
+}
+
+export interface UploadAccounting {
+  requested: number;
+  accepted: number;
+  duplicate: number;
+  unsupported: number;
+  failed: number;
+  /** Nombres de lo que no entró, para poder decirlo archivo por archivo. */
+  duplicateNames: string[];
+  unsupportedNames: string[];
+  failedNames: string[];
+}
+
+export function accountUploads(results: readonly UploadOutcome[]): UploadAccounting {
+  const acc: UploadAccounting = {
+    requested: results.length,
+    accepted: 0,
+    duplicate: 0,
+    unsupported: 0,
+    failed: 0,
+    duplicateNames: [],
+    unsupportedNames: [],
+    failedNames: [],
+  };
+  for (const r of results) {
+    if (r.deduplicated) {
+      acc.duplicate += 1;
+      acc.duplicateNames.push(r.name);
+    } else if (r.status === "UNSUPPORTED") {
+      acc.unsupported += 1;
+      acc.unsupportedNames.push(r.name);
+    } else if (r.status === "UPLOAD_FAILED") {
+      acc.failed += 1;
+      acc.failedNames.push(r.name);
+    } else {
+      acc.accepted += 1;
+    }
+  }
+  return acc;
+}
+
+/**
+ * El resultado dicho en una frase, sin celebrar de más.
+ *
+ * «Subida completada» sobre diecisiete archivos de los que llegaron nueve es la clase
+ * de mensaje que hace que un abogado descubra la pérdida tres días después, en la
+ * audiencia. Si algo no entró, se nombra.
+ */
+export function uploadAccountingStatement(acc: UploadAccounting): string {
+  if (acc.requested === 0) return "No seleccionaste ningún archivo.";
+  if (acc.accepted === acc.requested) {
+    return acc.requested === 1
+      ? "El documento se guardó en el expediente."
+      : `Los ${acc.requested} documentos se guardaron en el expediente.`;
+  }
+
+  const partes: string[] = [];
+  partes.push(
+    acc.accepted === 1
+      ? "1 documento se guardó en el expediente"
+      : `${acc.accepted} documentos se guardaron en el expediente`,
+  );
+  if (acc.duplicate > 0) {
+    partes.push(
+      acc.duplicate === 1
+        ? `1 ya estaba en el expediente (${acc.duplicateNames[0]})`
+        : `${acc.duplicate} ya estaban en el expediente`,
+    );
+  }
+  if (acc.unsupported > 0) {
+    partes.push(
+      acc.unsupported === 1
+        ? `1 no se admite por su formato (${acc.unsupportedNames[0]})`
+        : `${acc.unsupported} no se admiten por su formato`,
+    );
+  }
+  if (acc.failed > 0) {
+    partes.push(
+      acc.failed === 1
+        ? `1 no pudo subirse (${acc.failedNames[0]})`
+        : `${acc.failed} no pudieron subirse`,
+    );
+  }
+  return `De ${acc.requested} archivos: ${partes.join("; ")}.`;
 }

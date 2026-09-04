@@ -3,6 +3,7 @@
  * este cliente nunca decide qué puede ver el usuario, sólo muestra lo que la API
  * le devuelve dentro de su alcance.
  */
+import type { UploadAccounting } from "@iusia/domain";
 
 export class ApiError extends Error {
   constructor(
@@ -434,7 +435,13 @@ export const api = {
       const err = (body as { error?: { code: string; message: string } })?.error;
       throw new ApiError(err?.code ?? "INTERNAL", err?.message ?? "No fue posible subir", res.status);
     }
-    return body as { uploaded: Array<{ document_id: string; name: string; status: string }> };
+    // El recuento por archivo viaja con la respuesta: sin él, una carga de diecisiete
+    // archivos en la que entran quince se presenta igual que una en la que entran todos.
+    return body as {
+      uploaded: Array<{ document_id: string; name: string; status: string; deduplicated?: boolean }>;
+      batch_id: string;
+      accounting?: UploadAccounting;
+    };
   },
 
   documentVersions: (matterId: string, documentId: string) =>

@@ -20,7 +20,13 @@ import {
   practiceAreaLabel,
   riskTerm,
 } from "@iusia/ui";
-import { planFileSelection, summarizeSelection, type DuplicateCandidateView } from "@iusia/domain";
+import { useFileSelection } from "../hooks/use-file-selection";
+import { FileSelectionSummary } from "../components/FileSelectionSummary";
+import {
+  accountUploads,
+  uploadAccountingStatement,
+  type DuplicateCandidateView,
+} from "@iusia/domain";
 import { api, ApiError, type MatterSummary } from "../api.js";
 
 
@@ -362,13 +368,16 @@ function NewMatterForm({
   const [materiality, setMateriality] = useState("MATERIAL");
   const [area, setArea] = useState("COMERCIAL_CONTRACTUAL");
   const [objective, setObjective] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
-  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
-  // Lo que se sabe del formato se sabe AHORA, no tres minutos después de subirlo.
-  const formatNotices = useMemo(
-    () => summarizeSelection(files.map((f) => ({ name: f.name, type: f.type }))).notices,
-    [files],
-  );
+  // El mismo contrato de selección que Convocar y el workspace del expediente.
+  const {
+    files,
+    add: addFiles,
+    remove: removeFile,
+    limitNotice,
+    formatNotices,
+    totalBytes,
+  } = useFileSelection();
+  const [showAllFiles, setShowAllFiles] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Identidad de este alta. Un doble clic o un reintento devuelven el MISMO
@@ -402,14 +411,16 @@ function NewMatterForm({
       if (files.length > 0) {
         try {
           const upload = await api.uploadDocuments(res.matter.id, files);
-          const failed = upload.uploaded.filter(
-            (u) => u.status === "UPLOAD_FAILED" || u.status === "UNSUPPORTED",
-          );
-          if (failed.length > 0) {
-            uploadFailure =
-              `El expediente se creó, pero ${failed.length} de ${files.length} ` +
-              `${files.length === 1 ? "archivo no pudo adjuntarse" : "archivos no pudieron adjuntarse"}: ` +
-              `${failed.map((f) => f.name).join(", ")}. Adjúntalos de nuevo desde Documentos.`;
+          // El recuento lo hace el dominio, con las mismas casillas que el servidor
+          // deja escritas en la auditoría. Un duplicado no es un fallo, pero tampoco es
+          // un archivo nuevo, y llamar «completada» a una carga en la que faltan tres
+          // documentos es cómo se descubre la pérdida en la audiencia.
+          const acc = upload.accounting
+            ?? accountUploads(upload.uploaded.map((u) => ({
+              name: u.name, status: u.status, deduplicated: u.deduplicated,
+            })));
+          if (acc.accepted < acc.requested) {
+            uploadFailure = `El expediente se creó. ${uploadAccountingStatement(acc)}`;
           }
         } catch {
           uploadFailure =
@@ -483,22 +494,19 @@ function NewMatterForm({
               // Sin recorte mudo. `slice(0, 10)` descartaba archivos en el navegador y
               // nadie se enteraba: en la prueba real se seleccionaron 17 y sólo llegaron
               // 10 al servidor. Si sobran, se dice cuántos y el abogado decide.
-              const next = [...files, ...Array.from(e.target.files ?? [])];
-              const plan = planFileSelection(next.map((f) => f.name));
-              setFiles(next.slice(0, plan.accepted));
-              setSelectionNotice(plan.notice);
+              addFiles(e.target.files);
               e.target.value = "";
             }}
           />
           <Button type="button" variant="secondary" size="sm" onClick={() => fileInput.current?.click()}>
             Adjuntar documentos
           </Button>
-          {selectionNotice ? (
+          {limitNotice ? (
             <p
               role="alert"
               className="mt-2.5 rounded-[8px] border border-iusia-warning/35 bg-iusia-warning/10 px-3 py-2 text-[12.5px] leading-relaxed text-iusia-warning-text"
             >
-              {selectionNotice}
+              {limitNotice}
             </p>
           ) : null}
           {formatNotices.map((notice) => (
@@ -510,25 +518,13 @@ function NewMatterForm({
               {notice}
             </p>
           ))}
-          {files.length > 0 ? (
-            <ul className="mt-2.5 flex flex-col gap-1">
-              {files.map((f, i) => (
-                <li
-                  key={`${f.name}-${i}`}
-                  className="flex items-center justify-between gap-3 rounded-[8px] bg-iusia-paper px-2.5 py-1.5"
-                >
-                  <span className="min-w-0 truncate text-[12.5px] text-iusia-carbon">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
-                    className="shrink-0 text-[11.5px] font-medium text-iusia-mist-text hover:text-iusia-critical"
-                  >
-                    Quitar
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <FileSelectionSummary
+            files={files}
+            totalBytes={totalBytes}
+            expanded={showAllFiles}
+            onToggle={() => setShowAllFiles((v) => !v)}
+            onRemove={removeFile}
+          />
         </div>
       </Field>
 

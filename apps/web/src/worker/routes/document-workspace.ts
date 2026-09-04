@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  accountUploads,
   isAcceptedUpload,
   isReadableMimeType,
   MAX_FILES_PER_UPLOAD,
@@ -270,21 +271,41 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/upload", async (c) =>
     },
   );
 
+  /*
+    CONSTANCIA POR ARCHIVO.
+
+    Este registro decía `{count: 10, failed: 0}` para el lote de 17. Las dos cifras eran
+    ciertas y el informe era falso: se crearon nueve filas. `failed` sólo contaba
+    `UPLOAD_FAILED`, y el décimo archivo se fue por una de las dos ramas que devuelven
+    resultado sin crear fila —formato no admitido, o contenido idéntico a otro del mismo
+    lote—. Al reconstruirlo semanas después no hubo forma de decidir cuál: la respuesta
+    por archivo se le dio al navegador y no se guardó en ninguna parte.
+
+    Ahora cada casilla queda escrita, con los nombres de lo que no entró. Un lote se
+    puede auditar sin volver a preguntarle al abogado qué había seleccionado.
+  */
+  const accounting = accountUploads(results);
   await audit.record({
     organizationId,
     matterId,
     actorUserId: userId,
     action: "document.upload",
     resourceType: "document",
-    outcome: results.some((r) => r.status !== "UPLOAD_FAILED") ? "SUCCESS" : "FAILURE",
+    outcome: accounting.accepted > 0 ? "SUCCESS" : "FAILURE",
     detail: {
-      count: results.length,
       batch_id: uploadBatchId,
-      failed: results.filter((r) => r.status === "UPLOAD_FAILED").length,
+      requested: accounting.requested,
+      accepted: accounting.accepted,
+      duplicate: accounting.duplicate,
+      unsupported: accounting.unsupported,
+      failed: accounting.failed,
+      duplicate_names: accounting.duplicateNames,
+      unsupported_names: accounting.unsupportedNames,
+      failed_names: accounting.failedNames,
     },
   });
 
-  return c.json({ uploaded: results, batch_id: uploadBatchId }, 201);
+  return c.json({ uploaded: results, batch_id: uploadBatchId, accounting }, 201);
 });
 
 /**

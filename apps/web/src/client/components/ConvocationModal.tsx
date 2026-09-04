@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { uploadAccountingStatement, type UploadAccounting } from "@iusia/domain";
+import { useFileSelection } from "../hooks/use-file-selection";
+import { FileSelectionSummary } from "./FileSelectionSummary";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
@@ -53,7 +56,20 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
   const matters = useQuery({ queryKey: ["matters"], queryFn: api.listMatters, enabled: open });
   const [matterId, setMatterId] = useState("");
   const [objective, setObjective] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  // Mismo contrato de selección que el formulario de alta y el workspace: un solo
+  // límite, un solo aviso, ningún recorte mudo.
+  const {
+    files,
+    add: addFiles,
+    remove: removeFile,
+    clear: clearFiles,
+    limitNotice,
+    formatNotices,
+    totalBytes,
+  } = useFileSelection();
+  const [showAllFiles, setShowAllFiles] = useState(false);
+  const [uploadAccounting, setUploadAccounting] = useState<UploadAccounting | null>(null);
+  const [continueTo, setContinueTo] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   // Campos del expediente nuevo (sólo se muestran en modo NEW_MATTER).
   const [title, setTitle] = useState("");
@@ -91,6 +107,7 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
       // Modo nuevo: crear el expediente ANTES de nada. El resto del flujo se liga
       // inequívocamente a ese matterId, nunca a otro seleccionado.
       let targetId = createdMatterId || matterId;
+      let accepted: number | null = null;
       if (isNew && !createdMatterId) {
         try {
           const created = await api.createMatter({
@@ -125,7 +142,14 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
       // reconoce por su contenido.
       if (files.length > 0) {
         try {
-          await api.uploadDocuments(targetId, files);
+          const upload = await api.uploadDocuments(targetId, files);
+          accepted = upload.accounting?.accepted ?? upload.uploaded.length;
+          // Que la petición devuelva 201 NO significa que entraran todos: hay archivos
+          // que el servidor rechaza por formato y otros que unifica con uno idéntico,
+          // y ninguno de los dos casos es un fallo de subida. Se guarda el recuento
+          // para decirlo, en vez de dar por buena la carga entera.
+          setUploadAccounting(upload.accounting ?? null);
+          clearFiles();
         } catch (error) {
           setStage("DOCUMENT_UPLOAD_FAILED");
           throw error;
@@ -135,9 +159,14 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
       // La creación NO espera a la indexación. Si los documentos siguen procesándose,
       // se entrega el expediente y el análisis se inicia desde él cuando estén listos.
       const workspace = await api.matterWorkspace(targetId).catch(() => null);
+      // Se espera por los archivos que el servidor ACEPTÓ, no por los que se
+      // seleccionaron. Contra el número seleccionado, un lote con un duplicado o un
+      // formato no admitido nunca alcanza la cuenta y el expediente se queda esperando
+      // a un documento que nadie creó.
+      const expected = accepted ?? files.length;
       const ready =
-        files.length === 0 ||
-        (workspace !== null && documentsReadyForAnalysis(workspace.uploaded, files.length));
+        expected === 0
+        || (workspace !== null && documentsReadyForAnalysis(workspace.uploaded, expected));
       if (!ready) return { targetId, root: null, pending: true };
 
       try {
@@ -157,6 +186,18 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
           root ? `/casos/${targetId}?analisis=${root}` : `/casos/${targetId}?documentos=procesando`,
         );
       };
+      /*
+        SI FALTA ALGO, NO SE PASA DE PANTALLA.
+
+        Cerrar el modal y navegar al expediente es exactamente lo que convirtió la
+        pérdida de siete documentos en algo que el abogado descubrió al llegar a la
+        vista y contar filas. Cuando el servidor aceptó menos de lo que se le mandó, la
+        navegación espera a que lo haya leído.
+      */
+      if (uploadAccounting !== null && uploadAccounting.accepted < uploadAccounting.requested) {
+        setContinueTo(root ? `/casos/${targetId}?analisis=${root}` : `/casos/${targetId}?documentos=procesando`);
+        return;
+      }
       if (still || pending) go();
       else setTimeout(go, 900);
     },
@@ -392,7 +433,7 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                       onDrop={(e) => {
                         e.preventDefault();
                         if (convoking) return;
-                        setFiles((f) => [...f, ...Array.from(e.dataTransfer.files)].slice(0, 10));
+                        addFiles(e.dataTransfer.files);
                       }}
                       className="rounded-[var(--radius-md)] border border-dashed border-iusia-line-strong bg-iusia-ice/50 px-4 py-3.5"
                     >
@@ -417,34 +458,36 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                         multiple
                         className="sr-only"
                         aria-label="Adjuntar documentos al expediente"
-                        onChange={(e) =>
-                          setFiles((f) =>
-                            [...f, ...Array.from(e.target.files ?? [])].slice(0, 10),
-                          )
-                        }
+                        onChange={(e) => {
+                          addFiles(e.target.files);
+                          e.target.value = "";
+                        }}
                       />
 
-                      {files.length > 0 ? (
-                        <ul className="mt-3 flex flex-col gap-1">
-                          {files.map((f, i) => (
-                            <li
-                              key={`${f.name}-${i}`}
-                              className="flex items-center justify-between gap-3 rounded-[8px] bg-iusia-paper px-2.5 py-1.5"
-                            >
-                              <span className="min-w-0 truncate text-[12.5px] text-iusia-carbon">
-                                {f.name}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
-                                className="shrink-0 text-[11.5px] font-medium text-iusia-mist-text transition-colors hover:text-iusia-critical"
-                              >
-                                Quitar
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
+                      {limitNotice ? (
+                        <p
+                          role="alert"
+                          className="mt-2.5 rounded-[8px] border border-iusia-warning/35 bg-iusia-warning/10 px-3 py-2 text-[12.5px] leading-relaxed text-iusia-warning-text"
+                        >
+                          {limitNotice}
+                        </p>
                       ) : null}
+                      {formatNotices.map((notice) => (
+                        <p
+                          key={notice}
+                          role="alert"
+                          className="mt-2.5 rounded-[8px] border border-iusia-warning/35 bg-iusia-warning/10 px-3 py-2 text-[12.5px] leading-relaxed text-iusia-warning-text"
+                        >
+                          {notice}
+                        </p>
+                      ))}
+                      <FileSelectionSummary
+                        files={files}
+                        totalBytes={totalBytes}
+                        expanded={showAllFiles}
+                        onToggle={() => setShowAllFiles((v) => !v)}
+                        onRemove={removeFile}
+                      />
 
                       {/* El destino de esos archivos, dicho antes de adjuntarlos. */}
                       <p className="mt-3 flex items-start gap-2 text-[12px] leading-snug text-iusia-mist-text">
@@ -489,6 +532,28 @@ export function ConvocationModal({ open, onClose }: { open: boolean; onClose: ()
                           }}
                         >
                           Es un asunto diferente
+                        </Button>
+                      </div>
+                    </div>
+                  ) : continueTo !== null && uploadAccounting !== null ? (
+                    /*
+                      No todo lo que se mandó entró. Se dice aquí, con nombres, antes de
+                      pasar de pantalla: el expediente ya existe y los documentos que sí
+                      entraron están a salvo, pero la diferencia no puede quedar en que
+                      el abogado cuente filas y saque conclusiones.
+                    */
+                    <div role="status" className="mt-3">
+                      <p className="text-[13px] leading-relaxed text-iusia-carbon">
+                        {uploadAccountingStatement(uploadAccounting)}
+                      </p>
+                      <div className="mt-2.5">
+                        <Button
+                          onClick={() => {
+                            onClose();
+                            navigate(continueTo);
+                          }}
+                        >
+                          Abrir expediente
                         </Button>
                       </div>
                     </div>
