@@ -99,8 +99,35 @@ describe("indexado significa que se recupera de verdad", () => {
 
   it("«todavía no» NO es «ha fallado»", () => {
     // Es la distinción que produjo un falso error en un documento sano.
-    expect(confirm).toContain("markIndexConfirmDelayed");
-    expect(confirm).toContain('status: "DELAYED"');
+    expect(confirm).toContain('status: "PENDING"');
+    expect(confirm).not.toMatch(/attempt >= INDEX_CONFIRM_MAX_ATTEMPTS[\s\S]{0,200}status: "FAILED"/);
+  });
+
+  it("agotar la cadena rápida baja el ritmo, no abandona", () => {
+    /*
+      Lo vi ocurrir en directo con cuatro PDF del lote de 19: llegaron a doce
+      confirmaciones, se escribió la etapa `INDEXING_DELAYED`, `index_confirm_next_at`
+      quedó en nulo y no volvió nadie. El documento estaba entero en el proveedor, con
+      su identidad de item, y la pantalla decía «Procesando».
+    */
+    expect(confirm).toContain("INDEX_CONFIRM_SLOW_DELAY_S");
+    expect(confirm).toContain("INDEX_CONFIRM_SLOW_MAX_ATTEMPTS");
+    // La vigilancia lenta REPROGRAMA: nunca deja la próxima fecha en nulo.
+    const tramo = confirm.slice(confirm.indexOf("attempt >= INDEX_CONFIRM_MAX_ATTEMPTS"));
+    expect(tramo.slice(0, 900)).toContain("scheduleIndexConfirm");
+    expect(confirm).not.toContain("markIndexConfirmDelayed");
+  });
+
+  it("y sigue con el MISMO item: no re-normaliza ni re-sube", () => {
+    // Volver a subir deja obsoleto el item anterior y reinicia la cuenta.
+    expect(confirm).not.toContain("normalizeToText");
+    expect(confirm).not.toContain("uploadToAiSearch");
+  });
+
+  it("sólo tras horas de vigilancia lenta se pide intervención", () => {
+    expect(confirm).toContain("INDEX_CONFIRM_ABANDONED");
+    const tramo = confirm.slice(confirm.indexOf("slowAttempt > INDEX_CONFIRM_SLOW_MAX_ATTEMPTS"));
+    expect(tramo.slice(0, 400)).toContain("markIngestionFailedAt");
   });
 
   it("la confirmación no usa modelos generativos", () => {

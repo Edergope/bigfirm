@@ -34,6 +34,16 @@ export const INGESTION_LIFECYCLE = [
   "PROCESSING",
   /** Un consumidor lo tomó y dejó de dar señales. */
   "PROCESSING_STALLED",
+  /**
+   * Subido al índice, y el proveedor tarda más de lo habitual en terminar.
+   *
+   * NO es un fallo y NO es trabajo detenido: el documento está entero en el proveedor,
+   * con su identidad de item, y IUSIA sigue preguntando por él —más despacio, porque
+   * preguntar cada minuto durante una hora no acelera nada—. Es el estado que faltaba:
+   * sin él, una lentitud del proveedor se presentaba al abogado como avería suya y con
+   * un botón de «Reintentar» que no arreglaba nada y sí volvía a subirlo todo.
+   */
+  "INDEXING_DELAYED",
   /** Disponible para el análisis. */
   "INDEXED",
   /** Almacenado y consultable, fuera del RAG. */
@@ -68,6 +78,8 @@ export interface IngestionSignals {
   heartbeatAt?: string | null;
   /** Cuándo se puso el mensaje en la cola. */
   enqueuedAt?: string | null;
+  /** Etapa interna del procesamiento. Distingue «lento» de «detenido». */
+  stage?: string | null;
   updatedAt?: string | null;
 }
 
@@ -110,6 +122,20 @@ export function ingestionLifecycle(
   */
   if (status === "INDEXING") {
     if (attempts < 1) return "QUEUED";
+    /*
+      LA DISTINCIÓN QUE FALTABA.
+
+      Un documento subido al índice puede estar en dos situaciones muy distintas, y
+      hasta ahora se llamaban igual. Si la cadena de confirmación se agotó —doce
+      preguntas sin respuesta afirmativa— el sistema se rendía: escribía la etapa
+      `INDEXING_DELAYED`, dejaba `index_confirm_next_at` en nulo y no volvía nunca. Lo
+      vi ocurrir en directo con cuatro documentos del lote de 19.
+
+      Ahora esa etapa significa lo que dice: el proveedor va lento, IUSIA sigue
+      comprobando a baja frecuencia, y NO se le pide al abogado que repare nada. Sólo
+      es «detenido» lo que no tiene ningún trabajo futuro.
+    */
+    if (signals.stage === "INDEXING_DELAYED") return "INDEXING_DELAYED";
     return olderThan(signals.heartbeatAt ?? signals.updatedAt, PROCESSING_STALL_MINUTES)
       ? "PROCESSING_STALLED"
       : "PROCESSING";
@@ -137,6 +163,10 @@ export function ingestionLifecycle(
  * devolviera un 409 silencioso.
  */
 export function canRetryIngestion(state: IngestionLifecycle): boolean {
+  // `INDEXING_DELAYED` NO está aquí, deliberadamente. Reintentar mientras el proveedor
+  // sigue trabajando vuelve a subir el documento, deja el item anterior obsoleto y
+  // reinicia la cuenta: es exactamente el bucle que dejó un DOCX en 19 confirmaciones
+  // sin converger. El abogado no tiene que reparar la lentitud de un proveedor.
   return (
     state === "ERROR" ||
     state === "UPLOAD_FAILED" ||
@@ -147,7 +177,13 @@ export function canRetryIngestion(state: IngestionLifecycle): boolean {
 
 /** ¿Sigue en movimiento? Decide si la pantalla debe seguir consultando. */
 export function isIngestionInFlight(state: IngestionLifecycle): boolean {
-  return state === "UPLOADING" || state === "QUEUED" || state === "PROCESSING";
+  return (
+    state === "UPLOADING"
+    || state === "QUEUED"
+    || state === "PROCESSING"
+    // Sigue en movimiento, sólo que despacio: la pantalla debe seguir consultando.
+    || state === "INDEXING_DELAYED"
+  );
 }
 
 /**
@@ -187,6 +223,11 @@ export const INGESTION_LIFECYCLE_TERMS: Record<
     label: "Procesamiento detenido",
     hint: "La preparación se interrumpió a mitad. Puedes reintentarla.",
     tone: "warning",
+  },
+  INDEXING_DELAYED: {
+    label: "Indexación demorada",
+    hint: "El documento está a salvo y en preparación. Está tardando más de lo habitual; IUSIA sigue comprobándolo y no necesitas hacer nada.",
+    tone: "info",
   },
   INDEXED: {
     label: "Indexado por IUSIA",

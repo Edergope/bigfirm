@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { newId } from "@iusia/domain";
 import type { IusiaDb } from "../client.js";
 import { documents, documentVersions } from "../schema/iusia.js";
@@ -584,6 +584,8 @@ export class DocumentRepository {
     documentId: string,
     attempt: number,
     nextAt: string,
+    /** Etapa a registrar. `INDEXING_DELAYED` marca la vigilancia lenta. */
+    stage?: string,
   ) {
     await this.db
       .update(documents)
@@ -592,6 +594,7 @@ export class DocumentRepository {
         // avanzada: con at-least-once, dos mensajes pueden coincidir.
         indexConfirmAttempts: sql`max(${documents.indexConfirmAttempts}, ${attempt})`,
         indexConfirmNextAt: nextAt,
+        ...(stage ? { ingestionStage: stage } : {}),
         ingestionHeartbeatAt: new Date().toISOString(),
       })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
@@ -617,6 +620,41 @@ export class DocumentRepository {
   }
 
   /** Documentos subidos al índice cuya recuperabilidad falta confirmar. */
+  /**
+   * Documentos que la cola abandonó antes de llegar al índice.
+   *
+   * ÉSTE ES EL AGUJERO QUE DEJÓ SIETE PDF MUERTOS. En el lote de 19, siete documentos
+   * consumieron sus cuatro entregas en cuatro segundos y acabaron en la cola de
+   * descarte, que no tiene consumidor. Nadie iba a volver por ellos jamás: la barrida
+   * de confirmación sólo mira documentos en `INDEXING`, y éstos ni siquiera habían
+   * llegado a subirse. Su única salida era que un abogado pulsara «Reintentar» sobre
+   * cada uno, uno por uno, sin saber por qué.
+   *
+   * Se reconocen por lo que NO tienen: un consumidor los tomó (`attempts >= 1`), no hay
+   * identidad de item, y hace rato que no dan señales. Un documento vivo no cumple las
+   * tres cosas a la vez.
+   */
+  async listAbandonedIngestion(staleBefore: string, limit = 25) {
+    return this.db
+      .select({
+        id: documents.id,
+        organizationId: documents.organizationId,
+        matterId: documents.matterId,
+        attempts: documents.ingestionAttempts,
+      })
+      .from(documents)
+      .where(
+        and(
+          inArray(documents.ingestionStatus, ["PROCESSING", "FILE_STORED"]),
+          isNull(documents.aiSearchItemId),
+          isNull(documents.retiredAt),
+          gte(documents.ingestionAttempts, 1),
+          lte(documents.ingestionHeartbeatAt, staleBefore),
+        ),
+      )
+      .limit(limit);
+  }
+
   async listAwaitingIndexConfirmation(now: string, limit = 25) {
     return this.db
       .select({

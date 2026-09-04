@@ -40,3 +40,37 @@ no por lentitud sino por forma:
 - Las fronteras de aislamiento del RAG (organización + expediente) van en la metadata de
   cada parte, no sólo del documento.
 - `PARTITION_REQUIRED` es el punto de entrada previsto: ya se emite, ya no es un error.
+
+---
+
+## Capacidad medida — lote de 19 (IUS-2026-019, 2026-09-04)
+
+Un solo lote real. `SINGLE_BATCH_REAL_MEASUREMENT`: no hay P95 que sacar de aquí, y
+cualquier cifra presentada como SLA sería inventada.
+
+Lo que sí quedó medido, del libro de intentos:
+
+| observación | valor |
+|---|---|
+| documentos por entrega del consumidor | 4 (`max_batch_size`) |
+| lotes solapados en el pico | 3 (16:23:30 · 16:23:36 · 16:23:37) |
+| documentos abiertos a la vez en el pico | ~11 |
+| bytes de PDF abiertos en el pico | >40 MB |
+| lotes que sobrevivieron | los que abrieron ≤17 MB sin solaparse con otros dos |
+| lotes que murieron | los dos que arrancaron durante el solape |
+
+De ahí sale `INFLIGHT_BUDGET_BYTES = 24 MB` por aislamiento: por encima de esa cifra
+hubo muertes, por debajo no las hubo. Es una cota tomada de lo observado, no un número
+elegido por bonito, y debería revisarse con más lotes antes de darla por buena.
+
+Lo que este sprint NO resuelve y el 01B debe recoger:
+
+- **La cota es por aislamiento, no global.** Protege de la muerte por memoria, que es
+  el fallo observado. No impide que un expediente grande monopolice la cola entera y
+  deje sin turno al expediente pequeño del abogado de al lado — eso es contrapresión y
+  necesita coordinación entre aislamientos.
+- **La disponibilidad sigue siendo por documento entero.** Con particionado, un
+  documento estará disponible por partes y `freezeEvidenceSet` tendrá que hablar de
+  partes confirmadas, no sólo de documentos.
+- **El rescate de lo abandonado es genérico.** Reencola el documento entero. Con
+  particionado hará falta reanudar por la parte que falló.

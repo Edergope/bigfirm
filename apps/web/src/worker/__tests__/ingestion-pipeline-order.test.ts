@@ -56,7 +56,7 @@ describe("la inteligencia no espera al proveedor de almacenamiento", () => {
   it("la sincronización con el proveedor está acotada", () => {
     // Era el único tramo sin techo, y es donde se detuvo el documento.
     const call = src.slice(positionOf('stage = "PROVIDER_SYNC"'));
-    expect(call.slice(0, 900)).toContain("PROVIDER_SYNC_DEADLINE_MS");
+    expect(call.slice(0, 1400)).toContain("PROVIDER_SYNC_DEADLINE_MS");
   });
 
   it("el reintento reanuda: no rehace lo que ya está durable", () => {

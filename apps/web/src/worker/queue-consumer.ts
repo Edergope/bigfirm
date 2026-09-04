@@ -120,7 +120,7 @@ export async function ingestBatch(
           } catch {
             // La cola no aceptó el relevo: NO se confirma este mensaje. Reintentarlo es
             // preferible a perder la confirmación, y la barrida sigue como respaldo.
-            message.retry();
+            retryLater(message);
             return;
           }
         }
@@ -133,7 +133,7 @@ export async function ingestBatch(
 
       const outcome = await service.ingest(parsed.data, delivery);
       if (outcome.status === "ERROR") {
-        message.retry(); // fallo transitorio: reintentar (o a la DLQ tras max_retries)
+        retryLater(message); // fallo transitorio: reintentar (o a la DLQ tras max_retries)
       } else {
         message.ack();
       }
@@ -141,7 +141,7 @@ export async function ingestBatch(
       // Que un documento reviente NO puede tumbar a sus compañeros de lote: se
       // reintenta sólo él. Sin este catch, una excepción escapaba del map y los
       // mensajes ya resueltos quedaban sin ack.
-      message.retry();
+      retryLater(message);
     }
   });
 }
@@ -183,6 +183,29 @@ async function recordUndeliverable(
 }
 
 /**
+ * Reintenta un mensaje ESPERANDO antes de volver.
+ *
+ * `message.retry()` sin más devuelve el mensaje casi al instante. En el lote de 19 eso
+ * fue letal: siete documentos consumieron sus cuatro entregas —una inicial y los tres
+ * reintentos— en CUATRO SEGUNDOS, entre las 16:23:36 y las 16:23:43. Los tres reintentos
+ * se gastaron dentro de la misma congestión que había causado el fallo, y sin haber
+ * cambiado nada. Después, a la cola de descarte, que no tiene consumidor.
+ *
+ * Un reintento sólo sirve si el mundo ha tenido ocasión de cambiar. La espera crece con
+ * el número de entregas que Cloudflare declara, así que el último intento llega más de
+ * un minuto después del primero en vez de un segundo después.
+ */
+export function retryLater(message: Message<unknown>): void {
+  const attempt = (message as { attempts?: number }).attempts ?? 1;
+  message.retry({ delaySeconds: retryDelaySeconds(attempt) });
+}
+
+/** 10 s, 30 s, 90 s… con techo. Suficiente para que una congestión pase. */
+export function retryDelaySeconds(attempt: number): number {
+  return Math.min(10 * 3 ** Math.max(0, attempt - 1), 300);
+}
+
+/**
  * Documentos que se procesan a la vez dentro de un lote.
  *
  * Cada ingestión abre una descarga desde el proveedor de almacenamiento, una escritura
@@ -191,6 +214,28 @@ async function recordUndeliverable(
  * `max_batch_size` de staging (4), así que hoy el lote entero avanza en paralelo.
  */
 export const INGESTION_CONCURRENCY = 6;
+
+/**
+ * Bytes de documento que pueden estar en vuelo a la vez DENTRO de una invocación.
+ *
+ * Ésta es la cota que faltaba, y su ausencia es la causa raíz del lote de 19.
+ *
+ * Lo que muestra el libro de intentos: siete documentos abrieron cuatro entregas cada
+ * uno —veintiocho en total— y NINGUNA se cerró. Ni un `completed_at`, ni una etapa
+ * final, ni un código de fallo. Eso no es trabajo que falla: el `try/catch` de cada
+ * mensaje habría dejado rastro. Es el aislamiento entero muriéndose con todos sus
+ * mensajes dentro, que es lo único que ningún `catch` puede sobrevivir.
+ *
+ * Y encaja con los tamaños. Los dos lotes que murieron arrancaron a las 16:23:36 y
+ * 16:23:37, solapándose con un tercero que seguía procesando 17 MB, 7,8 MB y 5,4 MB.
+ * Sumando lo que había abierto a la vez —cada PDF se lee entero a memoria, y luego se
+ * copia otra vez a un Blob para convertirlo— se pasa de sobra el presupuesto de un
+ * aislamiento.
+ *
+ * Contar documentos no sirve: cuatro PDF de 100 KB y cuatro de 13 MB son el mismo
+ * número y no el mismo problema. Se cuenta lo que de verdad se consume.
+ */
+export const INGESTION_INFLIGHT_BYTES = 24 * 1024 * 1024;
 
 /**
  * Recorre los elementos con un número acotado de tareas simultáneas.

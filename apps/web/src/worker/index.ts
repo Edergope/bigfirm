@@ -11,7 +11,11 @@ import { practiceRoutes } from "./routes/practice.js";
 import { adminRoutes } from "./routes/admin.js";
 import { devRoutes } from "./routes/dev.js";
 import { handleIngestionQueue } from "./queue-consumer.js";
-import { confirmIndexReadiness, handleProviderSyncSweep } from "./scheduled.js";
+import {
+  confirmIndexReadiness,
+  handleProviderSyncSweep,
+  recoverAbandonedIngestion,
+} from "./scheduled.js";
 
 const app = new Hono<AppBindings>();
 
@@ -87,6 +91,9 @@ export default {
     // aplazada. Ninguna puede impedir la otra.
     await confirmIndexReadiness(env).catch(() => undefined);
     await handleProviderSyncSweep(env).catch(() => undefined);
+    // Los que la cola abandonó antes de llegar al índice. Sin esto, un documento que
+    // cae a la cola de descarte depende de que el abogado lo note y lo reintente.
+    await recoverAbandonedIngestion(env).catch(() => undefined);
   },
 };
 
@@ -94,5 +101,10 @@ export default {
 // wrangler.jsonc y sobrevivir al bundling (ver vite.config.ts, keepNames).
 export { LegalWorker } from "./agents/legal-worker.js";
 export { MatterOrchestrationWorkflow } from "./workflows/matter-orchestration.js";
-export { handleIngestionQueue, handleProviderSyncSweep, confirmIndexReadiness };
+export {
+  handleIngestionQueue,
+  handleProviderSyncSweep,
+  confirmIndexReadiness,
+  recoverAbandonedIngestion,
+};
 export type { Env };

@@ -3,6 +3,8 @@ import type { Env } from "../env.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import {
   INDEX_CONFIRM_MAX_ATTEMPTS,
+  INDEX_CONFIRM_SLOW_DELAY_S,
+  INDEX_CONFIRM_SLOW_MAX_ATTEMPTS,
   indexConfirmDelaySeconds,
   type AiSearchUploadInfo,
 } from "./ingestion.js";
@@ -100,9 +102,48 @@ export async function confirmDocumentIndexed(
   // Todavía no. «No ha terminado» NO es «ha fallado»: el proveedor puede ir lento sin
   // estar roto, y declarar error ahí es exactamente lo que produjo un falso fallo en un
   // documento sano.
+  /*
+    LA CADENA RÁPIDA SE AGOTA; LA VIGILANCIA NO.
+
+    Antes esto era el final del camino: se marcaba la etapa `INDEXING_DELAYED`, se
+    dejaba `index_confirm_next_at` en nulo y no volvía nadie. El documento quedaba
+    entero en el proveedor, con su identidad de item, y la pantalla decía «Procesando»
+    hasta que el latido envejecía y pasaba a «Procesamiento detenido» con un botón que
+    sólo servía para volver a subirlo todo.
+
+    Ahora se baja el ritmo en vez de abandonar. Se sigue preguntando cada media hora,
+    con el MISMO item —no se re-normaliza, no se re-sube, no se duplica nada— hasta seis
+    horas. Sólo entonces se declara que hace falta intervención.
+  */
   if (attempt >= INDEX_CONFIRM_MAX_ATTEMPTS) {
-    await documents.markIndexConfirmDelayed(input.organizationId, input.documentId, attempt);
-    return { status: "DELAYED", attempts: attempt };
+    const slowAttempt = attempt - INDEX_CONFIRM_MAX_ATTEMPTS + 1;
+    if (slowAttempt > INDEX_CONFIRM_SLOW_MAX_ATTEMPTS) {
+      // Seis horas de vigilancia lenta sin respuesta. Ya no es lentitud.
+      await documents.markIngestionFailedAt(
+        input.organizationId,
+        input.documentId,
+        "AI_SEARCH",
+        "INDEX_CONFIRM_ABANDONED",
+        "El proveedor de índice no confirmó el documento tras varias horas de comprobaciones.",
+      );
+      return {
+        status: "FAILED",
+        code: "INDEX_CONFIRM_ABANDONED",
+        detail: `${attempt} comprobaciones sin confirmación del proveedor.`,
+      };
+    }
+    await documents.scheduleIndexConfirm(
+      input.organizationId,
+      input.documentId,
+      attempt,
+      new Date(Date.now() + INDEX_CONFIRM_SLOW_DELAY_S * 1000).toISOString(),
+      "INDEXING_DELAYED",
+    );
+    return {
+      status: "PENDING",
+      providerStatus: info?.status ?? (providerDone ? "completed" : "unknown"),
+      nextDelaySeconds: INDEX_CONFIRM_SLOW_DELAY_S,
+    };
   }
 
   const nextDelaySeconds = indexConfirmDelaySeconds(attempt);

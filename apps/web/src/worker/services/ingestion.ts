@@ -116,6 +116,28 @@ export const AI_SEARCH_POLL_MS = 25_000;
 export const INDEX_CONFIRM_FIRST_DELAY_S = 30;
 export const INDEX_CONFIRM_MAX_ATTEMPTS = 12;
 
+/**
+ * Cada cuánto se vuelve a preguntar cuando la cadena rápida se agotó.
+ *
+ * Doce preguntas en unos diez minutos son suficientes para un documento normal. Que se
+ * agoten no significa que el documento esté perdido: significa que el proveedor va
+ * lento. Lo vi con cuatro PDF del lote de 19, que llegaron a doce confirmaciones y se
+ * quedaron con `index_confirm_next_at` en nulo — nadie iba a volver.
+ *
+ * Media hora es lento a propósito. No acelera nada preguntar cada minuto durante una
+ * hora, y sí gasta invocaciones que otros expedientes necesitan.
+ */
+export const INDEX_CONFIRM_SLOW_DELAY_S = 30 * 60;
+
+/**
+ * Cuánto se sigue insistiendo a baja frecuencia antes de pedir intervención.
+ *
+ * Doce medias horas son seis horas. Pasado eso ya no es «el proveedor va lento»: algo
+ * quedó realmente mal, y entonces sí corresponde un estado que el abogado pueda
+ * accionar.
+ */
+export const INDEX_CONFIRM_SLOW_MAX_ATTEMPTS = 12;
+
 /** Espera antes del intento N: 30, 45, 60, 90, 120… con techo de 120 s. */
 export function indexConfirmDelaySeconds(attempt: number): number {
   const ladder = [30, 45, 60, 90, 120];
@@ -295,171 +317,179 @@ export class IngestionService {
       // 1. BYTES. Del ingreso durable si están; del proveedor sólo si el documento ya
       //    se sincronizó y el ingreso se limpió.
       await heartbeat("INGRESS");
-      let bytes: ArrayBuffer;
-      const ingress = await this.env.ARTIFACTS.get(ingressKey);
-      if (ingress) {
-        bytes = await ingress.arrayBuffer();
-      } else if (doc.driveFileId) {
-        stage = "DRIVE_DOWNLOAD";
-        const storage = await this.resolveStorage(documents, message);
-        if (!storage) return { status: "STORAGE_NOT_CONFIGURED" };
-        bytes = await withDeadline(
-          storage.download(doc.driveFileId),
-          DOWNLOAD_DEADLINE_MS,
-          "DRIVE_DOWNLOAD",
-        );
-      } else {
-        // Sin bytes no hay nada que ingerir, y fingir lo contrario dejaría un documento
-        // «procesando» eternamente.
-        await documents.markIngestionFailedAt(
-          message.organization_id,
-          message.document_id,
-          "INGRESS",
-          "SOURCE_BYTES_MISSING",
-          "No se conserva el contenido del archivo.",
-        );
-        return { status: "ERROR", detail: "los bytes del documento no están disponibles" };
-      }
-      clock.mark("download_ms");
-
-      // 2. INTELIGENCIA. Sin tocar el proveedor. Si el espejo y el índice ya existen de
-      //    un intento anterior, no se rehace: el reintento reanuda, no reempieza.
-      const key = documentMirrorKey(
-        message.organization_id,
-        message.matter_id,
-        message.document_id,
-      );
       /*
-        LA INTELIGENCIA YA ESTÁ HECHA si el espejo existe Y el documento llegó al índice.
-        Basta con tener identidad de item: `INDEXING` significa subido y pendiente de
-        confirmar, no pendiente de subir.
-
-        La condición exigía `indexedAt !== null`, que sólo es cierto DESPUÉS de confirmar.
-        Así, cada reintento de sincronización con el proveedor volvía a normalizar y a
-        subir un documento que ya estaba en el índice, reiniciaba su contador de
-        confirmación y encolaba otra cadena — dejando `outdated` a la subida anterior.
-        `ENSAYO ESPECIALIZACION xxx.docx` acumuló 19 confirmaciones así y nunca convergió:
-        cada vuelta invalidaba el trabajo de la anterior.
+        A partir de aquí se abren los bytes del documento y no se sueltan hasta haberlo
+        convertido. Ese tramo es el que consume memoria, y es el que se acota: el
+        presupuesto se pide ANTES de leer, con el tamaño que D1 ya conoce, para no
+        descubrir que no cabía cuando ya está en memoria.
       */
-      const mirrorReady = doc.r2MirrorKey === key;
-      const alreadyIndexed = mirrorReady && (doc.indexedAt !== null || doc.aiSearchItemId !== null);
-      if (!alreadyIndexed && isIndexableMimeType(doc.mimeType)) {
-        stage = "NORMALIZE";
-        await heartbeat("NORMALIZATION");
-        const text = await withDeadline(
-          normalizeToText(bytes, doc.mimeType, doc.name, this.env.AI),
-          NORMALIZE_DEADLINE_MS,
-          "NORMALIZE",
+      return await withInflightBudget(doc.sizeBytes ?? 0, async () => {
+        let bytes: ArrayBuffer;
+        const ingress = await this.env.ARTIFACTS.get(ingressKey);
+        if (ingress) {
+          bytes = await ingress.arrayBuffer();
+        } else if (doc.driveFileId) {
+          stage = "DRIVE_DOWNLOAD";
+          const storage = await this.resolveStorage(documents, message);
+          if (!storage) return { status: "STORAGE_NOT_CONFIGURED" };
+          bytes = await withDeadline(
+            storage.download(doc.driveFileId),
+            DOWNLOAD_DEADLINE_MS,
+            "DRIVE_DOWNLOAD",
+          );
+        } else {
+          // Sin bytes no hay nada que ingerir, y fingir lo contrario dejaría un documento
+          // «procesando» eternamente.
+          await documents.markIngestionFailedAt(
+            message.organization_id,
+            message.document_id,
+            "INGRESS",
+            "SOURCE_BYTES_MISSING",
+            "No se conserva el contenido del archivo.",
+          );
+          return { status: "ERROR", detail: "los bytes del documento no están disponibles" };
+        }
+        clock.mark("download_ms");
+
+        // 2. INTELIGENCIA. Sin tocar el proveedor. Si el espejo y el índice ya existen de
+        //    un intento anterior, no se rehace: el reintento reanuda, no reempieza.
+        const key = documentMirrorKey(
+          message.organization_id,
+          message.matter_id,
+          message.document_id,
         );
-        clock.mark("normalize_ms");
+        /*
+          LA INTELIGENCIA YA ESTÁ HECHA si el espejo existe Y el documento llegó al índice.
+          Basta con tener identidad de item: `INDEXING` significa subido y pendiente de
+          confirmar, no pendiente de subir.
 
-        stage = "R2_PUT";
-        // Metadata de R2 → la usa AI Search como folder/tenant para el filtrado.
-        await this.env.ARTIFACTS.put(key, text, {
-          httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-          customMetadata: {
-            organization_id: message.organization_id,
-            matter_id: message.matter_id,
-            document_id: message.document_id,
-            document_version: String(doc.currentVersion),
-            is_current: "true",
-            is_active: "true",
-            source_mime_type: doc.mimeType,
-          },
-        });
-        clock.mark("r2_ms");
+          La condición exigía `indexedAt !== null`, que sólo es cierto DESPUÉS de confirmar.
+          Así, cada reintento de sincronización con el proveedor volvía a normalizar y a
+          subir un documento que ya estaba en el índice, reiniciaba su contador de
+          confirmación y encolaba otra cadena — dejando `outdated` a la subida anterior.
+          `ENSAYO ESPECIALIZACION xxx.docx` acumuló 19 confirmaciones así y nunca convergió:
+          cada vuelta invalidaba el trabajo de la anterior.
+        */
+        const mirrorReady = doc.r2MirrorKey === key;
+        const alreadyIndexed = mirrorReady && (doc.indexedAt !== null || doc.aiSearchItemId !== null);
+        if (!alreadyIndexed && isIndexableMimeType(doc.mimeType)) {
+          stage = "NORMALIZE";
+          await heartbeat("NORMALIZATION");
+          const text = await withDeadline(
+            normalizeToText(bytes, doc.mimeType, doc.name, this.env.AI),
+            NORMALIZE_DEADLINE_MS,
+            "NORMALIZE",
+          );
+          clock.mark("normalize_ms");
 
-        stage = "AI_SEARCH_UPLOAD";
-        await heartbeat("AI_SEARCH");
+          stage = "R2_PUT";
+          // Metadata de R2 → la usa AI Search como folder/tenant para el filtrado.
+          await this.env.ARTIFACTS.put(key, text, {
+            httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+            customMetadata: {
+              organization_id: message.organization_id,
+              matter_id: message.matter_id,
+              document_id: message.document_id,
+              document_version: String(doc.currentVersion),
+              is_current: "true",
+              is_active: "true",
+              source_mime_type: doc.mimeType,
+            },
+          });
+          clock.mark("r2_ms");
+
+          stage = "AI_SEARCH_UPLOAD";
+          await heartbeat("AI_SEARCH");
+
+          /*
+            IDEMPOTENCIA. Una reentrega no vuelve a subir el mismo item: si ya hay
+            identidad persistida y el índice no lo dio por fallido, se reutiliza. Con
+            at-least-once eso no es una optimización, es la diferencia entre un item y dos.
+          */
+          let item: AiSearchUploadInfo;
+          if (doc.aiSearchItemId) {
+            item = { id: doc.aiSearchItemId, key: doc.aiSearchItemKey ?? key, status: "queued" };
+          } else {
+            item = await withDeadline(
+              uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, indexMetadata({
+                organizationId: message.organization_id,
+                matterId: message.matter_id,
+                documentId: message.document_id,
+                documentVersion: doc.currentVersion,
+              })),
+              AI_SEARCH_DEADLINE_MS,
+              "AI_SEARCH_UPLOAD",
+            );
+          }
+          clock.mark("ai_search_ms");
+
+          stage = "D1_MARK_INDEXED";
+          const hash = await sha256Hex(text);
+          // El item está ENVIADO. Confirmar que se recupera es otro trabajo: esperarlo
+          // aquí ocupaba el 99 % del tiempo del consumidor sin hacer nada.
+          await documents.markIndexing(
+            message.organization_id,
+            message.document_id,
+            key,
+            hash,
+            clock.finish(),
+            { itemId: item?.id ?? null, itemKey: item?.key ?? key },
+          );
+          await this.enqueueIndexConfirm(message, INDEX_CONFIRM_FIRST_DELAY_S);
+        }
 
         /*
-          IDEMPOTENCIA. Una reentrega no vuelve a subir el mismo item: si ya hay
-          identidad persistida y el índice no lo dio por fallido, se reutiliza. Con
-          at-least-once eso no es una optimización, es la diferencia entre un item y dos.
+          3. PROCEDENCIA. La sincronización con el proveedor ocurre AL FINAL, acotada, y
+             su fallo NO deshace nada: el documento ya es utilizable. Queda pendiente y se
+             reintenta; los bytes originales permanecen en el ingreso hasta que aterrice.
         */
-        let item: AiSearchUploadInfo | null = null;
-        if (doc.aiSearchItemId) {
-          item = { id: doc.aiSearchItemId, key: doc.aiSearchItemKey ?? key, status: "queued" };
-        } else {
-          item = await withDeadline(
-            uploadToAiSearch(this.env.AI_SEARCH ?? null, key, text, indexMetadata({
-              organizationId: message.organization_id,
-              matterId: message.matter_id,
-              documentId: message.document_id,
-              documentVersion: doc.currentVersion,
-            })),
-            AI_SEARCH_DEADLINE_MS,
-            "AI_SEARCH_UPLOAD",
-          );
-        }
-        clock.mark("ai_search_ms");
-
-        stage = "D1_MARK_INDEXED";
-        const hash = await sha256Hex(text);
-        // El item está ENVIADO. Confirmar que se recupera es otro trabajo: esperarlo
-        // aquí ocupaba el 99 % del tiempo del consumidor sin hacer nada.
-        await documents.markIndexing(
-          message.organization_id,
-          message.document_id,
-          key,
-          hash,
-          clock.finish(),
-          { itemId: item?.id ?? null, itemKey: item?.key ?? key },
-        );
-        await this.enqueueIndexConfirm(message, INDEX_CONFIRM_FIRST_DELAY_S);
-      }
-
-      /*
-        3. PROCEDENCIA. La sincronización con el proveedor ocurre AL FINAL, acotada, y
-           su fallo NO deshace nada: el documento ya es utilizable. Queda pendiente y se
-           reintenta; los bytes originales permanecen en el ingreso hasta que aterrice.
-      */
-      if (!doc.driveFileId) {
-        stage = "PROVIDER_SYNC";
-        await heartbeat("FINAL_STORAGE");
-        try {
-          const storage = await this.resolveStorage(documents, message);
-          if (!storage) {
-            // Sin credenciales del proveedor no hay nada que sincronizar AHORA, pero
-            // dejarlo en silencio creaba deuda invisible: los cinco documentos de
-            // IUS-2026-016 quedaron indexados con `provider_sync_state` nulo, así que la
-            // barrida nunca los vería y su original jamás saldría del ingreso.
-            await this.deferProviderSync(
-              documents,
-              doc,
-              message,
-              new Error("DRIVE_NOT_AVAILABLE"),
-            );
-          } else {
-            const providerFileId = await withDeadline(
-              this.syncToProvider(storage, doc, message, bytes),
-              PROVIDER_SYNC_DEADLINE_MS,
-              "PROVIDER_SYNC",
-            );
-            if (providerFileId) {
-              await documents.attachProviderFile(
-                message.organization_id,
-                message.document_id,
-                providerFileId,
+        if (!doc.driveFileId) {
+          stage = "PROVIDER_SYNC";
+          await heartbeat("FINAL_STORAGE");
+          try {
+            const storage = await this.resolveStorage(documents, message);
+            if (!storage) {
+              // Sin credenciales del proveedor no hay nada que sincronizar AHORA, pero
+              // dejarlo en silencio creaba deuda invisible: los cinco documentos de
+              // IUS-2026-016 quedaron indexados con `provider_sync_state` nulo, así que la
+              // barrida nunca los vería y su original jamás saldría del ingreso.
+              await this.deferProviderSync(
+                documents,
+                doc,
+                message,
+                new Error("DRIVE_NOT_AVAILABLE"),
               );
-              // El ingreso ya cumplió su función: el original está en el proveedor y su
-              // espejo normalizado en el índice. Conservarlo sería pagar dos veces.
-              await this.env.ARTIFACTS.delete(ingressKey).catch(() => undefined);
+            } else {
+              const providerFileId = await withDeadline(
+                this.syncToProvider(storage, doc, message, bytes),
+                PROVIDER_SYNC_DEADLINE_MS,
+                "PROVIDER_SYNC",
+              );
+              if (providerFileId) {
+                await documents.attachProviderFile(
+                  message.organization_id,
+                  message.document_id,
+                  providerFileId,
+                );
+                // El ingreso ya cumplió su función: el original está en el proveedor y su
+                // espejo normalizado en el índice. Conservarlo sería pagar dos veces.
+                await this.env.ARTIFACTS.delete(ingressKey).catch(() => undefined);
+              }
             }
+          } catch (error) {
+            // Se registra y se sigue: un proveedor lento no puede volver a dejar un
+            // documento sin analizar, que es exactamente lo que pasó con CC JFRR.pdf.
+            console.warn("provider_sync_deferred", {
+              document_id: message.document_id,
+              ...safeIngestionError(error),
+            });
+            await this.deferProviderSync(documents, doc, message, error);
           }
-        } catch (error) {
-          // Se registra y se sigue: un proveedor lento no puede volver a dejar un
-          // documento sin analizar, que es exactamente lo que pasó con CC JFRR.pdf.
-          console.warn("provider_sync_deferred", {
-            document_id: message.document_id,
-            ...safeIngestionError(error),
-          });
-          await this.deferProviderSync(documents, doc, message, error);
         }
-      }
 
-      await closeAttempt({ finalState: "INDEXED", stage, timings: clock.timings });
-      return { status: "INDEXED", detail: key, timings: clock.timings };
+        await closeAttempt({ finalState: "INDEXED", stage, timings: clock.timings });
+        return { status: "INDEXED", detail: key, timings: clock.timings };
+      });
     } catch (error) {
       if (error instanceof StorageNotConfiguredError) {
         return { status: "STORAGE_NOT_CONFIGURED" };
@@ -722,6 +752,50 @@ export type AiSearchUploadInfo = {
  * envía —fallar opacamente contra el proveedor no dice nada— y se clasifica como
  * `PARTITION_REQUIRED`, que es el trabajo de SPRINT_01B.
  */
+/**
+ * Presupuesto de bytes de documento abiertos a la vez EN ESTE AISLAMIENTO.
+ *
+ * Es la cota que faltaba y la causa raíz del lote de 19. Veintiocho entregas abiertas y
+ * ninguna cerrada: sin `completed_at`, sin etapa final, sin código de fallo. Un
+ * `try/catch` por mensaje siempre deja rastro, así que lo que murió no fue el trabajo
+ * sino el aislamiento entero, con todos sus mensajes dentro. Los dos lotes que cayeron
+ * arrancaron solapándose con un tercero que tenía 17 MB, 7,8 MB y 5,4 MB abiertos.
+ *
+ * EL ALCANCE ES DELIBERADO. Un módulo compartido dentro del aislamiento es exactamente
+ * la frontera del problema: lo que se agota es la memoria de ESE aislamiento, no una
+ * cuota global. Coordinar entre aislamientos exigiría un Durable Object y no protegería
+ * mejor de esto; sería más maquinaria para resolver otro problema.
+ *
+ * Se cuentan bytes y no documentos porque cuatro PDF de 100 KB y cuatro de 13 MB son el
+ * mismo número y no el mismo problema.
+ */
+const INFLIGHT_BUDGET_BYTES = 24 * 1024 * 1024;
+
+let inflightBytes = 0;
+const inflightWaiters: (() => void)[] = [];
+
+/**
+ * Espera turno para abrir `size` bytes, ejecuta, y libera pase lo que pase.
+ *
+ * Un documento cuyo tamaño supera el presupuesto entero NO se queda esperando para
+ * siempre: pasa solo, que es lo máximo que se puede acotar sin rechazarlo.
+ */
+async function withInflightBudget<T>(size: number, fn: () => Promise<T>): Promise<T> {
+  const cost = Math.max(0, Math.min(size, INFLIGHT_BUDGET_BYTES));
+  while (inflightBytes > 0 && inflightBytes + cost > INFLIGHT_BUDGET_BYTES) {
+    await new Promise<void>((resolve) => inflightWaiters.push(resolve));
+  }
+  inflightBytes += cost;
+  try {
+    return await fn();
+  } finally {
+    inflightBytes -= cost;
+    // Se despierta a todos: cada uno vuelve a comprobar su propio hueco, así que un
+    // documento grande no queda detrás de una fila de pequeños que sí caben.
+    while (inflightWaiters.length > 0) inflightWaiters.shift()?.();
+  }
+}
+
 export const AI_SEARCH_MAX_ITEM_BYTES = 4 * 1024 * 1024;
 
 /**

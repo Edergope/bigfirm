@@ -498,6 +498,7 @@ function Documentos({ data }: { data: MatterDetail }) {
             heartbeatAt: d.ingestion_heartbeat_at,
             enqueuedAt: d.ingestion_enqueued_at,
             updatedAt: d.updated_at,
+            stage: d.ingestion_stage,
           }),
         ),
       );
@@ -678,6 +679,7 @@ function DocFolder({
         heartbeatAt: d.ingestion_heartbeat_at,
         enqueuedAt: d.ingestion_enqueued_at,
         updatedAt: d.updated_at,
+        stage: d.ingestion_stage,
       },
       now,
     );

@@ -87,3 +87,69 @@ export async function handleProviderSyncSweep(env: Env): Promise<{ requeued: num
  * tandas, y la espera creciente de cada documento hace el resto.
  */
 export const SWEEP_BATCH_LIMIT = 25;
+
+
+/**
+ * Cuánto silencio basta para dar por abandonado un trabajo que nadie cerró.
+ *
+ * Más largo que el umbral de «detenido» que ve el abogado: primero se le dice la
+ * verdad —esto no avanza—, y poco después el sistema intenta arreglarlo solo.
+ */
+export const ABANDONED_STALE_MINUTES = 15;
+
+/**
+ * Techo de rescates automáticos antes de pedir intervención.
+ *
+ * Reintentar sin fin un documento que siempre muere es la otra forma de no arreglar
+ * nada: consume la cola que necesitan los expedientes sanos y nunca lo dice.
+ */
+export const ABANDONED_MAX_ATTEMPTS = 12;
+
+/**
+ * Rescata los documentos que la cola abandonó antes de llegar al índice.
+ *
+ * En el lote de 19, siete PDF gastaron sus cuatro entregas en cuatro segundos —los tres
+ * reintentos cayeron dentro de la misma congestión que los había matado— y acabaron en
+ * la cola de descarte, que no tiene consumidor. La única salida era que el abogado
+ * pulsara «Reintentar» sobre cada uno. Reparar la infraestructura no es su trabajo.
+ *
+ * Esta barrida los devuelve a la cola. Con el reintento ya espaciado y el presupuesto de
+ * bytes acotado, vuelven a un sistema distinto del que los mató.
+ */
+export async function recoverAbandonedIngestion(env: Env): Promise<{ requeued: number; abandoned: number }> {
+  const documents = new DocumentRepository(createDb(env.DB));
+  const staleBefore = new Date(Date.now() - ABANDONED_STALE_MINUTES * 60_000).toISOString();
+  const stuck = await documents.listAbandonedIngestion(staleBefore, SWEEP_BATCH_LIMIT);
+
+  let requeued = 0;
+  let abandoned = 0;
+  for (const doc of stuck) {
+    if ((doc.attempts ?? 0) >= ABANDONED_MAX_ATTEMPTS) {
+      // Ya no es congestión pasajera. Se dice, con código, y queda reintentable a mano.
+      await documents
+        .markIngestionFailedAt(
+          doc.organizationId,
+          doc.id,
+          "INGRESS",
+          "INGESTION_ABANDONED",
+          "La preparación no llegó a completarse tras varios intentos automáticos.",
+        )
+        .catch(() => undefined);
+      abandoned += 1;
+      continue;
+    }
+    try {
+      await env.DOCUMENT_INGESTION.send({
+        organization_id: doc.organizationId,
+        matter_id: doc.matterId,
+        document_id: doc.id,
+        reason: "UPLOADED",
+        enqueued_at: new Date().toISOString(),
+      });
+      requeued += 1;
+    } catch {
+      // La cola no lo aceptó: la próxima barrida lo reintenta.
+    }
+  }
+  return { requeued, abandoned };
+}

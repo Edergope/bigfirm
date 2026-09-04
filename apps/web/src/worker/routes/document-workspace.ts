@@ -341,6 +341,11 @@ documentWorkspaceRoutes.get("/matters/:matterId/workspace", async (c) => {
     ingestion_attempts: d.ingestionAttempts,
     ingestion_enqueued_at: d.ingestionEnqueuedAt,
     ingestion_heartbeat_at: d.ingestionHeartbeatAt,
+    // La ETAPA distingue «el proveedor va lento» de «esto no avanza». Sin ella la
+    // pantalla no puede separar «Indexación demorada» de «Procesamiento detenido», y
+    // acaba ofreciendo un botón de reintentar que vuelve a subirlo todo. No es dato de
+    // negocio: es la misma clase de señal que los intentos y el latido.
+    ingestion_stage: d.ingestionStage,
     content_source: d.contentSource,
     // Provenance visible del entregable: de qué plantilla y con qué agente salió.
     generated_from_template_id: d.generatedFromTemplateId,
@@ -1199,6 +1204,7 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
     heartbeatAt: doc.ingestionHeartbeatAt,
     enqueuedAt: doc.ingestionEnqueuedAt,
     updatedAt: doc.updatedAt,
+    stage: doc.ingestionStage,
   });
   if (!canRetryIngestion(state)) {
     throw new IusiaError(
@@ -1206,6 +1212,38 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
       "Este documento no necesita reintento ahora mismo.",
       { code: "NOT_RETRYABLE", state },
     );
+  }
+
+  /*
+    REANUDAR, NO EMPEZAR DE CERO.
+
+    Un documento que ya tiene su espejo en R2 y su identidad de item en el índice no
+    necesita volver a descargarse, convertirse ni subirse: lo único que le falta es que
+    alguien pregunte si el proveedor terminó. Reprocesarlo entero deja el item anterior
+    obsoleto, reinicia la cuenta de confirmaciones y multiplica el trabajo — es el bucle
+    que dejó un DOCX en 19 confirmaciones sin converger.
+
+    Se reanuda desde la confirmación. Sólo se rehace todo si no hay item que reutilizar.
+  */
+  if (doc.aiSearchItemId !== null && doc.indexedAt === null) {
+    await c.env.DOCUMENT_INGESTION.send({
+      organization_id: organizationId,
+      matter_id: matterId,
+      document_id: documentId,
+      reason: "AI_SEARCH_CONFIRM",
+      enqueued_at: new Date().toISOString(),
+    });
+    await audit.record({
+      organizationId,
+      matterId,
+      actorUserId: userId,
+      action: "document.ingestion.retry",
+      resourceType: "document",
+      resourceId: documentId,
+      outcome: "SUCCESS",
+      detail: { from_state: state, resumed_from: "AI_SEARCH_CONFIRM" },
+    });
+    return c.json({ status: "RETRYING", resumed_from: "AI_SEARCH_CONFIRM" });
   }
 
   const hasBytes =

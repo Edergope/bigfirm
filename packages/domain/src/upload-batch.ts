@@ -90,6 +90,13 @@ export function batchProgress(states: readonly string[]): BatchProgress {
       case "PROCESSING_STALLED":
         stalled += 1;
         break;
+      case "INDEXING_DELAYED":
+        // Va lento, no está roto: el documento está entero en el proveedor y IUSIA
+        // sigue comprobándolo. Cuenta como trabajo en curso —todavía puede entrar al
+        // análisis— y NUNCA como detenido, que es lo que obligaría al abogado a
+        // reintentar algo que él no puede arreglar.
+        processing += 1;
+        break;
       case "QUEUED":
         // A salvo y esperando turno. Cuenta como cargado y como pendiente, nunca como
         // trabajo en curso: nadie lo ha tomado todavía.
