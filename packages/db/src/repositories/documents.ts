@@ -600,24 +600,6 @@ export class DocumentRepository {
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
   }
 
-  /**
-   * El índice sigue sin confirmar tras agotar los intentos.
-   *
-   * NO se marca error: «no ha terminado» no es «ha fallado». El documento queda en un
-   * estado operativo visible para soporte, y la barrida puede seguir intentándolo — un
-   * upstream lento no puede convertirse en un documento roto.
-   */
-  async markIndexConfirmDelayed(organizationId: string, documentId: string, attempt: number) {
-    await this.db
-      .update(documents)
-      .set({
-        indexConfirmAttempts: attempt,
-        indexConfirmNextAt: null,
-        ingestionStage: "INDEXING_DELAYED",
-        ingestionHeartbeatAt: new Date().toISOString(),
-      })
-      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
-  }
 
   /** Documentos subidos al índice cuya recuperabilidad falta confirmar. */
   /**
@@ -727,6 +709,36 @@ export class DocumentRepository {
         ingestionFailureCode: code,
         ingestionFailureMessage: safeMessage.slice(0, 300),
         ingestionHeartbeatAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+  }
+
+  /**
+   * El documento no tiene texto que leer.
+   *
+   * Desenlace, no avería: una fotografía sin texto o un PDF que es puro escaneo dan el
+   * mismo resultado la décima vez que la primera. El archivo queda a salvo y
+   * consultable; sólo se declara que no entra al análisis, con su motivo ya escrito por
+   * `markIngestionFailedAt`. Se limpia la fecha de próxima comprobación porque no hay
+   * nada más que comprobar.
+   */
+  async markNotIndexable(
+    organizationId: string,
+    documentId: string,
+    reason: { code: string; message: string; stage: string },
+  ) {
+    const now = new Date().toISOString();
+    await this.db
+      .update(documents)
+      .set({
+        ingestionStatus: "NOT_INDEXABLE",
+        // El motivo y el estado se escriben JUNTOS. Hacerlo en dos pasos deja una
+        // ventana en la que el documento ya está marcado y todavía no dice por qué.
+        ingestionStage: reason.stage,
+        ingestionFailureCode: reason.code,
+        ingestionFailureMessage: reason.message.slice(0, 300),
+        indexConfirmNextAt: null,
         updatedAt: now,
       })
       .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));

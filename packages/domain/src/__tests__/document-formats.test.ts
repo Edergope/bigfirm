@@ -67,23 +67,31 @@ describe("los formatos que el proveedor sí convierte", () => {
 });
 
 /**
- * Las imágenes SÍ las convierte la plataforma, con detección de objetos y un modelo de
- * visión que las describe en prosa. Están apagadas a propósito: una descripción
- * generada no es el texto del documento, y citarla como evidencia sería atribuirle al
- * expediente algo que nadie escribió en él. Un escaneo necesita OCR, que es otra cosa.
+ * Las imágenes entran al análisis por TRANSCRIPCIÓN, no por descripción.
+ *
+ * Estuvieron fuera a propósito mientras el único camino disponible era la conversión
+ * nativa, que pasa la imagen por un modelo de visión y devuelve prosa: «un documento
+ * con texto impreso y un sello». Eso no es el texto del documento y citarlo como
+ * evidencia sería atribuirle al expediente algo que nadie escribió.
+ *
+ * Con OCR el camino es otro: se lee el texto que ya está en la imagen, se marca como
+ * extraído por OCR, y lo que no tiene texto legible se dice.
  */
-describe("las imágenes se guardan, no se interpretan", () => {
+describe("las imágenes se transcriben, no se describen", () => {
   it.each(["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "image/svg+xml"])(
-    "%s se conserva pero no entra al análisis",
+    "%s se admite y se lee",
     (mime) => {
       expect(isAcceptedUpload(mime)).toBe(true);
-      expect(isReadableMimeType(mime)).toBe(false);
-      expect(formatCoverage(mime).verdict).toBe("STORED_ONLY");
+      expect(isReadableMimeType(mime)).toBe(true);
+      expect(formatCoverage(mime).verdict).toBe("READABLE");
     },
   );
 
-  it("le ofrece al abogado la salida real para un escaneo", () => {
-    expect(formatCoverage("image/png", "acta.png").reason).toContain("PDF con texto");
+  it("no se promete más de lo que se hace", () => {
+    // Se dice que se transcribe, y se dice qué pasa si no hay nada que transcribir.
+    const r = formatCoverage("image/png", "acta.png").reason;
+    expect(r).toContain("transcribirá el texto visible");
+    expect(r).toContain("no contiene texto legible");
   });
 
   it("audio y vídeo se guardan sin prometer lectura", () => {

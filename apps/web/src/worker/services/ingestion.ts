@@ -1,5 +1,11 @@
 import {
+  isOcrMimeType,
   isReadableMimeType,
+  hasUsableText,
+  interpretOcrAnswer,
+  NO_TEXT_REASON,
+  OCR_TRANSCRIPTION_PROMPT,
+  type OcrOutcome,
   StorageNotConfiguredError,
   documentIngressKey,
   documentMirrorKey,
@@ -21,7 +27,7 @@ import { DriveWorkspaceService } from "./drive-workspace.js";
  * reintento de Queue reescribe el mismo objeto sin duplicar.
  */
 export interface IngestionOutcome {
-  status: "INDEXED" | "STORAGE_NOT_CONFIGURED" | "SKIPPED" | "ERROR";
+  status: "INDEXED" | "NOT_INDEXABLE" | "STORAGE_NOT_CONFIGURED" | "SKIPPED" | "ERROR";
   detail?: string;
   /** Duraciones por etapa, en ms. Presentes sólo cuando la ingestión completó. */
   timings?: StageTimings;
@@ -494,6 +500,30 @@ export class IngestionService {
       if (error instanceof StorageNotConfiguredError) {
         return { status: "STORAGE_NOT_CONFIGURED" };
       }
+      /*
+        SIN TEXTO NO ES UN FALLO.
+
+        Una fotografía de un paisaje, o un PDF que es puro escaneo, no tienen texto que
+        leer, y reintentarlo da el mismo resultado la segunda vez y la décima. Es un
+        desenlace: el archivo está a salvo, se consulta desde el expediente, y se dice
+        por qué no entra al análisis. Antes esto acababa subiendo contenido vacío al
+        índice, produciendo cero fragmentos, y la confirmación lo perseguía durante seis
+        horas hasta rendirse con un código que no explicaba nada.
+      */
+      if (error instanceof NoTextDetectedError) {
+        await documents.markNotIndexable(message.organization_id, message.document_id, {
+          code: "NO_TEXT_DETECTED",
+          message: error.message,
+          stage: error.kind,
+        });
+        await closeAttempt({
+          finalState: "NO_TEXT_DETECTED",
+          stage: error.kind,
+          failureCode: "NO_TEXT_DETECTED",
+          failureMessage: error.message,
+        });
+        return { status: "NOT_INDEXABLE", detail: error.message };
+      }
       console.error("ingestion_stage_failed", {
         organization_id: message.organization_id,
         matter_id: message.matter_id,
@@ -938,6 +968,80 @@ export function isIndexableMimeType(mimeType: string): boolean {
 }
 
 /**
+ * Modelo de Workers AI que transcribe imágenes.
+ *
+ * ES CAPACIDAD NATIVA, no una dependencia nueva. Moondream declara el OCR entre sus
+ * tareas y ya está alojado en Workers AI, así que no hay librería que instalar
+ * —Tesseract en un Worker es un WASM de decenas de megabytes—, ni servicio que montar,
+ * ni proveedor externo al que enviar la cédula de un cliente.
+ *
+ * NO es el mismo camino que la conversión a Markdown de imágenes, que Cloudflare
+ * resuelve con detección de objetos más un modelo que DESCRIBE la imagen en prosa. Eso
+ * produce texto nuevo; esto lee el que ya está.
+ */
+const OCR_MODEL = "@cf/moondream/moondream3.1-9B-A2B";
+
+/**
+ * Un documento sin texto que leer.
+ *
+ * NO es un fallo del sistema y no debe reintentarse: reintentar una fotografía de un
+ * paisaje da el mismo resultado la segunda vez. Es un desenlace legítimo —el archivo
+ * está a salvo y se puede consultar— y por eso lleva su propio tipo, para que la
+ * ingestión lo distinga de un error transitorio.
+ */
+export class NoTextDetectedError extends Error {
+  constructor(readonly kind: "IMAGE" | "SCANNED_PDF") {
+    super(kind === "SCANNED_PDF" ? NO_TEXT_REASON.SCANNED_PDF : NO_TEXT_REASON.IMAGE);
+    this.name = "NoTextDetectedError";
+  }
+}
+
+/** Techo del OCR. Una imagen no puede retener un consumidor indefinidamente. */
+const OCR_DEADLINE_MS = 60_000;
+
+/**
+ * Transcribe el texto visible de una imagen.
+ *
+ * Determinista a propósito: temperatura cero y sin traza de razonamiento. No queremos
+ * que el modelo razone sobre el documento, queremos que lo lea. Y no se le pregunta
+ * nada jurídico: la interpretación viene después, con los agentes, sobre el texto ya
+ * extraído y marcado como tal.
+ */
+export async function extractTextFromImage(
+  bytes: ArrayBuffer,
+  mimeType: string,
+  ai: Ai | undefined,
+): Promise<OcrOutcome> {
+  if (!ai) throw new Error("Workers AI no está configurado");
+  const response = (await withDeadline(
+    ai.run(OCR_MODEL as never, {
+      task: "query",
+      image: `data:${mimeType};base64,${base64(bytes)}`,
+      question: OCR_TRANSCRIPTION_PROMPT,
+      temperature: 0,
+      reasoning: false,
+      stream: false,
+    } as never),
+    // Cota propia, más corta que la de conversión: una imagen que no vuelve no puede
+    // retener un consumidor mientras el resto del lote espera.
+    OCR_DEADLINE_MS,
+    "OCR",
+  )) as { answer?: string } | undefined;
+  return interpretOcrAnswer(response?.answer);
+}
+
+/** Bytes → base64, por trozos para no reventar la pila con un argumento gigante. */
+function base64(bytes: ArrayBuffer): string {
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  const CHUNK = 8192;
+  for (let i = 0; i < view.length; i += CHUNK) {
+    binary += String.fromCharCode(...view.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
  * Normaliza a Markdown para AI Search. NUNCA interpreta el contenido convertido
  * como instrucciones. Las imágenes embebidas se omiten para no activar modelos de
  * visión ni introducir costo variable en el pipeline documental de texto.
@@ -954,6 +1058,12 @@ export async function normalizeToText(
     || mimeType === "application/xml"
   ) {
     return new TextDecoder().decode(bytes);
+  }
+
+  if (isOcrMimeType(mimeType)) {
+    const outcome = await extractTextFromImage(bytes, mimeType, ai);
+    if (outcome.status === "NO_TEXT") throw new NoTextDetectedError("IMAGE");
+    return outcome.text;
   }
 
   if (!isReadableMimeType(mimeType)) {
@@ -975,6 +1085,18 @@ export async function normalizeToText(
   );
   if (result.format === "error") {
     throw new Error(`Workers AI toMarkdown: ${result.error}`);
+  }
+  /*
+    CONVERSIÓN VACÍA = ESCANEO.
+
+    La conversión de PDF extrae texto; no hace OCR. Un PDF escaneado la atraviesa sin
+    error y devuelve una cadena vacía o cuatro caracteres de metadatos. Eso se subía
+    igual al índice, producía cero fragmentos, y la confirmación lo perseguía durante
+    seis horas antes de rendirse — seis horas para averiguar que el archivo no tenía
+    texto que leer. Se comprueba antes de subir nada.
+  */
+  if (!hasUsableText(result.data)) {
+    throw new NoTextDetectedError(mimeType === "application/pdf" ? "SCANNED_PDF" : "IMAGE");
   }
   return result.data;
 }

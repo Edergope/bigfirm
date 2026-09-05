@@ -70,7 +70,7 @@ const VISION_ONLY_MIME = new Set([
  * Motivo único para las imágenes, para que la pantalla y la matriz no diverjan.
  */
 const IMAGE_REASON =
-  "La plataforma sabe describir imágenes con un modelo de visión, pero una descripción generada no es el texto del documento y no puede citarse como evidencia. Un escaneo necesita OCR, que es otra cosa.";
+  "Se transcribe el texto visible mediante OCR y se marca como tal, nunca como texto original. Una imagen sin texto legible se conserva pero no entra al análisis: no se describe ni se completa lo ilegible.";
 
 /** Formatos legibles como texto plano, sin conversión de por medio. */
 function isPlainText(mimeType: string): boolean {
@@ -81,9 +81,21 @@ function isPlainText(mimeType: string): boolean {
   );
 }
 
+/**
+ * ¿Se lee este formato transcribiendo lo que se ve, en vez de extrayendo texto?
+ *
+ * Son las imágenes. Antes estaban fuera del análisis por una decisión de coste y de
+ * honestidad: la conversión nativa las DESCRIBE con un modelo de visión, y una
+ * descripción generada no es el texto del documento. La transcripción sí lo es, y por
+ * eso ahora entran — pero por otro camino, con otro modelo y marcadas como tales.
+ */
+export function isOcrMimeType(mimeType: string): boolean {
+  return VISION_ONLY_MIME.has(mimeType);
+}
+
 /** ¿Puede IUSIA leer este documento y citarlo como evidencia? */
 export function isReadableMimeType(mimeType: string): boolean {
-  return isPlainText(mimeType) || RICH_TEXT_MIME.has(mimeType);
+  return isPlainText(mimeType) || RICH_TEXT_MIME.has(mimeType) || isOcrMimeType(mimeType);
 }
 
 export type FormatVerdict =
@@ -117,11 +129,11 @@ export function formatCoverage(mimeType: string, filename = ""): FormatCoverage 
         "El formato .doc de Word 97-2003 no puede leerse. Guárdalo como .docx o PDF y vuelve a subirlo para que IUSIA pueda citarlo.",
     };
   }
-  if (VISION_ONLY_MIME.has(mimeType)) {
+  if (isOcrMimeType(mimeType)) {
     return {
-      verdict: "STORED_ONLY",
+      verdict: "READABLE",
       reason:
-        "Las imágenes se conservan en el expediente, pero IUSIA aún no lee su contenido. Si el documento es un escaneo, sube la versión en PDF con texto.",
+        "IUSIA transcribirá el texto visible en la imagen y podrá citarlo. Si la imagen no contiene texto legible, se conservará en el expediente sin entrar al análisis.",
     };
   }
   if (isReadableMimeType(mimeType)) {
@@ -219,6 +231,16 @@ export function summarizeSelection(
 export interface FormatCapability {
   format: string;
   mimeType: string;
+  /**
+   * Qué decide el veredicto de esta fila.
+   *
+   * Casi siempre el tipo de archivo. Pero «PDF escaneado» NO es un tipo: es un PDF
+   * corriente cuyo contenido resulta ser imagen, y eso sólo se sabe al intentar
+   * convertirlo. Marcarlo aquí evita la contradicción de tener dos filas con el mismo
+   * MIME y veredictos distintos, y evita también la tentación de resolverla mintiendo
+   * en una de las dos.
+   */
+  determinedBy: "MIME" | "CONTENT";
   durable: boolean;
   preview: boolean;
   extract: boolean;
@@ -231,8 +253,9 @@ export const FORMAT_CAPABILITY_MATRIX: readonly FormatCapability[] = [
   cap(
     "PDF escaneado",
     "application/pdf",
-    true,
-    "Se acepta y se convierte. Si la página es sólo imagen, la conversión no devuelve texto y el documento queda consultable pero no citable.",
+    false,
+    "La conversión de PDF extrae texto, no hace OCR: un escaneo devuelve vacío. Se detecta ANTES de subirlo al índice y se dice, en vez de perseguirlo durante horas. Se conserva y se consulta; para citarlo hace falta una versión con texto seleccionable.",
+    "CONTENT",
   ),
   cap("DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", true,
     "Se convierte a texto y se cita."),
@@ -247,10 +270,11 @@ export const FORMAT_CAPABILITY_MATRIX: readonly FormatCapability[] = [
   cap("HTML", "text/html", true, "Se convierte a texto y se cita."),
   cap("CSV", "text/csv", true, "Se lee como texto y se cita."),
   cap("TXT", "text/plain", true, "Se lee como texto y se cita."),
-  cap("JPG", "image/jpeg", false, IMAGE_REASON),
-  cap("PNG", "image/png", false, IMAGE_REASON),
-  cap("WEBP", "image/webp", false, IMAGE_REASON),
-  cap("GIF", "image/gif", false, IMAGE_REASON),
+  cap("JPG", "image/jpeg", true, IMAGE_REASON),
+  cap("PNG", "image/png", true, IMAGE_REASON),
+  cap("WEBP", "image/webp", true, IMAGE_REASON),
+  cap("GIF", "image/gif", true, IMAGE_REASON),
+  cap("SVG", "image/svg+xml", true, IMAGE_REASON),
   cap("Vídeo MP4", "video/mp4", false, "Se conserva en el expediente. No se extrae contenido."),
   cap("Audio MP3", "audio/mpeg", false, "Se conserva en el expediente. No se extrae contenido."),
 ];
@@ -260,10 +284,12 @@ function cap(
   mimeType: string,
   index: boolean,
   reason: string,
+  determinedBy: "MIME" | "CONTENT" = "MIME",
 ): FormatCapability {
   return {
     format,
     mimeType,
+    determinedBy,
     // Todo lo que se admite se guarda: el ingreso durable es previo a cualquier
     // intento de leerlo, precisamente para que un formato ilegible no sea una pérdida.
     durable: true,

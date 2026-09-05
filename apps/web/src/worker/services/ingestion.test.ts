@@ -67,12 +67,14 @@ describe("normalización documental", () => {
     ).rejects.toThrow("archivo dañado");
   });
 
-  it("clasifica formatos ricos soportados y excluye media con visión/audio", () => {
+  it("clasifica formatos ricos soportados y excluye audio y vídeo", () => {
     expect(isIndexableMimeType("application/pdf")).toBe(true);
     expect(
       isIndexableMimeType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     ).toBe(true);
-    expect(isIndexableMimeType("image/png")).toBe(false);
+    // Las imágenes entraron al análisis al añadir el OCR: se transcribe el texto que
+    // ya está en ellas. No hay nada análogo que hacer con un audio o un vídeo.
+    expect(isIndexableMimeType("image/png")).toBe(true);
     expect(isIndexableMimeType("video/mp4")).toBe(false);
     expect(isIndexableMimeType("audio/wav")).toBe(false);
   });
@@ -255,14 +257,43 @@ describe("semántica de AI_INDEXED", () => {
   });
 });
 
-describe("imágenes: no se finge inteligencia", () => {
-  it("una imagen no es indexable y nunca entra a la cola", () => {
-    // El estado inicial que se le asigna es NOT_INDEXABLE, así que se muestra como
-    // «Vista disponible · no indexado» en vez de fallar con un error de proceso.
-    expect(isIndexableMimeType("image/png")).toBe(false);
-    expect(isIndexableMimeType("image/jpeg")).toBe(false);
-    // Y no se aplica OCR ni visión: no hay costo generativo escondido.
+describe("imágenes: se transcribe lo que hay, no se finge lo que falta", () => {
+  it("una imagen entra al análisis por su texto, no por su descripción", () => {
+    // La política anterior las dejaba fuera porque el único camino disponible era un
+    // modelo que DESCRIBE la imagen en prosa, y una descripción generada no es el
+    // texto del documento. Transcribir sí lo es.
+    expect(isIndexableMimeType("image/png")).toBe(true);
+    expect(isIndexableMimeType("image/jpeg")).toBe(true);
     expect(isIndexableMimeType("application/pdf")).toBe(true);
     expect(isIndexableMimeType("text/plain")).toBe(true);
+  });
+
+  it("una imagen sin texto legible no produce contenido inventado", async () => {
+    // El modelo devuelve su centinela; la ingestión lo convierte en un desenlace
+    // —consultable, no citable— en vez de indexar una descripción.
+    const ai = { run: async () => ({ answer: "SIN_TEXTO" }) } as unknown as Ai;
+    await expect(
+      normalizeToText(new Uint8Array([1]).buffer, "image/png", "foto.png", ai),
+    ).rejects.toThrow(/No se detectó texto legible/);
+  });
+
+  it("una imagen CON texto devuelve exactamente lo transcrito", async () => {
+    const ai = {
+      run: async () => ({ answer: "CÉDULA DE CIUDADANÍA\n1.020.345.678" }),
+    } as unknown as Ai;
+    const texto = await normalizeToText(
+      new Uint8Array([1]).buffer, "image/jpeg", "cedula.jpg", ai,
+    );
+    expect(texto).toBe("CÉDULA DE CIUDADANÍA\n1.020.345.678");
+  });
+
+  it("un PDF que resulta ser un escaneo se detecta ANTES de subirlo al índice", async () => {
+    // La conversión de PDF extrae texto y no hace OCR: un escaneo la atraviesa sin
+    // error y devuelve vacío. Subirlo producía cero fragmentos y seis horas de
+    // confirmaciones inútiles.
+    const ai = { toMarkdown: async () => ({ format: "markdown", data: "  \n " }) } as unknown as Ai;
+    await expect(
+      normalizeToText(new Uint8Array([1]).buffer, "application/pdf", "escaneo.pdf", ai),
+    ).rejects.toThrow(/no contiene texto/);
   });
 });

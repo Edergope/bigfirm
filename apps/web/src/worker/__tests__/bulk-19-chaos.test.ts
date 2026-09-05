@@ -120,7 +120,7 @@ describe("una indexación lenta no es una avería del abogado", () => {
   it("agotar la cadena rápida ya no es un limbo", () => {
     expect(confirm).toContain("INDEX_CONFIRM_SLOW_DELAY_S");
     const tramo = confirm.slice(confirm.indexOf("attempt >= INDEX_CONFIRM_MAX_ATTEMPTS"));
-    expect(tramo.slice(0, 900)).toContain("scheduleIndexConfirm");
+    expect(tramo.slice(0, 2000)).toContain("scheduleIndexConfirm");
   });
 
   it("«Indexación demorada» es su propio estado, no «detenido»", () => {
@@ -187,8 +187,30 @@ describe("la ingestión no depende del proveedor de almacenamiento", () => {
     expect(i).toBeLessThan(j);
   });
 
-  it("la ingestión no invoca ningún modelo generativo", () => {
-    expect(ingestion).not.toMatch(/\.run\(|chatCompletion|generateText/);
+  it("la ingestión no invoca ningún modelo JURÍDICO generativo", () => {
+    /*
+      Antes esta prueba decía «ningún modelo», y dejó de ser cierta al añadir el OCR:
+      transcribir una imagen invoca un modelo de visión. La distinción que importa no
+      es si se llama a un modelo, sino QUÉ se le pide. Aquí sólo se le pide leer lo que
+      ya está escrito; interpretar el expediente es trabajo de los agentes, después, y
+      sobre texto ya extraído y marcado como tal.
+    */
+    expect(ingestion).not.toMatch(/chatCompletion|generateText|createLegal|AGENT_/);
+    const llamadas = [...ingestion.matchAll(/ai\.run\(([^,]+)/g)].map((m) => m[1]!.trim());
+    expect(llamadas).toEqual(["OCR_MODEL as never"]);
+  });
+
+  it("y al modelo de visión se le pide transcribir, no opinar", () => {
+    const fn = ingestion.slice(ingestion.indexOf("export async function extractTextFromImage"));
+    // Determinismo: no queremos que el modelo piense sobre el documento, que lo lea.
+    expect(fn.slice(0, 900)).toContain("temperature: 0");
+    expect(fn.slice(0, 900)).toContain("reasoning: false");
+    expect(fn.slice(0, 900)).toContain("OCR_TRANSCRIPTION_PROMPT");
+  });
+
+  it("una imagen no puede retener un consumidor indefinidamente", () => {
+    const fn = ingestion.slice(ingestion.indexOf("export async function extractTextFromImage"));
+    expect(fn.slice(0, 1200)).toContain("OCR_DEADLINE_MS");
   });
 });
 

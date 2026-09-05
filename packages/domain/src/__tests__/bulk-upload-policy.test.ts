@@ -226,8 +226,21 @@ describe("matriz de capacidad por formato", () => {
   it("la matriz y el veredicto de la pantalla no divergen", () => {
     for (const f of FORMAT_CAPABILITY_MATRIX) {
       if (f.mimeType === "application/msword") continue; // resuelto además por extensión
+      // Las filas de contenido —«PDF escaneado»— no se pueden resolver por MIME: son
+      // el mismo tipo que su hermana nativa y sólo se distinguen al convertirlas.
+      if (f.determinedBy === "CONTENT") continue;
       const v = formatCoverage(f.mimeType).verdict;
       expect(f.index ? "READABLE" : "STORED_ONLY").toBe(v);
     }
+  });
+
+  it("lo que no se decide por el tipo de archivo lo dice", () => {
+    const escaneado = FORMAT_CAPABILITY_MATRIX.find((f) => f.format === "PDF escaneado")!;
+    expect(escaneado.determinedBy).toBe("CONTENT");
+    // Y comparte MIME con su hermana nativa, que sí es citable: la diferencia no está
+    // en el tipo, está en si hay texto dentro.
+    const nativo = FORMAT_CAPABILITY_MATRIX.find((f) => f.format === "PDF con texto")!;
+    expect(nativo.mimeType).toBe(escaneado.mimeType);
+    expect(nativo.index).toBe(true);
   });
 });

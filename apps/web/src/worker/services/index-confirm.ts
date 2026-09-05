@@ -1,4 +1,4 @@
-import { DocumentRepository, createDb } from "@iusia/db";
+import { DocumentRepository, IngestionAttemptRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
 import { AiSearchRetrievalProvider } from "../integrations/ai-search.js";
 import {
@@ -60,6 +60,41 @@ export async function confirmDocumentIndexed(
 
   const attempt = (doc.indexConfirmAttempts ?? 0) + 1;
 
+  /*
+    CONSTANCIA DE LA COMPROBACIÓN.
+
+    Veintitrés confirmaciones por documento en el lote de 19 y NI UNA dejó rastro: ni en
+    el libro de intentos, ni en la auditoría. Cuando cinco documentos acabaron en
+    `INDEX_CONFIRM_ABANDONED` no había forma de decir qué respondía el proveedor —si
+    seguía trabajando, si nunca produjo fragmentos, o si la recuperación exacta no los
+    encontraba—. El producto no podía explicar su propio veredicto.
+
+    Se reutiliza el libro que ya existe. No hay tabla nueva, ni sistema de eventos, ni
+    consulta manual al índice desde fuera: la evidencia la produce el propio camino que
+    promueve el documento a `AI_INDEXED`.
+  */
+  const attempts = new IngestionAttemptRepository(createDb(env.DB));
+  const ledgerId = await attempts
+    .open({
+      organizationId: input.organizationId,
+      matterId: input.matterId,
+      documentId: input.documentId,
+      attempt,
+      reason: "AI_SEARCH_CONFIRM",
+    })
+    .catch(() => null);
+  /** Cierra el intento sin poder tumbar la confirmación: es rastro, no lógica. */
+  const record = async (outcome: {
+    finalState: string;
+    stage?: string | null;
+    failureCode?: string | null;
+    failureMessage?: string | null;
+    timings?: Record<string, number> | null;
+  }): Promise<void> => {
+    if (!ledgerId) return;
+    await attempts.close(ledgerId, outcome).catch(() => undefined);
+  };
+
   // 1-2. Estado del item EXACTO que subimos, no de uno parecido.
   const info = await itemInfo(env, doc.aiSearchItemId);
   if (info?.status === "error") {
@@ -70,11 +105,19 @@ export async function confirmDocumentIndexed(
       "AI_SEARCH_ITEM_ERROR",
       info.error ?? "el índice rechazó el documento",
     );
+    await record({
+      finalState: "FAILED",
+      stage: "AI_SEARCH_ITEM_ERROR",
+      failureCode: "AI_SEARCH_ITEM_ERROR",
+      failureMessage: info.error ?? "el índice rechazó el documento",
+    });
     return { status: "FAILED", code: "AI_SEARCH_ITEM_ERROR", detail: info.error };
   }
 
   const providerDone = info?.status === "completed";
   const hasChunks = (info?.chunks_count ?? 0) > 0;
+  /** Lo que el proveedor afirma en ESTA comprobación. Es la evidencia, no una etiqueta. */
+  const providerStage = `provider=${info?.status ?? "unknown"} chunks=${info?.chunks_count ?? 0}`;
 
   if (providerDone && hasChunks) {
     // 3. Recuperación REAL, filtrando por el documento antes de buscar.
@@ -95,6 +138,17 @@ export async function confirmDocumentIndexed(
         doc.r2MirrorKey ?? "",
         doc.contentHash ?? "",
       );
+      /*
+        Éste es el ÚNICO camino que promueve un documento a `AI_INDEXED`, y ahora deja
+        escrito por qué: el proveedor terminó, produjo fragmentos, y una recuperación
+        exacta por `document_id` los encontró. «Indexado» deja de ser una afirmación
+        del sistema y pasa a ser un hecho comprobable desde el propio expediente.
+      */
+      await record({
+        finalState: "RETRIEVAL_SMOKE_PASSED",
+        stage: providerStage,
+        timings: { chunks_retrieved: chunks.length, chunks_indexed: info?.chunks_count ?? 0 },
+      });
       return { status: "CONFIRMED", chunks: chunks.length };
     }
   }
@@ -126,6 +180,14 @@ export async function confirmDocumentIndexed(
         "INDEX_CONFIRM_ABANDONED",
         "El proveedor de índice no confirmó el documento tras varias horas de comprobaciones.",
       );
+      await record({
+        finalState: "FAILED",
+        stage: providerStage,
+        failureCode: "INDEX_CONFIRM_ABANDONED",
+        // Lo último que dijo el proveedor queda escrito: sin esto, «abandonado» no
+        // distingue «seguía trabajando» de «nunca produjo un fragmento».
+        failureMessage: `Última respuesta del índice: ${providerStage}.`,
+      });
       return {
         status: "FAILED",
         code: "INDEX_CONFIRM_ABANDONED",
@@ -139,6 +201,7 @@ export async function confirmDocumentIndexed(
       new Date(Date.now() + INDEX_CONFIRM_SLOW_DELAY_S * 1000).toISOString(),
       "INDEXING_DELAYED",
     );
+    await record({ finalState: "PENDING_SLOW", stage: providerStage });
     return {
       status: "PENDING",
       providerStatus: info?.status ?? (providerDone ? "completed" : "unknown"),
@@ -153,6 +216,7 @@ export async function confirmDocumentIndexed(
     attempt,
     new Date(Date.now() + nextDelaySeconds * 1000).toISOString(),
   );
+  await record({ finalState: "PENDING", stage: providerStage });
   return {
     status: "PENDING",
     providerStatus: info?.status ?? (providerDone ? "completed" : "unknown"),

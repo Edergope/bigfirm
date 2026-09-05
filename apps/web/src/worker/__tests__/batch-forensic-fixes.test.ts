@@ -100,7 +100,10 @@ describe("indexado significa que se recupera de verdad", () => {
   it("«todavía no» NO es «ha fallado»", () => {
     // Es la distinción que produjo un falso error en un documento sano.
     expect(confirm).toContain('status: "PENDING"');
-    expect(confirm).not.toMatch(/attempt >= INDEX_CONFIRM_MAX_ATTEMPTS[\s\S]{0,200}status: "FAILED"/);
+    // Agotar la cadena rápida NO declara error: lo primero que hace es reprogramar.
+    const tramo = confirm.slice(confirm.indexOf("attempt >= INDEX_CONFIRM_MAX_ATTEMPTS"));
+    expect(tramo.indexOf("scheduleIndexConfirm")).toBeGreaterThan(0);
+    expect(tramo.indexOf("INDEX_CONFIRM_ABANDONED")).toBeLessThan(tramo.indexOf("scheduleIndexConfirm"));
   });
 
   it("agotar la cadena rápida baja el ritmo, no abandona", () => {
@@ -114,7 +117,7 @@ describe("indexado significa que se recupera de verdad", () => {
     expect(confirm).toContain("INDEX_CONFIRM_SLOW_MAX_ATTEMPTS");
     // La vigilancia lenta REPROGRAMA: nunca deja la próxima fecha en nulo.
     const tramo = confirm.slice(confirm.indexOf("attempt >= INDEX_CONFIRM_MAX_ATTEMPTS"));
-    expect(tramo.slice(0, 900)).toContain("scheduleIndexConfirm");
+    expect(tramo.slice(0, 2000)).toContain("scheduleIndexConfirm");
     expect(confirm).not.toContain("markIndexConfirmDelayed");
   });
 

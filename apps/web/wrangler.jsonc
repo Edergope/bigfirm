@@ -68,6 +68,18 @@
       {
         "queue": "iusia-document-ingestion",
         "max_batch_size": 4,
+        // Techo GLOBAL de invocaciones simultáneas del consumidor.
+        //
+        // Sin esto la cola autoescala hasta 250, que es el límite de la plataforma. El
+        // presupuesto de bytes del consumidor acota UN aislamiento; doscientos cincuenta
+        // aislamientos a la vez no los acota nadie, y por eso el lote de 19 mató dos
+        // tandas enteras: tres lotes solapados con más de 40 MB de PDF abiertos.
+        //
+        // El dos sale de lo medido, no de una preferencia: los lotes que corrieron solos
+        // sobrevivieron con 17 MB, y los que murieron arrancaron durante un solape de
+        // tres. Es un techo CONFIGURADO sobre evidencia de un único lote; súbelo cuando
+        // haya más medidas, no antes.
+        "max_concurrency": 2,
         "max_retries": 3,
         "dead_letter_queue": "iusia-document-ingestion-dlq"
       }
@@ -143,6 +155,9 @@
           {
             "queue": "iusia-document-ingestion",
             "max_batch_size": 4,
+            // Mismo techo que arriba, por la misma razón medida. Ver el comentario del
+            // consumidor de nivel superior.
+            "max_concurrency": 2,
             "max_retries": 3,
             "dead_letter_queue": "iusia-document-ingestion-dlq"
           }
@@ -214,6 +229,7 @@
           {
             "queue": "iusia-document-ingestion-production",
             "max_batch_size": 4,
+            "max_concurrency": 2,
             "max_retries": 3,
             "dead_letter_queue": "iusia-document-ingestion-production-dlq"
           }
