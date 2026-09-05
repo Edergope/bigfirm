@@ -770,6 +770,8 @@ const FAILURE_STAGE: Record<string, string> = {
 
 export type IngestionStage =
   | "PROVIDER_SYNC"
+  /** El documento no cabe en un item y se reparte en partes. */
+  | "PARTITION"
   | "DRIVE_DOWNLOAD"
   | "NORMALIZE"
   | "R2_PUT"

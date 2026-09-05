@@ -303,3 +303,14 @@ describe("ninguna parte se queda sin quien vuelva, y ninguna gira sin fin", () =
     expect(read("index.ts")).toContain("confirmPartitionReadiness(env)");
   });
 });
+
+describe("una parte sin identidad de item no se da por subida", () => {
+  it("se declara fallida, que es reintentable, en vez de fingir que avanzó", () => {
+    // Sin identidad no hay nada que confirmar después: la parte quedaría en INDEXING
+    // sin item, y nadie volvería a saber de ella.
+    const src = read("services/partition-ingest.ts");
+    expect(src).toContain("PARTITION_ITEM_MISSING");
+    const guard = src.slice(src.indexOf("if (!item.id)"));
+    expect(guard.slice(0, 400)).toContain("markFailed");
+  });
+});

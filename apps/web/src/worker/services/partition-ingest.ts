@@ -204,6 +204,19 @@ export async function ingestPartition(
       documentVersion,
     }),
   );
+  /*
+    Sin identidad de item no hay nada que confirmar después, y marcarla como subida
+    dejaría una parte que nadie puede comprobar y de la que nadie volverá a saber. Se
+    declara fallida, que es reintentable, en vez de fingir que avanzó.
+  */
+  if (!item.id) {
+    await partitions.markFailed(
+      row.id,
+      "PARTITION_ITEM_MISSING",
+      "El índice aceptó la parte pero no devolvió su identificador.",
+    );
+    return { status: "FAILED", code: "PARTITION_ITEM_MISSING" };
+  }
   await partitions.markIndexing(row.id, item.id);
   return { status: "INDEXING" };
 }
