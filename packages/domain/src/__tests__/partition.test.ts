@@ -179,3 +179,47 @@ describe("evidencia parcial con procedencia exacta", () => {
     expect(evidenceAdmits(frozen, { document_id: "otro", partition_ordinal: 1 })).toBe(false);
   });
 });
+
+/**
+ * CUÁNDO ENTRA DE VERDAD EL TROCEO.
+ *
+ * Medí un documento sintético de cien páginas jurídicas densas: 239 KB de texto
+ * convertido. El techo del proveedor es de 4 MB POR ITEM, y sobre texto convertido eso
+ * son unas mil doscientas páginas.
+ *
+ * Es decir: el «gate de 100 páginas» no ejercita el troceo en absoluto. Un expediente
+ * de cien páginas cabe entero en un item, y lo que de verdad lo ponía en riesgo era la
+ * memoria de convertirlo —que ya acota el presupuesto de bytes por aislamiento—, no el
+ * límite del índice.
+ *
+ * Dejo la medida escrita aquí porque la premisa de la que partí era falsa, y el próximo
+ * que lea este módulo merece saber que sirve para documentos genuinamente enormes, no
+ * para los de cien páginas.
+ */
+describe("a partir de cuántas páginas se parte de verdad", () => {
+  const paginaDensa = (n: number) =>
+    `PÁGINA ${n}\n\nCLÁUSULA ${n}. ${"Las partes acuerdan expresamente lo aquí dispuesto. ".repeat(45)}\n\nEn constancia se firma la página ${n}.`;
+  const bytesPorPagina =
+    new TextEncoder().encode(paginaDensa(1)).byteLength;
+
+  it("cien páginas caben en un solo item", () => {
+    const cien = Array.from({ length: 100 }, (_, i) => paginaDensa(i + 1)).join("\n\n");
+    expect(new TextEncoder().encode(cien).byteLength).toBeLessThan(PARTITION_MAX_BYTES);
+    expect(partitionText(cien)).toHaveLength(1);
+  });
+
+  it("el umbral real ronda las mil páginas, no las cien", () => {
+    const paginasQueCaben = Math.floor(PARTITION_MAX_BYTES / bytesPorPagina);
+    expect(paginasQueCaben).toBeGreaterThan(1000);
+  });
+
+  it("y por encima de ese tamaño sí se reparte", () => {
+    const enorme = Array.from({ length: 1500 }, (_, i) => paginaDensa(i + 1)).join("\n\n");
+    const partes = partitionText(enorme);
+    expect(partes.length).toBeGreaterThan(1);
+    for (const p of partes) expect(p.bytes).toBeLessThanOrEqual(PARTITION_MAX_BYTES);
+    // Y sigue sin perder páginas al hacerlo.
+    const recompuesto = partes.map((p) => p.text).join("\n\n");
+    for (const n of [1, 750, 1500]) expect(recompuesto).toContain(`PÁGINA ${n}`);
+  });
+});
