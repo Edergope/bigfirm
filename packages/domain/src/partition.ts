@@ -69,23 +69,40 @@ export function partitionText(
     return [{ ordinal: 1, text, bytes: byteLength(text) }];
   }
 
+  /*
+    EL COSTE TIENE QUE SER LINEAL.
+
+    La primera versión medía el acumulador ENTERO en cada iteración —codificar a UTF-8
+    un texto que crece— y eso es cuadrático: un documento de mil quinientas páginas
+    tardaba catorce segundos, y uno de diez mil habría sido inviable. Lo encontró CI al
+    agotar el tiempo de una prueba, que es la mejor forma de encontrarlo.
+
+    Se lleva la cuenta de bytes en una variable. Cada bloque se mide UNA vez.
+  */
   const partes: string[] = [];
-  let actual = "";
+  const acumulado: string[] = [];
+  let acumuladoBytes = 0;
+  /** Bytes que añade unir un bloque más con el separador de párrafo. */
+  const SEPARADOR_BYTES = 2;
 
   const empujar = (): void => {
-    if (actual.length > 0) {
-      partes.push(actual);
-      actual = "";
+    if (acumulado.length > 0) {
+      partes.push(acumulado.join("\n\n"));
+      acumulado.length = 0;
+      acumuladoBytes = 0;
     }
   };
 
   for (const bloque of dividirEnBloques(text, maxBytes)) {
-    const candidato = actual.length === 0 ? bloque : `${actual}\n\n${bloque}`;
-    if (byteLength(candidato) > maxBytes) {
+    const bloqueBytes = byteLength(bloque);
+    const conSeparador = acumulado.length === 0 ? bloqueBytes : bloqueBytes + SEPARADOR_BYTES;
+    if (acumuladoBytes + conSeparador > maxBytes) {
       empujar();
-      actual = bloque;
+      acumulado.push(bloque);
+      acumuladoBytes = bloqueBytes;
     } else {
-      actual = candidato;
+      acumulado.push(bloque);
+      acumuladoBytes += conSeparador;
     }
   }
   empujar();

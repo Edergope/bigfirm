@@ -223,3 +223,36 @@ describe("a partir de cuántas páginas se parte de verdad", () => {
     for (const n of [1, 750, 1500]) expect(recompuesto).toContain(`PÁGINA ${n}`);
   });
 });
+
+/**
+ * El coste del troceo tiene que ser lineal.
+ *
+ * La primera versión medía el acumulador ENTERO en cada iteración —codificar a UTF-8 un
+ * texto que crece— y eso es cuadrático: mil quinientas páginas tardaban catorce
+ * segundos, y diez mil habrían sido inviables. Lo encontró CI al agotar el tiempo de una
+ * prueba, no yo leyendo el código.
+ */
+describe("trocear un documento enorme no puede costar cuadrático", () => {
+  const paginaDensa = (n: number) =>
+    `PÁGINA ${n}\n\nCLÁUSULA ${n}. ${"Las partes acuerdan expresamente lo aquí dispuesto. ".repeat(45)}\n\nEn constancia se firma la página ${n}.`;
+
+  const medir = (paginas: number): number => {
+    const texto = Array.from({ length: paginas }, (_, i) => paginaDensa(i + 1)).join("\n\n");
+    const t0 = Date.now();
+    partitionText(texto);
+    return Date.now() - t0;
+  };
+
+  it("doblar el tamaño no cuadruplica el tiempo", () => {
+    const t1500 = medir(1500);
+    const t3000 = medir(3000);
+    // Con coste cuadrático la razón rondaría 4; con lineal, 2. Se deja margen amplio
+    // para no convertir esto en una prueba que falla por el ruido de la máquina.
+    const razon = t3000 / Math.max(t1500, 1);
+    expect(razon).toBeLessThan(3);
+  });
+
+  it("tres mil páginas se trocean en un tiempo razonable", () => {
+    expect(medir(3000)).toBeLessThan(2000);
+  });
+});
