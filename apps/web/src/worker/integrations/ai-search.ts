@@ -1,5 +1,6 @@
 import {
   allowedFolderPrefixes,
+  ordinalFromKey,
   type IntegrationState,
   type RetrievalProvider,
   type RetrievalQuery,
@@ -96,7 +97,9 @@ export class AiSearchRetrievalProvider implements RetrievalProvider {
       if (query.document_id && documentId !== query.document_id) continue;
 
       const key = str(chunk.item?.key);
+      const ordinal = ordinalFromKey(key);
       results.push({
+        ...(ordinal === null ? {} : { partition_ordinal: ordinal }),
         document_id: documentId || documentIdOf(key),
         matter_id: matterId,
         score: chunk.score ?? 0,

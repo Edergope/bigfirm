@@ -15,6 +15,7 @@ import {
   confirmIndexReadiness,
   handleProviderSyncSweep,
   recoverAbandonedIngestion,
+  confirmPartitionReadiness,
 } from "./scheduled.js";
 
 const app = new Hono<AppBindings>();
@@ -94,6 +95,8 @@ export default {
     // Los que la cola abandonó antes de llegar al índice. Sin esto, un documento que
     // cae a la cola de descarte depende de que el abogado lo note y lo reintente.
     await recoverAbandonedIngestion(env).catch(() => undefined);
+    // Partes de documentos grandes cuya confirmación se perdió o quedó varada.
+    await confirmPartitionReadiness(env).catch(() => undefined);
   },
 };
 
@@ -106,5 +109,6 @@ export {
   handleProviderSyncSweep,
   confirmIndexReadiness,
   recoverAbandonedIngestion,
+  confirmPartitionReadiness,
 };
 export type { Env };

@@ -111,6 +111,16 @@ export interface RetrievalResult {
   score: number;
   excerpt: string;
   source_folder: string;
+  /**
+   * Parte del documento de la que salió este fragmento, si el documento está partido.
+   *
+   * Es la procedencia exacta que exige el uso jurídico: sin ella, una cita de un
+   * documento de cien páginas no puede volver al sitio del que salió. Viaja en la CLAVE
+   * del item porque los cinco campos de metadata del índice están ocupados por lo que
+   * sostiene el aislamiento, y ése es un techo del proveedor que no vamos a gastar en
+   * esto.
+   */
+  partition_ordinal?: number;
 }
 
 /**
@@ -174,7 +184,26 @@ export const DocumentIngestionMessage = z.object({
      * después, sin ocupar un consumidor durante los 77-112 s que tarda el índice.
      */
     "AI_SEARCH_CONFIRM",
+    /**
+     * Subir UNA parte de un documento grande al índice.
+     *
+     * Extiende el contrato que ya existe en vez de abrir otra cola. El reparto, los
+     * reintentos con espera, el techo de invocaciones concurrentes y el presupuesto de
+     * bytes ya gobiernan esta cola: una cola nueva significaría duplicar los cuatro
+     * mecanismos y mantenerlos sincronizados a mano.
+     */
+    "PARTITION",
+    /** Confirmar que UNA parte terminó y se recupera. */
+    "PARTITION_CONFIRM",
   ]),
+  /**
+   * Parte concreta a la que se refiere el mensaje. Sólo para `PARTITION*`.
+   *
+   * NO se confía en él: la fila se busca en D1 por las CUATRO claves de aislamiento más
+   * el ordinal, así que un mensaje forjado desde otra organización no encuentra nada.
+   */
+  partition_ordinal: z.number().int().positive().optional(),
+  document_version: z.number().int().positive().optional(),
   /** Marca de idempotencia adicional para deduplicar reintentos de Queue. */
   enqueued_at: z.string().datetime(),
 });

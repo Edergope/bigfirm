@@ -1,4 +1,4 @@
-import { DocumentRepository, createDb } from "@iusia/db";
+import { DocumentRepository, PartitionRepository, createDb } from "@iusia/db";
 import type { Env } from "./env.js";
 
 
@@ -155,4 +155,57 @@ export async function recoverAbandonedIngestion(env: Env): Promise<{ requeued: n
     }
   }
   return { requeued, abandoned };
+}
+
+
+/**
+ * Red de seguridad de las particiones.
+ *
+ * El camino normal es el mismo que el de un documento entero: la parte se sube, se
+ * encola su confirmación con retraso, y ésta se reprograma sola mientras el índice
+ * siga trabajando. Esta barrida sólo recoge lo que ese camino no cubrió —un mensaje
+ * perdido, un despliegue a mitad— y lo VARADO, que es una parte en `INDEXING` sin
+ * próxima comprobación programada.
+ *
+ * Lo varado está aquí desde el primer día precisamente porque en documentos enteros
+ * llegó tarde: la barrida buscaba sólo por fecha vencida, y una fecha nula nunca es
+ * menor que ahora, así que cuatro documentos se quedaron esperando a nadie.
+ */
+export async function confirmPartitionReadiness(env: Env): Promise<{ requeued: number }> {
+  const partitions = new PartitionRepository(createDb(env.DB));
+  const now = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - ABANDONED_STALE_MINUTES * 60_000).toISOString();
+  const due = await partitions.listAwaitingConfirmation(now, staleBefore, SWEEP_BATCH_LIMIT);
+  /*
+    Y las que se quedaron sin subir.
+
+    Una parte cuyo trabajo murió —el aislamiento se cayó, la cola agotó sus entregas—
+    queda en `PENDING` sin item y sin nadie que vuelva. Es el mismo agujero que dejó
+    siete PDF muertos en el lote de 19, y no vale la pena volver a descubrirlo: el
+    documento se quedaría incompleto para siempre con las demás partes disponibles,
+    que es la peor forma de fallar porque parece que funciona.
+  */
+  const varadas = await partitions.listStalledUploads(staleBefore, SWEEP_BATCH_LIMIT);
+
+  let requeued = 0;
+  for (const [p, reason] of [
+    ...due.map((x) => [x, "PARTITION_CONFIRM"] as const),
+    ...varadas.map((x) => [x, "PARTITION"] as const),
+  ]) {
+    try {
+      await env.DOCUMENT_INGESTION.send({
+        organization_id: p.organizationId,
+        matter_id: p.matterId,
+        document_id: p.documentId,
+        document_version: p.documentVersion,
+        partition_ordinal: p.ordinal,
+        reason,
+        enqueued_at: new Date().toISOString(),
+      });
+      requeued += 1;
+    } catch {
+      // La cola no lo aceptó: la próxima barrida lo reintenta.
+    }
+  }
+  return { requeued };
 }

@@ -3,6 +3,8 @@ import { DocumentRepository, createDb } from "@iusia/db";
 import type { Env } from "./env.js";
 import { IngestionService } from "./services/ingestion.js";
 import { confirmDocumentIndexed } from "./services/index-confirm.js";
+import { confirmPartition, ingestPartition } from "./services/partition-ingest.js";
+import { INDEX_CONFIRM_FIRST_DELAY_S } from "./services/ingestion.js";
 
 /**
  * Consumidor de la cola de ingestión documental.
@@ -131,6 +133,33 @@ export async function ingestBatch(
         return;
       }
 
+      /*
+        PARTES DE UN DOCUMENTO GRANDE. Mismo consumidor, misma cola, mismos reintentos
+        con espera y mismo techo de invocaciones concurrentes: sólo cambia el trabajo.
+      */
+      if (parsed.data.reason === "PARTITION" || parsed.data.reason === "PARTITION_CONFIRM") {
+        const outcome = parsed.data.reason === "PARTITION"
+          ? await ingestPartition(env, parsed.data)
+          : await confirmPartition(env, parsed.data);
+
+        if (outcome.status === "INDEXING") {
+          // Subida hecha: la confirmación pregunta después, sin retener un consumidor.
+          await env.DOCUMENT_INGESTION.send(
+            { ...partitionMessage(parsed.data), reason: "PARTITION_CONFIRM" },
+            { delaySeconds: INDEX_CONFIRM_FIRST_DELAY_S },
+          );
+        } else if (outcome.status === "PENDING") {
+          // El relevo se envía AQUÍ, donde está la cola, y sólo entonces se confirma
+          // este mensaje: escribir una fecha en D1 no hace que nadie vuelva.
+          await env.DOCUMENT_INGESTION.send(
+            { ...partitionMessage(parsed.data), reason: "PARTITION_CONFIRM" },
+            { delaySeconds: outcome.nextDelaySeconds },
+          );
+        }
+        message.ack();
+        return;
+      }
+
       const outcome = await service.ingest(parsed.data, delivery);
       if (outcome.status === "ERROR") {
         retryLater(message); // fallo transitorio: reintentar (o a la DLQ tras max_retries)
@@ -144,6 +173,18 @@ export async function ingestBatch(
       retryLater(message);
     }
   });
+}
+
+/** Reencola la MISMA parte: la identidad del trabajo no cambia entre relevos. */
+function partitionMessage(m: DocumentIngestionMessage) {
+  return {
+    organization_id: m.organization_id,
+    matter_id: m.matter_id,
+    document_id: m.document_id,
+    document_version: m.document_version,
+    partition_ordinal: m.partition_ordinal,
+    enqueued_at: new Date().toISOString(),
+  };
 }
 
 /**

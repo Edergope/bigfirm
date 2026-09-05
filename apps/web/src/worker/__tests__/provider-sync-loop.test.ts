@@ -61,8 +61,22 @@ describe("la inteligencia no se rehace en cada reintento de proveedor", () => {
   });
 
   it("el reintento de proveedor no toca el contador de confirmación", () => {
-    // `markIndexing` lo reinicia a 0, así que sólo debe llamarse cuando SÍ se sube.
-    const upload = src.slice(src.indexOf("if (!alreadyIndexed && isIndexableMimeType"));
-    expect(upload.slice(0, 3000)).toContain("markIndexing");
+    // `markIndexing` lo reinicia a 0, así que sólo debe ocurrir cuando SÍ se sube: por
+    // posición, no por una ventana de caracteres que cualquier añadido desplaza.
+    const guarda = src.indexOf("if (!alreadyIndexed && isIndexableMimeType");
+    const marca = src.indexOf("markIndexing", guarda);
+    const sync = src.indexOf('stage = "PROVIDER_SYNC"');
+    expect(guarda).toBeGreaterThan(0);
+    expect(marca).toBeGreaterThan(guarda);
+    expect(marca).toBeLessThan(sync);
+  });
+
+  it("un documento demasiado grande se reparte ANTES de intentar subirlo entero", () => {
+    // Subir 4 MB para que el proveedor lo rechace es trabajo tirado, y el rechazo
+    // llegaba como un fallo del documento en vez de como lo que era: no cabe.
+    const guarda = src.indexOf("PARTITION_THRESHOLD_BYTES");
+    const upload = src.indexOf('stage = "AI_SEARCH_UPLOAD"');
+    expect(guarda).toBeGreaterThan(0);
+    expect(guarda).toBeLessThan(upload);
   });
 });

@@ -244,6 +244,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
           documentNames: new Map(
             docs.filter((d) => frozen.has(d.id)).map((d) => [d.id, d.name]),
           ),
+          evidenceSet: sourceContext.evidenceSet,
           maxResults: 5,
         });
       },
@@ -1031,6 +1032,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
                       matterId: params.matter_id,
                       objective: `${task.mission} ${task.questions.join(" ")}`.trim(),
                       documentNames,
+                      evidenceSet: ctx.evidence_set,
                       maxResults: 5,
                     });
                 if (evidenceCount > 0) {
@@ -1218,6 +1220,7 @@ export class MatterOrchestrationWorkflow extends WorkflowEntrypoint<
               matterId: params.matter_id,
               objective: params.objective,
               documentNames,
+              evidenceSet: ctx.evidence_set,
               maxResults: 5,
             });
         const def = getAgentDefinition(ORCHESTRATOR_AGENT_ID);

@@ -1,4 +1,4 @@
-import type { DocumentExcerpt, RetrievalProvider } from "@iusia/domain";
+import { evidenceAdmits, type DocumentExcerpt, type EvidenceMember, type RetrievalProvider } from "@iusia/domain";
 
 /**
  * Recolecta la evidencia RAG de un matter y la transforma al contrato de dominio
@@ -57,6 +57,15 @@ export async function collectMatterEvidence(args: {
   objective: string;
   /** document_id → nombre legible, para la metadata del excerpt. */
   documentNames: Map<string, string>;
+  /**
+   * Conjunto congelado al arrancar el análisis. Filtra por documento Y por parte.
+   *
+   * Sin él, un fragmento de la página 73 de un documento cuyo análisis empezó con las
+   * páginas 1 a 40 disponibles entraría igual: se indexó después de que el abogado
+   * pulsara el botón, y citarlo sería apoyar el dictamen en una fuente que no existía
+   * cuando se tomó la decisión.
+   */
+  evidenceSet?: readonly EvidenceMember[];
   maxResults?: number;
   /** Cota de la llamada al índice. Ver `RETRIEVAL_DEADLINE_MS`. */
   timeoutMs?: number;
@@ -75,11 +84,19 @@ export async function collectMatterEvidence(args: {
     args.timeoutMs ?? RETRIEVAL_DEADLINE_MS,
   );
 
-  return chunks.filter((chunk) => args.documentNames.has(chunk.document_id)).map((chunk, i) => ({
+  const admitido = (chunk: { document_id: string; partition_ordinal?: number }): boolean =>
+    args.documentNames.has(chunk.document_id)
+    && (args.evidenceSet === undefined || evidenceAdmits(args.evidenceSet, chunk));
+
+  return chunks.filter(admitido).map((chunk, i) => ({
     // Conserva el document_id: trazabilidad chunk → documento → matter → output.
     ref_id: `${chunk.document_id}#${i + 1}`,
     document_name: args.documentNames.get(chunk.document_id) ?? chunk.document_id,
     content: chunk.excerpt,
-    page_hint: `chunk ${i + 1} · score ${chunk.score.toFixed(3)}`,
+    // Procedencia: sin la parte, una cita de un documento de cien páginas no puede
+    // volver al sitio del que salió, y eso no sirve en un escrito.
+    page_hint: chunk.partition_ordinal === undefined
+      ? `chunk ${i + 1} · score ${chunk.score.toFixed(3)}`
+      : `parte ${chunk.partition_ordinal} · chunk ${i + 1} · score ${chunk.score.toFixed(3)}`,
   }));
 }

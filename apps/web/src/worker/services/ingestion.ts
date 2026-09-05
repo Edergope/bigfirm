@@ -1,4 +1,5 @@
 import {
+  PARTITION_THRESHOLD_BYTES,
   isOcrMimeType,
   isReadableMimeType,
   hasUsableText,
@@ -14,6 +15,7 @@ import {
 import { DocumentRepository, IngestionAttemptRepository, MatterRepository, createDb } from "@iusia/db";
 import type { Env } from "../env.js";
 import { DriveConnectionError, OrganizationStorageResolver } from "./drive-credentials.js";
+import { planPartitions } from "./partition-ingest.js";
 import { DriveWorkspaceService } from "./drive-workspace.js";
 
 /**
@@ -403,6 +405,29 @@ export class IngestionService {
             },
           });
           clock.mark("r2_ms");
+
+          /*
+            DEMASIADO GRANDE PARA UN ITEM: SE PARTE.
+
+            El techo de 4 MB por item es del proveedor. Hasta ahora esto terminaba en
+            `PARTITION_REQUIRED`, un código de fallo correcto que no tenía destinatario:
+            el documento quedaba fuera del análisis y nadie podía hacer nada.
+
+            Se reparte y se sale. Cada parte es un mensaje en la MISMA cola, con las
+            mismas esperas y el mismo techo de invocaciones concurrentes; el documento
+            estará disponible en cuanto lo esté su primera parte.
+          */
+          if (new TextEncoder().encode(text).byteLength > PARTITION_THRESHOLD_BYTES) {
+            stage = "PARTITION";
+            await heartbeat("PARTITION");
+            const count = await planPartitions(this.env, message, doc, text);
+            await closeAttempt({
+              finalState: "PARTITIONED",
+              stage,
+              timings: { ...clock.timings, partitions: count },
+            });
+            return { status: "INDEXED", detail: `${count} partes`, timings: clock.timings };
+          }
 
           stage = "AI_SEARCH_UPLOAD";
           await heartbeat("AI_SEARCH");

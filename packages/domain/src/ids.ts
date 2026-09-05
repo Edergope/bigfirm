@@ -14,6 +14,8 @@ export const ID_PREFIXES = {
   /** Intento de ingestión. Una fila por intento, para el forense. */
   ingestionAttempt: "iat",
   documentVersion: "dvr",
+  /** Parte de un documento que no cabe en un solo item del índice. */
+  documentPartition: "dpt",
   execution: "exe",
   event: "evt",
   workPackage: "wpk",

@@ -156,6 +156,14 @@ export const documents = sqliteTable(
     aiSearchUploadedAt: text("ai_search_uploaded_at"),
     /** Confirmación de indexación: contador propio y cuándo volver a preguntar. */
     indexConfirmAttempts: integer("index_confirm_attempts").notNull().default(0),
+    /*
+      Recuento de particiones. Un documento que cabe en un item tiene `partition_count`
+      1; uno de cien páginas tiene los que hagan falta, y está disponible en cuanto
+      `partitions_ready` llega a 1 — no hace falta esperar al último.
+    */
+    partitionCount: integer("partition_count").notNull().default(0),
+    partitionsReady: integer("partitions_ready").notNull().default(0),
+    partitionsFailed: integer("partitions_failed").notNull().default(0),
     indexConfirmNextAt: text("index_confirm_next_at"),
     /** Lote de carga. Correlación, NO transacción: un fallo no toca a los demás. */
     uploadBatchId: text("upload_batch_id"),
@@ -663,5 +671,39 @@ export const documentIngestionAttempts = sqliteTable(
   (t) => [
     index("ingestion_attempts_doc_idx").on(t.documentId, t.startedAt),
     index("ingestion_attempts_org_idx").on(t.organizationId, t.matterId),
+  ],
+);
+
+/**
+ * Particiones de un documento que no cabe en un solo item del índice.
+ *
+ * La identidad de una partición es `(documento, versión, ordinal)` y está protegida por
+ * un índice único en la migración: con entrega «al menos una vez», eso es lo que impide
+ * que un mensaje repetido cree una segunda fila, suba un segundo item y cuente dos
+ * veces la misma parte como disponible.
+ */
+export const documentPartitions = sqliteTable(
+  "document_partitions",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    matterId: text("matter_id").notNull(),
+    documentId: text("document_id").notNull(),
+    documentVersion: integer("document_version").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    sourceKey: text("source_key").notNull(),
+    bytes: integer("bytes").notNull(),
+    /** PENDING → INDEXING → READY | FAILED. */
+    state: text("state").notNull().default("PENDING"),
+    aiSearchItemId: text("ai_search_item_id"),
+    indexConfirmAttempts: integer("index_confirm_attempts").notNull().default(0),
+    indexConfirmNextAt: text("index_confirm_next_at"),
+    failureCode: text("failure_code"),
+    failureMessage: text("failure_message"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("document_partitions_document").on(t.organizationId, t.documentId, t.state),
   ],
 );

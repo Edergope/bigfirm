@@ -12,3 +12,4 @@ export * from "./repositories/notifications.js";
 export * from "./repositories/drive-folders.js";
 export * from "./repositories/templates.js";
 export * from "./repositories/storage-connections.js";
+export * from "./repositories/partitions.js";

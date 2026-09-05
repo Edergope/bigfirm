@@ -26,6 +26,7 @@ export * from "./upload-batch.js";
 export * from "./document-formats.js";
 export * from "./evidence-set.js";
 export * from "./ocr.js";
+export * from "./partition.js";
 export * from "./orchestration-safety.js";
 export * from "./team-plan.js";
 export * from "./errors.js";
