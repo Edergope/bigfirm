@@ -1227,7 +1227,21 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
 
     Se reanuda desde la confirmación. Sólo se rehace todo si no hay item que reutilizar.
   */
-  if (doc.aiSearchItemId !== null && doc.indexedAt === null) {
+  /*
+    Salvo que ese camino YA se haya agotado.
+
+    Reanudar desde la confirmación es lo correcto mientras haya algo que confirmar. Pero
+    los cinco documentos del lote de 19 que acabaron en `INDEX_CONFIRM_ABANDONED` tienen
+    item y llevan veintitrés comprobaciones sin respuesta: volver a preguntar lo mismo
+    da lo mismo. Su item se construyó a partir de un texto que el proveedor nunca supo
+    fragmentar —muy probablemente vacío, porque la conversión de un PDF escaneado
+    devuelve vacío— y lo que hace falta es rehacer el contenido, no reconfirmarlo.
+
+    Sin esta condición, «Reintentar» sobre esos documentos habría vuelto a girar durante
+    otras seis horas para llegar al mismo sitio.
+  */
+  const confirmAgotado = doc.ingestionFailureCode === "INDEX_CONFIRM_ABANDONED";
+  if (doc.aiSearchItemId !== null && doc.indexedAt === null && !confirmAgotado) {
     await c.env.DOCUMENT_INGESTION.send({
       organization_id: organizationId,
       matter_id: matterId,
@@ -1268,6 +1282,9 @@ documentWorkspaceRoutes.post("/matters/:matterId/documents/:documentId/retry", a
     organizationId,
     documentId,
     doc.ingestionStatus,
+    // Si la confirmación ya se agotó, lo que hace falta es rehacer el contenido, y para
+    // eso hay que soltar el item: mientras exista, la ingestión da el trabajo por hecho.
+    confirmAgotado,
   );
   if (!claimed) {
     throw new IusiaError("CONFLICT", "El documento ya se está reprocesando", {

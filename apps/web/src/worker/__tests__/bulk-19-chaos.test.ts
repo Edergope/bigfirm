@@ -286,3 +286,48 @@ describe("la señal de «demorado» no puede ser una que otros pisen", () => {
     expect(dominio).toContain("export const INDEX_CONFIRM_EXHAUSTED_AT = 12;");
   });
 });
+
+/**
+ * Reintentar tiene que rehacer lo que hace falta rehacer.
+ *
+ * Los cinco documentos que el lote de 19 dejó en `INDEX_CONFIRM_ABANDONED` tienen item
+ * y veintitrés comprobaciones sin respuesta. Su item se construyó sobre un texto que el
+ * proveedor nunca supo fragmentar —muy probablemente vacío, porque la conversión de un
+ * PDF escaneado devuelve vacío— así que volver a preguntar lo mismo da lo mismo.
+ */
+describe("reanudar no siempre es lo correcto", () => {
+  const route = read("routes/document-workspace.ts");
+  const repo = readFileSync(
+    join(root, "..", "..", "..", "..", "packages", "db", "src", "repositories", "documents.ts"),
+    "utf8",
+  );
+
+  it("una confirmación agotada NO se reanuda: se rehace", () => {
+    expect(route).toContain('doc.ingestionFailureCode === "INDEX_CONFIRM_ABANDONED"');
+    const guard = route.slice(route.indexOf("const confirmAgotado"));
+    expect(guard.slice(0, 400)).toContain("&& !confirmAgotado");
+  });
+
+  it("y rehacer suelta la identidad del item", () => {
+    /*
+      Sin esto el reproceso no rehace nada: la ingestión ve que ya hay item, da el
+      trabajo por hecho —`alreadyIndexed`— y se salta la normalización entera. El item
+      vacío habría sobrevivido a su propio reintento.
+    */
+    const fn = repo.slice(repo.indexOf("async markIngestionRetrying"));
+    expect(fn.slice(0, 2600)).toContain("aiSearchItemId: null");
+    expect(fn.slice(0, 2600)).toContain("indexConfirmAttempts: 0");
+    expect(fn.slice(0, 2600)).toContain("r2MirrorKey: null");
+  });
+
+  it("pero sólo cuando se pide: un reintento normal conserva lo ya durable", () => {
+    const fn = repo.slice(repo.indexOf("async markIngestionRetrying"));
+    expect(fn.slice(0, 2600)).toContain("rebuildContent");
+    expect(fn.slice(0, 2600)).toMatch(/\.\.\.\(rebuildContent\s*\n?\s*\?/);
+  });
+
+  it("la ingestión da por hecho el trabajo justamente por esa identidad", () => {
+    // Es la razón por la que soltarla es la única forma de rehacer el contenido.
+    expect(ingestion).toContain("doc.indexedAt !== null || doc.aiSearchItemId !== null");
+  });
+});

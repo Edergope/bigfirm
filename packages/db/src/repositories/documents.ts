@@ -341,6 +341,21 @@ export class DocumentRepository {
     organizationId: string,
     documentId: string,
     fromStatus: string,
+    /**
+     * Reproceso COMPLETO: se suelta también la identidad del item.
+     *
+     * Sin esto, un reintento que pretende rehacer el contenido no lo rehace: la
+     * ingestión ve que ya hay item, da el trabajo por hecho y se salta la
+     * normalización entera. Es el caso de los cinco documentos del lote de 19 cuyo item
+     * se construyó a partir de un texto que el proveedor nunca supo fragmentar —muy
+     * probablemente vacío—: reintentarlos conservando el item habría reconfirmado
+     * eternamente el mismo item vacío.
+     *
+     * Soltarla es seguro: el item viejo queda obsoleto en el proveedor cuando la nueva
+     * subida aterriza con la misma clave, y hasta entonces el documento no está
+     * indexado, así que no hay evidencia que se quede huérfana.
+     */
+    rebuildContent = false,
   ): Promise<boolean> {
     const updated = await this.db
       .update(documents)
@@ -365,6 +380,15 @@ export class DocumentRepository {
         ingestionStage: null,
         ingestionFailureCode: null,
         ingestionFailureMessage: null,
+        ...(rebuildContent
+          ? {
+              aiSearchItemId: null,
+              aiSearchItemKey: null,
+              indexConfirmAttempts: 0,
+              indexConfirmNextAt: null,
+              r2MirrorKey: null,
+            }
+          : {}),
         updatedAt: new Date().toISOString(),
       })
       .where(
